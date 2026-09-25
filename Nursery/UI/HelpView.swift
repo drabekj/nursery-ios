@@ -17,6 +17,9 @@ struct HelpView: View {
                 topic("waveform", "Obraz, nebo jen zvuk",
                       "Přepínač nahoře volí, co hlavní obrazovka ukazuje. Obraz ukazuje živé video z postýlky. Jen zvuk ukazuje jen pokojíček: kruh, který se rozvlní se zvukem, a slovy, co se děje. Video se v tu chvíli vůbec nestahuje.",
                       footnote: "Jen zvuk šetří baterii i Wi-Fi a telefon méně hřeje. Na miminko se můžete kdykoli podívat tlačítkem Nahlédnout do postýlky. Pořídí jednu fotku z kamery, bez živého obrazu.")
+                topic("speaker.wave.1", "Hlasitost",
+                      "Chůvička hraje tak hlasitě, jak je nastavený iPhone. Když je hlasitost iPhonu pod 20 %, ukáže Chůvička upozornění a posuvník hlasitosti. Když je zvuk vypnutý, tlačítko Zvuk svítí červeně.",
+                      footnote: "Tlačítko ztišení na boku iPhonu Chůvičku neztiší. Hlasitost ale ano.")
                 topic("moon.stars", "Noční režim",
                       "Displej zůstane zapnutý, ale téměř černý a na nejnižším jasu. Telefon se sám nezamkne. Obraz se zastaví, zvuk a upozornění běží dál. Když se miminko ozve, vlnovka se rozsvítí. Klepnutím displej probudíte.")
                 topic("battery.75", "Baterie a nabíjení",

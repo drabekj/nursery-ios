@@ -38,7 +38,9 @@ struct NightView: View {
                 Label(statusText, systemImage: Theme.symbol(for: engine.soundStatus))
                     .font(.subheadline.weight(.medium))
                     // A fault stays bright. A normal state stays dim.
-                    .foregroundStyle(engine.soundStatus == .lost ? Theme.alarm : Color.white.opacity(sound ? 0.6 : 0.28))
+                    .foregroundStyle(engine.soundStatus == .lost ? Theme.alarm
+                                     : engine.volumeLow ? Theme.warn.opacity(0.8)
+                                     : Color.white.opacity(sound ? 0.6 : 0.28))
                 Spacer()
                 batteryLine
                 Text("Klepnutím probudíte displej")
@@ -90,7 +92,8 @@ struct NightView: View {
     }
 
     private var statusText: String {
-        activity.current != nil ? "Ozývá se" : engine.soundStatus.title
+        if engine.volumeLow { return "Hlasitost iPhonu je nízká" }
+        return activity.current != nil ? "Ozývá se" : engine.soundStatus.title
     }
 
     /// The battery, dim. It turns red and asks for a charger when the battery is low.

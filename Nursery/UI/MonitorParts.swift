@@ -331,7 +331,10 @@ struct ControlBar: View {
             }
             .pickerStyle(.menu)
         } label: {
-            BarLabel(title: soundTitle, symbol: engine.mode.symbol, isOn: engine.mode != .off, tint: Theme.moon)
+            // Off is red: a parent must see at a glance that nothing plays.
+            BarLabel(title: soundTitle, symbol: engine.mode.symbol, isOn: true,
+                     tint: engine.mode == .off ? Theme.alarm : Theme.moon,
+                     onForeground: engine.mode == .off ? .white : .black)
         } primaryAction: {
             Haptics.firm()
             if engine.mode == .off { engine.soundOn() } else { engine.mode = .off }
@@ -357,6 +360,7 @@ struct BarLabel: View {
     let symbol: String
     let isOn: Bool
     let tint: Color
+    var onForeground: Color = .black
 
     var body: some View {
         let shape = RoundedRectangle(cornerRadius: 24, style: .continuous)
@@ -370,7 +374,7 @@ struct BarLabel: View {
                 .lineLimit(1)
                 .minimumScaleFactor(0.8)
         }
-        .foregroundStyle(isOn ? Color.black : Color.primary)
+        .foregroundStyle(isOn ? onForeground : Color.primary)
         .frame(maxWidth: .infinity, minHeight: 66)
         .background(isOn ? tint : Color.clear, in: shape)
         .glass(in: shape, interactive: true)
@@ -426,7 +430,7 @@ struct FullScreenMonitor: View {
                         GlassGroup(spacing: 10) {
                             HStack(spacing: 10) {
                                 GlassCircleButton(symbol: engine.mode.symbol, size: 50,
-                                                  tint: engine.mode == .off ? .primary : Theme.moon, label: "Zvuk") {
+                                                  tint: engine.mode == .off ? Theme.alarm : Theme.moon, label: "Zvuk") {
                                     Haptics.firm()
                                     if engine.mode == .off { engine.soundOn() } else { engine.mode = .off }
                                     scheduleHide()

@@ -44,6 +44,10 @@ final class MonitorEngine: ObservableObject {
     @Published private(set) var audioOnly = false
     @Published private(set) var delayMilliseconds = 0
     @Published private(set) var failures = 0
+    /// The iPhone's own volume, 0...1. The app cannot change it by code, but it can warn when it is low.
+    @Published private(set) var systemVolume: Float = 1
+    /// Live sound at a volume that a sleeping parent may not hear.
+    var volumeLow: Bool { mode == .live && systemVolume < 0.2 }
     @Published var mode: SoundMode {
         didSet {
             guard mode != oldValue else { return }
@@ -98,11 +102,13 @@ final class MonitorEngine: ObservableObject {
     private var ticks = 0
     private var timer: Timer?
     private let pathMonitor = NWPathMonitor()
+    private var volumeObservation: NSKeyValueObservation?
     private var bag = Set<AnyCancellable>()
 
     init(settings: Settings) {
         self.settings = settings
-        let savedMode = SoundMode(rawValue: UserDefaults.standard.string(forKey: "soundMode") ?? "") ?? .live
+        var savedMode = SoundMode(rawValue: UserDefaults.standard.string(forKey: "soundMode") ?? "") ?? .live
+        if Self.isDemo { savedMode = UserDefaults.standard.string(forKey: "demoScreen") == "muted" ? .off : .live }
         mode = savedMode
         lastOnMode = savedMode == .off ? .live : savedMode
         let view = VideoLayerView()
@@ -187,6 +193,7 @@ final class MonitorEngine: ObservableObject {
     private func startDemo() {
         connection = .live
         everHeard = true
+        if UserDefaults.standard.string(forKey: "demoScreen") == "volume" { systemVolume = 0.12 }
         audioOnly = settings.soundView
         activityLog.loadDemo()
         if let image = UIImage(named: "DemoFrame") { renderer.showStill(image) }
@@ -398,6 +405,18 @@ final class MonitorEngine: ObservableObject {
         } catch {
             Log.shared.add("audio session: \(error.localizedDescription)")
         }
+        // The volume buttons, Control Center, and a new route (AirPods) all change it.
+        systemVolume = session.outputVolume
+        volumeObservation = session.observe(\.outputVolume, options: [.new]) { [weak self] s, _ in
+            let v = s.outputVolume
+            Task { @MainActor in self?.volumeChanged(v) }
+        }
+    }
+
+    private func volumeChanged(_ v: Float) {
+        let wasLow = volumeLow
+        systemVolume = v
+        if volumeLow != wasLow { Log.shared.add("iPhone volume \(Int(v * 100)) %") }
     }
 
     private func applyMode() {

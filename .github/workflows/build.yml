@@ -67,6 +67,8 @@ jobs:
           cp "$DATA/Library/Application Support/events.log" shots/events.log || true
           shot main-dark main dark
           shot sound-dark sound dark
+          shot muted muted light
+          shot volume volume light
           shot activity-dark activity dark
 
       - name: Upload the screenshots and logs

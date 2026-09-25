@@ -125,7 +125,12 @@ struct MonitorView: View {
             // height from the picture, and the picture shrank to 60 % of the width.
             if soundView { Spacer().frame(height: 16) } else { Spacer(minLength: 12) }
 
-            if askAlerts {
+            if engine.volumeLow {
+                VolumeWarning(volume: engine.systemVolume)
+                    .padding(.horizontal, 16)
+                    .padding(.bottom, 12)
+                    .transition(.move(edge: .bottom).combined(with: .opacity))
+            } else if askAlerts {
                 AlertOffer(allow: allowAlerts, dismiss: { withAnimation { askAlerts = false } })
                     .padding(.horizontal, 16)
                     .padding(.bottom, 12)
@@ -136,6 +141,7 @@ struct MonitorView: View {
                 .padding(.horizontal, 16)
                 .padding(.bottom, 8)
         }
+        .animation(.spring(response: 0.45, dampingFraction: 0.85), value: engine.volumeLow)
     }
 
     // iPad, and the sound view in landscape.
@@ -159,7 +165,11 @@ struct MonitorView: View {
                     HourStrip(activity: engine.activityLog) { sheet = .activity }
                 }
                 Spacer(minLength: 0)
-                if askAlerts { AlertOffer(allow: allowAlerts, dismiss: { askAlerts = false }) }
+                if engine.volumeLow {
+                    VolumeWarning(volume: engine.systemVolume)
+                } else if askAlerts {
+                    AlertOffer(allow: allowAlerts, dismiss: { askAlerts = false })
+                }
                 ControlBar(aiming: $aiming, actions: actions, pictureTools: !soundView)
             }
             .frame(width: 360)
