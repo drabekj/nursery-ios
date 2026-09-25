@@ -80,9 +80,11 @@ private fun BabySetup(start: () -> Unit, becomeParent: () -> Unit) {
             OutlinedTextField(name, { Settings.set(Settings.unitName, "unitName", it.take(40)) }, Modifier.fillMaxWidth().padding(horizontal = 16.dp),
                 label = { Text("Název") }, singleLine = true)
             Row(Modifier.padding(16.dp)) {
+                val segment = SegmentedButtonDefaults.colors(activeContainerColor = colors.moon, activeContentColor = Color.Black,
+                    inactiveContainerColor = colors.card, inactiveContentColor = colors.ink)
                 SingleChoiceSegmentedButtonRow(Modifier.fillMaxWidth()) {
-                    SegmentedButton(video, { Settings.set(Settings.unitVideo, "unitVideo", true) }, SegmentedButtonDefaults.itemShape(0, 2)) { Text("Obraz i zvuk") }
-                    SegmentedButton(!video, { Settings.set(Settings.unitVideo, "unitVideo", false) }, SegmentedButtonDefaults.itemShape(1, 2)) { Text("Jen zvuk") }
+                    SegmentedButton(video, { Settings.set(Settings.unitVideo, "unitVideo", true) }, SegmentedButtonDefaults.itemShape(0, 2), colors = segment) { Text("Obraz i zvuk") }
+                    SegmentedButton(!video, { Settings.set(Settings.unitVideo, "unitVideo", false) }, SegmentedButtonDefaults.itemShape(1, 2), colors = segment) { Text("Jen zvuk") }
                 }
             }
             if (video) Choice("Kamera", listOf(false to "Zadní", true to "Přední"), front) { Settings.set(Settings.unitFront, "unitFront", it) }

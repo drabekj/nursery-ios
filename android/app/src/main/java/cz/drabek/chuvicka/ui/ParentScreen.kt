@@ -89,6 +89,7 @@ fun ParentScreen(openSettings: () -> Unit, pip: Boolean, enterPip: () -> Unit) {
             AnimatedContent(soundView, Modifier.weight(1f), transitionSpec = { fadeIn(tween(350)) togetherWith fadeOut(tween(200)) }, label = "view") { sound ->
                 if (sound) SoundStage() else PictureStage(enterPip)
             }
+            Spacer(Modifier.height(12.dp))
             VolumeWarning()
             ControlBar()
             Spacer(Modifier.height(8.dp))
@@ -375,7 +376,8 @@ private fun VolumeWarning() {
                 Text(if (volume < 0.01f) "Hlasitost telefonu je vypnutá" else "Hlasitost telefonu je nízká · ${(volume * 100).toInt()} %", fontWeight = FontWeight.SemiBold, color = colors.ink)
                 Text("Pláč nemusíte slyšet.", fontSize = 13.sp, color = colors.muted)
             }
-            FilledTonalButton(onClick = { Monitor.raiseVolume() }) { Text("Zesílit") }
+            Button(onClick = { Monitor.raiseVolume() },
+                colors = ButtonDefaults.buttonColors(containerColor = colors.moon, contentColor = Color.Black)) { Text("Zesílit") }
         }
     }
 }

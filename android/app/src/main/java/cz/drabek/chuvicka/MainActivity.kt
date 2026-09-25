@@ -8,6 +8,7 @@ import android.os.Build
 import android.os.Bundle
 import android.util.Rational
 import androidx.activity.ComponentActivity
+import androidx.activity.SystemBarStyle
 import androidx.activity.compose.BackHandler
 import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
@@ -63,6 +64,14 @@ class MainActivity : ComponentActivity() {
             LaunchedEffect(Unit) {
                 if (App.demoScreen == "night") Monitor.night.value = true
                 if (App.demoScreen == "baby-live") BabyService.start(this@MainActivity)
+            }
+            // The status bar icons follow the app's appearance, not the system's.
+            val dark = appearance == Settings.Appearance.DARK ||
+                (appearance == Settings.Appearance.AUTO && androidx.compose.foundation.isSystemInDarkTheme())
+            LaunchedEffect(dark) {
+                val style = if (dark) SystemBarStyle.dark(android.graphics.Color.TRANSPARENT)
+                            else SystemBarStyle.light(android.graphics.Color.TRANSPARENT, android.graphics.Color.TRANSPARENT)
+                enableEdgeToEdge(statusBarStyle = style, navigationBarStyle = style)
             }
             ChuvickaTheme(appearance) {
                 when {
