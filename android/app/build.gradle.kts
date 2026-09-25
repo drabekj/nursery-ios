@@ -64,4 +64,7 @@ dependencies {
     implementation("androidx.camera:camera-core:$camerax")
     implementation("androidx.camera:camera-camera2:$camerax")
     implementation("androidx.camera:camera-lifecycle:$camerax")
+
+    // The QR code of the pairing: make it on the phone at the baby, read it on the parent's.
+    implementation("com.google.zxing:core:3.5.3")
 }

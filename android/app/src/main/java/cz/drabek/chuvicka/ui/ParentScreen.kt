@@ -281,8 +281,13 @@ private fun PeekCard() {
     var taken by remember { mutableStateOf(0L) }
     var loading by remember { mutableStateOf(false) }
     var failed by remember { mutableStateOf(false) }
+    var unavailable by remember { mutableStateOf(false) }
     val scope = rememberCoroutineScope()
     fun peek() {
+        // An IP camera read directly gives no photo: only the live picture.
+        if (!App.demo && Settings.source.value == Settings.Source.CAMERA && Settings.cameraKind.value == Settings.KIND_RTSP) {
+            unavailable = true; return
+        }
         loading = true; failed = false
         scope.launch {
             val bytes = withContext(Dispatchers.IO) { Monitor.snapshot() }
@@ -306,6 +311,7 @@ private fun PeekCard() {
         Column(Modifier.weight(1f)) {
             Text(if (taken > 0) "Fotka z kamery" else "Nahlédnout do postýlky", fontWeight = FontWeight.SemiBold, color = colors.ink)
             val sub = when {
+                unavailable -> "Fotka není k dispozici. Klepněte na živý obraz."
                 failed -> "Kamera neodpověděla. Zkuste to znovu."
                 loading -> "Fotím…"
                 taken > 0 -> "${ago(taken)} · klepnutím obnovíte"

@@ -2,6 +2,7 @@ package cz.drabek.chuvicka
 
 import android.Manifest
 import android.app.PictureInPictureParams
+import android.content.Intent
 import android.content.pm.PackageManager
 import android.content.res.Configuration
 import android.os.Build
@@ -23,10 +24,16 @@ import cz.drabek.chuvicka.ui.ChuvickaTheme
 import cz.drabek.chuvicka.ui.LogScreen
 import cz.drabek.chuvicka.ui.PairingScreen
 import cz.drabek.chuvicka.ui.ParentScreen
+import cz.drabek.chuvicka.ui.ScannerPage
 import cz.drabek.chuvicka.ui.SettingsScreen
+import cz.drabek.chuvicka.ui.Wizard
+import cz.drabek.chuvicka.ui.WizardStep
+import cz.drabek.chuvicka.ui.wizardDemoStep
 
 class MainActivity : ComponentActivity() {
     private var pip by mutableStateOf(false)
+    /** The first-run wizard, or the wizard again from the settings. */
+    private var wizardOpen by mutableStateOf(false)
     private var onPermissions: (() -> Unit)? = null
     private val permissions = registerForActivityResult(ActivityResultContracts.RequestMultiplePermissions()) { result ->
         val then = onPermissions ?: return@registerForActivityResult     // Only the notifications: nothing to do.
@@ -47,8 +54,15 @@ class MainActivity : ComponentActivity() {
             Settings.soundView.value = App.demoScreen == "sound" || App.demoScreen == "sound-dark"
             Settings.appearance.value = if (App.demoScreen.endsWith("dark")) Settings.Appearance.DARK else Settings.Appearance.LIGHT
             Settings.unitCode.value = "482913"
+            if (App.demoScreen == "wizard-remote") Settings.source.value = Settings.Source.PHONE
+            if (App.demoScreen == "wizard-camera") Settings.rtspBrand.value = Settings.CameraBrand.TAPO
         }
-        if (Build.VERSION.SDK_INT >= 33 && !App.demo &&
+        // The demo shows the wizard only for its own screens. Otherwise: until it is done once.
+        wizardOpen = if (App.demo) App.demoScreen.startsWith("wizard") else !Settings.onboarded.value
+        handleLink(intent)
+        addOnNewIntentListener { handleLink(it) }
+        // The wizard asks for the notifications itself, with an explanation.
+        if (Build.VERSION.SDK_INT >= 33 && !App.demo && !wizardOpen &&
             ContextCompat.checkSelfPermission(this, Manifest.permission.POST_NOTIFICATIONS) != PackageManager.PERMISSION_GRANTED) {
             permissions.launch(arrayOf(Manifest.permission.POST_NOTIFICATIONS))
         }
@@ -56,9 +70,12 @@ class MainActivity : ComponentActivity() {
             val role by Settings.role.collectAsState()
             val appearance by Settings.appearance.collectAsState()
             var page by remember { mutableStateOf(if (App.demoScreen == "settings") "settings" else "main") }
-            BackHandler(page != "main") { page = if (page == "settings") "main" else "settings" }
-            LaunchedEffect(role) {
-                if (role == Settings.Role.PARENT) ParentService.start(this@MainActivity)
+            BackHandler(!wizardOpen && page != "main") {
+                page = when (page) { "settings" -> "main"; "scan" -> "pairing"; else -> "settings" }
+            }
+            // The monitor waits while the wizard runs: its connection test needs the camera to itself.
+            LaunchedEffect(role, wizardOpen) {
+                if (role == Settings.Role.PARENT && !wizardOpen) ParentService.start(this@MainActivity)
                 else ParentService.stop(this@MainActivity)
             }
             LaunchedEffect(Unit) {
@@ -75,22 +92,44 @@ class MainActivity : ComponentActivity() {
             }
             ChuvickaTheme(appearance) {
                 when {
+                    wizardOpen -> Wizard(
+                        startAt = if (App.demo) wizardDemoStep(App.demoScreen) else WizardStep.WELCOME,
+                        cancel = if (Settings.onboarded.value) ({ wizardOpen = false }) else null,
+                        startBaby = ::startBaby,
+                        done = { page = "main"; wizardOpen = false },
+                    )
                     role == Settings.Role.BABY -> BabyScreen(
                         start = ::startBaby,
                         stop = { BabyService.stop(this) },
                         becomeParent = { Settings.set(Settings.role, "role", Settings.Role.PARENT) },
+                        openWizard = { wizardOpen = true },
                     )
                     page == "settings" -> SettingsScreen(
                         back = { page = "main" },
                         openPairing = { page = "pairing" },
                         openLog = { page = "log" },
                         becomeBaby = { page = "main"; Settings.set(Settings.role, "role", Settings.Role.BABY) },
+                        openWizard = { page = "main"; wizardOpen = true },
                     )
-                    page == "pairing" -> PairingScreen(back = { page = "settings" })
+                    page == "pairing" -> PairingScreen(back = { page = "settings" }, openScanner = { page = "scan" })
+                    page == "scan" -> ScannerPage(back = { page = "pairing" }, paired = { Monitor.reconnect("paired"); page = "pairing" })
                     page == "log" -> LogScreen(back = { page = "settings" })
                     else -> ParentScreen(openSettings = { page = "settings" }, pip = pip, enterPip = ::enterPip)
                 }
             }
+        }
+    }
+
+    /** A pairing link (chuvicka://pair?...) from the system camera or another app. */
+    private fun handleLink(intent: Intent?) {
+        val link = PairLink.parse(intent?.data) ?: return
+        intent?.data = null                    // Once only, also after a restart of the activity.
+        PairLink.apply(link)
+        if (wizardOpen) {
+            WizardEvents.linkPaired.value = true
+        } else {
+            Settings.set(Settings.role, "role", Settings.Role.PARENT)
+            Monitor.reconnect("paired by a link")
         }
     }
 

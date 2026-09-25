@@ -38,7 +38,7 @@ class BabyServer(
     /** It opens a port that the system chooses, and returns it for the mDNS registration. */
     fun start(): Int {
         // A fixed port, so the address that a parent keeps for the time away stays valid.
-        val s = try { ServerSocket(PORT) } catch (e: IOException) { ServerSocket(0) }
+        val s = try { ServerSocket(BABY_PORT) } catch (e: IOException) { ServerSocket(0) }
         server = s
         running = true
         Thread({
@@ -54,18 +54,10 @@ class BabyServer(
         return s.localPort
     }
 
-    private val port get() = server?.localPort ?: PORT
+    private val port get() = server?.localPort ?: BABY_PORT
 
     /** This phone's IPv4 addresses, the Tailscale one first. A parent keeps them for the time away. */
-    private fun addresses(): String = java.net.NetworkInterface.getNetworkInterfaces().toList()
-        .filter { it.isUp && !it.isLoopback }
-        .flatMap { it.inetAddresses.toList() }
-        .filterIsInstance<java.net.Inet4Address>()
-        .map { it.hostAddress ?: "" }
-        .filter { it.isNotEmpty() && !it.startsWith("169.254.") }
-        .distinct()
-        .sortedByDescending { cz.drabek.chuvicka.proto.RtspClient.isTailscale(it) }
-        .joinToString(", ") { "$it:$port" }
+    private fun addresses(): String = cz.drabek.chuvicka.Net.ipv4().joinToString(", ") { "$it:$port" }
 
     fun stop() {
         running = false
@@ -313,4 +305,5 @@ class BabyServer(
     }
 }
 
-private const val PORT = 8555
+/** The fixed port of the phone at the baby. The iOS app uses the same. */
+const val BABY_PORT = 8555

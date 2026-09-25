@@ -29,6 +29,8 @@ object BabyState {
     val parents = MutableStateFlow(0)
     val history = MutableStateFlow(List(60) { 0f })
     val error = MutableStateFlow<String?>(null)
+    /** The port of the running server, for the QR code. 0 when it does not run. */
+    val port = MutableStateFlow(0)
     @Volatile var capture: BabyCapture? = null
 }
 
@@ -81,6 +83,7 @@ class BabyService : LifecycleService() {
             BabyState.error.value = "Vysílání se nepodařilo spustit (${e.message})."
             stopSelf(); return
         }
+        BabyState.port.value = port
         capture.startAudio()
         if (video) capture.startVideo(this, Settings.unitFront.value)
         register(port)
@@ -99,7 +102,7 @@ class BabyService : LifecycleService() {
     /** mDNS: the parents find "Pokojíček" on the Wi-Fi. The iOS app browses the same type. */
     private fun register(port: Int) {
         val info = NsdServiceInfo().apply {
-            serviceName = Settings.unitName.value.trim().ifEmpty { "Pokojíček" }.take(40)
+            serviceName = Settings.unitServiceName
             serviceType = BABY_SERVICE_TYPE
             setPort(port)
         }
@@ -154,6 +157,7 @@ class BabyService : LifecycleService() {
         wakeLock?.let { if (it.isHeld) it.release() }
         wifiLock?.let { if (it.isHeld) it.release() }
         BabyState.running.value = false
+        BabyState.port.value = 0
         BabyState.parents.value = 0
         BabyState.history.value = List(60) { 0f }
         Log.add("baby phone off")

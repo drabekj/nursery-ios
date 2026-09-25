@@ -45,8 +45,24 @@ object Settings {
         NORMAL("Normální", 0f), LOUD("Zesílená", 12f), MAX("Maximální", 20f)
     }
     enum class Appearance(val title: String) { LIGHT("Světlý"), DARK("Tmavý"), AUTO("Automaticky") }
+    /** The RTSP paths of the common IP cameras: the main stream and the small one. */
+    enum class CameraBrand(val title: String, val main: String, val small: String) {
+        TAPO("Tapo", "stream1", "stream2"),
+        HIKVISION("Hikvision", "Streaming/Channels/101", "Streaming/Channels/102"),
+        DAHUA("Dahua / Imou", "cam/realmonitor?channel=1&subtype=0", "cam/realmonitor?channel=1&subtype=1"),
+        REOLINK("Reolink", "h264Preview_01_main", "h264Preview_01_sub"),
+        OTHER("Jiná kamera", "", ""),
+    }
+
+    const val KIND_GO2RTC = "go2rtc"
+    const val KIND_RTSP = "rtsp"
 
     private lateinit var p: SharedPreferences
+    /**
+     * The camera password. A plain private file, apart from the other settings: only this app
+     * can read it. EncryptedSharedPreferences would need one more library.
+     */
+    private lateinit var secret: SharedPreferences
 
     val role = MutableStateFlow(Role.PARENT)
     val source = MutableStateFlow(Source.CAMERA)
@@ -67,9 +83,31 @@ object Settings {
     val unitCode = MutableStateFlow("")
     val unitVideo = MutableStateFlow(true)
     val unitFront = MutableStateFlow(false)
+    /** False until the first-run wizard is done. */
+    val onboarded = MutableStateFlow(true)
+    /** The camera source: "go2rtc" (a server) or "rtsp" (an IP camera read directly). */
+    val cameraKind = MutableStateFlow(KIND_GO2RTC)
+    val streamMain = MutableStateFlow("nursery")
+    val streamSmall = MutableStateFlow("nursery_sd")
+    /** The IP camera's streams, full RTSP URLs without the user and the password. */
+    val rtspUrl = MutableStateFlow("")
+    val rtspUrlSmall = MutableStateFlow("")
+    val rtspUser = MutableStateFlow("")
+    val rtspBrand = MutableStateFlow(CameraBrand.TAPO)
 
     fun init(context: Context) {
         p = context.getSharedPreferences("settings", Context.MODE_PRIVATE)
+        secret = context.getSharedPreferences("secret", Context.MODE_PRIVATE)
+        // An install from before the wizard has settings already: it skips the wizard.
+        if (!p.contains("onboarded")) p.edit().putBoolean("onboarded", p.all.keys.any { it != "unitCode" }).apply()
+        onboarded.value = p.getBoolean("onboarded", true)
+        cameraKind.value = p.getString("cameraKind", null) ?: KIND_GO2RTC
+        streamMain.value = p.getString("streamMain", null) ?: "nursery"
+        streamSmall.value = p.getString("streamSmall", null) ?: "nursery_sd"
+        rtspUrl.value = p.getString("rtspUrl", "") ?: ""
+        rtspUrlSmall.value = p.getString("rtspUrlSmall", "") ?: ""
+        rtspUser.value = p.getString("rtspUser", "") ?: ""
+        rtspBrand.value = enumValueOrNull<CameraBrand>(p.getString("rtspBrand", null)) ?: CameraBrand.TAPO
         role.value = enumValueOrNull<Role>(p.getString("role", null)) ?: Role.PARENT
         source.value = enumValueOrNull<Source>(p.getString("source", null)) ?: Source.CAMERA
         host.value = p.getString("host", null) ?: "192.168.0.136"
@@ -103,18 +141,43 @@ object Settings {
         p.edit().putString("babyAddresses", list.joinToString(",")).apply()
     }
 
+    var rtspPassword: String
+        get() = secret.getString("rtspPassword", "") ?: ""
+        set(value) { secret.edit().putString("rtspPassword", value).apply() }
+
     /** The Pi now. */
     val serverHost get() = activeHost.value.ifEmpty { host.value.trim() }
 
+    /** The name that the phone at the baby announces with mDNS. */
+    val unitServiceName get() = unitName.value.trim().ifEmpty { "Pokojíček" }.take(40)
+
     fun newCode() = "%06d".format(Random.nextInt(0, 1_000_000))
 
-    /** The stream URL. The Tapo camera is read through go2rtc on the Pi, never directly. */
+    /** The stream URL: go2rtc on the Pi, or the IP camera directly (with its user and password). */
     fun cameraUrl(soundOnly: Boolean): String {
+        if (cameraKind.value == KIND_RTSP) {
+            // Sound only: the small stream, if the camera has one. Never "?audio".
+            val url = if (soundOnly && rtspUrlSmall.value.isNotBlank()) rtspUrlSmall.value else rtspUrl.value
+            return withCredentials(url.trim(), rtspUser.value, rtspPassword)
+        }
+        return go2rtcUrl(serverHost, soundOnly)
+    }
+
+    fun go2rtcUrl(server: String, soundOnly: Boolean): String {
         // Sound only: the 360p stream with its picture, which the app does not draw. Not "?audio":
         // go2rtc then asks the Tapo camera for the sound track only, and the camera sends nothing.
-        val name = if (soundOnly) "nursery_sd" else "nursery"
-        return "rtsp://$serverHost:8554/$name"
+        val name = if (soundOnly) streamSmall.value.trim().ifEmpty { "nursery_sd" } else streamMain.value.trim().ifEmpty { "nursery" }
+        return "rtsp://$server:8554/$name"
     }
+
+    /** "rtsp://host/path" to "rtsp://user:pass@host/path", both percent-encoded. */
+    fun withCredentials(url: String, user: String, password: String): String {
+        val rest = if (url.startsWith("rtsp://", ignoreCase = true)) url.substring(7) else url
+        if (user.isEmpty() || rest.substringBefore('/').contains('@')) return "rtsp://$rest"
+        return "rtsp://${encode(user)}:${encode(password)}@$rest"
+    }
+
+    fun encode(s: String): String = java.net.URLEncoder.encode(s, "UTF-8").replace("+", "%20")
 
     private inline fun <reified T : Enum<T>> enumValueOrNull(name: String?): T? =
         enumValues<T>().firstOrNull { it.name == name }

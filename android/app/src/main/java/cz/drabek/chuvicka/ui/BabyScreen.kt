@@ -48,13 +48,13 @@ import java.util.Locale
 
 /** The screen of the phone at the baby: the choices before the start, a dark screen while it sends. */
 @Composable
-fun BabyScreen(start: () -> Unit, stop: () -> Unit, becomeParent: () -> Unit) {
+fun BabyScreen(start: () -> Unit, stop: () -> Unit, becomeParent: () -> Unit, openWizard: () -> Unit) {
     val running by BabyState.running.collectAsState()
-    if (running) BabySending(stop) else BabySetup(start, becomeParent)
+    if (running) BabySending(stop) else BabySetup(start, becomeParent, openWizard)
 }
 
 @Composable
-private fun BabySetup(start: () -> Unit, becomeParent: () -> Unit) {
+private fun BabySetup(start: () -> Unit, becomeParent: () -> Unit, openWizard: () -> Unit) {
     val code by Settings.unitCode.collectAsState()
     val name by Settings.unitName.collectAsState()
     val video by Settings.unitVideo.collectAsState()
@@ -70,7 +70,9 @@ private fun BabySetup(start: () -> Unit, becomeParent: () -> Unit) {
 
         Column(Modifier.fillMaxWidth().clip(RoundedCornerShape(24.dp)).background(colors.card).padding(18.dp),
             horizontalAlignment = Alignment.CenterHorizontally) {
-            Text("Párovací kód", fontWeight = FontWeight.SemiBold, color = colors.muted)
+            PairQr()
+            Spacer(Modifier.height(16.dp))
+            Text("Nebo zadejte párovací kód", fontWeight = FontWeight.SemiBold, color = colors.muted)
             Text(spaced(code), fontSize = 44.sp, fontWeight = FontWeight.SemiBold, color = colors.ink)
             Text("Na telefonu rodiče: Nastavení → Zdroj → Telefon u miminka.", fontSize = 12.sp, color = colors.muted, textAlign = TextAlign.Center)
             TextButton(onClick = { Settings.set(Settings.unitCode, "unitCode", Settings.newCode()) }) { Text("Nový kód") }
@@ -101,6 +103,7 @@ private fun BabySetup(start: () -> Unit, becomeParent: () -> Unit) {
             Text("Začít vysílat", fontWeight = FontWeight.SemiBold, fontSize = 17.sp)
         }
         TextButton(onClick = { confirmParent = true }) { Text("Tento telefon je rodičovský") }
+        TextButton(onClick = openWizard) { Text("Průvodce nastavením") }
     }
     if (confirmParent) AlertDialog(
         onDismissRequest = { confirmParent = false },
@@ -183,7 +186,7 @@ private fun BabySending(stop: () -> Unit) {
             }
         }
         AnimatedVisibility(awake, enter = fadeIn(), exit = fadeOut()) {
-            Column(Modifier.fillMaxSize().systemBarsPadding().padding(20.dp), horizontalAlignment = Alignment.CenterHorizontally,
+            Column(Modifier.fillMaxSize().systemBarsPadding().verticalScroll(rememberScrollState()).padding(20.dp), horizontalAlignment = Alignment.CenterHorizontally,
                 verticalArrangement = Arrangement.spacedBy(14.dp, Alignment.CenterVertically)) {
                 if (video) {
                     Box(Modifier.fillMaxWidth().aspectRatio(16f / 9f).clip(RoundedCornerShape(20.dp)).background(Color.White.copy(alpha = 0.06f)),
@@ -197,6 +200,8 @@ private fun BabySending(stop: () -> Unit) {
                     Text("Náhled. Namiřte telefon na postýlku.", fontSize = 12.sp, color = Color.White.copy(alpha = 0.6f))
                 }
                 Text(statusText, fontWeight = FontWeight.SemiBold, color = if (parents > 0) DarkPalette.calm else Color.White.copy(alpha = 0.7f))
+                // The QR code, also for a second parent's phone.
+                PairQr(size = if (video) 150.dp else 200.dp, labelColor = Color.White.copy(alpha = 0.7f))
                 Text("Kód  ${spaced(code)}", fontWeight = FontWeight.SemiBold, color = Color.White.copy(alpha = 0.85f))
                 Button(onClick = stop, Modifier.widthIn(max = 320.dp).fillMaxWidth().height(50.dp), shape = RoundedCornerShape(16.dp),
                     colors = ButtonDefaults.buttonColors(containerColor = DarkPalette.alarm.copy(alpha = 0.85f), contentColor = Color.White)) {

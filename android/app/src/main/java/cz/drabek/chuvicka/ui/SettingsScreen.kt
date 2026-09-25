@@ -15,6 +15,7 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.filled.Check
 import androidx.compose.material.icons.filled.PhoneAndroid
+import androidx.compose.material.icons.filled.QrCodeScanner
 import androidx.compose.material.icons.filled.Share
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
@@ -28,13 +29,17 @@ import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import cz.drabek.chuvicka.Log
+import cz.drabek.chuvicka.PairLink
 import cz.drabek.chuvicka.Settings
 import cz.drabek.chuvicka.parent.BabyFinder
 import cz.drabek.chuvicka.parent.Monitor
 
 @Composable
-fun SettingsScreen(back: () -> Unit, openPairing: () -> Unit, openLog: () -> Unit, becomeBaby: () -> Unit) {
+fun SettingsScreen(back: () -> Unit, openPairing: () -> Unit, openLog: () -> Unit, becomeBaby: () -> Unit, openWizard: () -> Unit) {
     val source by Settings.source.collectAsState()
+    val cameraKind by Settings.cameraKind.collectAsState()
+    val rtspBrand by Settings.rtspBrand.collectAsState()
+    val rtspUrl by Settings.rtspUrl.collectAsState()
     val host by Settings.host.collectAsState()
     val babyName by Settings.babyName.collectAsState()
     val loudness by Settings.loudness.collectAsState()
@@ -49,7 +54,10 @@ fun SettingsScreen(back: () -> Unit, openPairing: () -> Unit, openLog: () -> Uni
 
     Page("Nastavení", back) {
         val babyTailscale = babyAddresses.firstOrNull { cz.drabek.chuvicka.proto.RtspClient.isTailscale(it.substringBeforeLast(":")) }
-        Section("Zdroj", footer = if (source == Settings.Source.CAMERA)
+        val ipCamera = source == Settings.Source.CAMERA && cameraKind == Settings.KIND_RTSP
+        Section("Zdroj", footer = if (ipCamera)
+            "IP kamera v domácí síti. Mimo domov ji Chůvička neukáže: do kamery nejde nainstalovat Tailscale. Na dálku pomůže druhý telefon u postýlky nebo server go2rtc."
+        else if (source == Settings.Source.CAMERA)
             "Počítač, na kterém běží go2rtc. Doma se Chůvička připojí na jeho adresu v síti. Mimo domov použije adresu přes Tailscale, když je v telefonu Tailscale zapnutý."
         else "Druhý telefon s Chůvičkou u postýlky, iPhone nebo Android, posílá obraz a zvuk přímo do tohoto telefonu. " +
             (if (babyTailscale != null) "Mimo domov přes Tailscale: $babyTailscale."
@@ -57,7 +65,15 @@ fun SettingsScreen(back: () -> Unit, openPairing: () -> Unit, openLog: () -> Uni
             Choice("Obraz a zvuk z", listOf(Settings.Source.CAMERA to "Kamera v pokojíčku", Settings.Source.PHONE to "Telefon u miminka"), source) {
                 Settings.set(Settings.source, "source", it); Monitor.reconnect("source changed")
             }
-            if (source == Settings.Source.CAMERA) {
+            if (ipCamera) {
+                Row(Modifier.fillMaxWidth().clickable(onClick = openWizard).padding(16.dp), verticalAlignment = Alignment.CenterVertically) {
+                    Column(Modifier.weight(1f)) {
+                        Text("IP kamera ${rtspBrand.title}", color = colors.ink)
+                        Text(rtspUrl, fontSize = 13.sp, color = colors.muted)
+                    }
+                    Text("Změnit", color = colors.accent)
+                }
+            } else if (source == Settings.Source.CAMERA) {
                 OutlinedTextField(hostField, { hostField = it }, Modifier.fillMaxWidth().padding(16.dp), label = { Text("Adresa serveru") },
                     singleLine = true, keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Uri))
                 OutlinedTextField(remoteField, { remoteField = it }, Modifier.fillMaxWidth().padding(horizontal = 16.dp).padding(bottom = 16.dp),
@@ -93,6 +109,9 @@ fun SettingsScreen(back: () -> Unit, openPairing: () -> Unit, openLog: () -> Uni
         Section("Displej") {
             Choice("Vzhled", Settings.Appearance.entries.map { it to it.title }, appearance) { Settings.set(Settings.appearance, "appearance", it) }
         }
+        Section("Průvodce", footer = "Provede vás nastavením krok za krokem, jako při prvním spuštění.") {
+            Row(Modifier.fillMaxWidth().clickable(onClick = openWizard).padding(16.dp)) { Text("Průvodce nastavením", color = colors.ink) }
+        }
         Section("Tento telefon", footer = "Tento telefon pak nehlídá, ale vysílá: jeho kamera a mikrofon budou u postýlky.") {
             TextButton(onClick = { confirmBaby = true }, Modifier.padding(horizontal = 8.dp)) { Text("Použít jako telefon u miminka") }
         }
@@ -113,16 +132,21 @@ fun SettingsScreen(back: () -> Unit, openPairing: () -> Unit, openLog: () -> Uni
 
 /** On the parent: find the phone at the baby with mDNS, and pair with its code. */
 @Composable
-fun PairingScreen(back: () -> Unit) {
+fun PairingScreen(back: () -> Unit, openScanner: () -> Unit) {
     val context = LocalContext.current
     val finder = remember { BabyFinder(context) }
     DisposableEffect(Unit) { finder.start(); onDispose { finder.stop() } }
     val names by finder.names.collectAsState()
     val babyName by Settings.babyName.collectAsState()
     var picking by remember { mutableStateOf<String?>(null) }
-    var code by remember { mutableStateOf("") }
 
     Page("Telefon u miminka", back) {
+        Button(onClick = openScanner, Modifier.padding(horizontal = 16.dp, vertical = 8.dp).fillMaxWidth().height(56.dp), shape = RoundedCornerShape(20.dp),
+            colors = ButtonDefaults.buttonColors(containerColor = colors.moon, contentColor = Color.Black)) {
+            Icon(Icons.Filled.QrCodeScanner, null)
+            Spacer(Modifier.width(10.dp))
+            Text("Naskenovat QR kód", fontWeight = FontWeight.SemiBold, fontSize = 17.sp)
+        }
         if (babyName.isNotEmpty()) Section("Spárováno") {
             Row(Modifier.fillMaxWidth().padding(16.dp)) {
                 Text(babyName, Modifier.weight(1f), color = colors.ink)
@@ -138,7 +162,7 @@ fun PairingScreen(back: () -> Unit) {
                 Text("Hledám telefon u miminka…", color = colors.muted)
             }
             names.forEach { name ->
-                Row(Modifier.fillMaxWidth().clickable { code = ""; picking = name }.padding(16.dp), verticalAlignment = Alignment.CenterVertically) {
+                Row(Modifier.fillMaxWidth().clickable { picking = name }.padding(16.dp), verticalAlignment = Alignment.CenterVertically) {
                     Icon(Icons.Filled.PhoneAndroid, null, tint = colors.accent)
                     Spacer(Modifier.width(12.dp))
                     Text(name, Modifier.weight(1f), color = colors.ink)
@@ -149,32 +173,46 @@ fun PairingScreen(back: () -> Unit) {
         Section("Jak na to") {
             Step(1, "Na druhém telefonu (iPhonu nebo Androidu) otevřete Chůvičku → Nastavení → Použít jako telefon u miminka.")
             Step(2, "Položte ho k postýlce, 1–2 metry od miminka, a připojte nabíječku.")
-            Step(3, "Klepněte tady na jeho název a zadejte šestimístný kód, který ukazuje.")
+            Step(3, "Naskenujte jeho QR kód, nebo tady klepněte na jeho název a zadejte šestimístný kód, který ukazuje.")
         }
     }
-    picking?.let { name ->
-        AlertDialog(
-            onDismissRequest = { picking = null },
-            title = { Text("Párovací kód") },
-            text = {
-                Column {
-                    Text("Zadejte kód, který ukazuje telefon „$name“.")
-                    Spacer(Modifier.height(12.dp))
-                    OutlinedTextField(code, { v -> code = v.filter(Char::isDigit).take(6) }, singleLine = true,
-                        keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.NumberPassword), label = { Text("6 číslic") })
-                }
-            },
-            confirmButton = {
-                TextButton(enabled = code.length == 6, onClick = {
-                    Settings.set(Settings.babyCode, "babyCode", code)
-                    Settings.set(Settings.babyName, "babyName", name)
-                    Settings.set(Settings.source, "source", Settings.Source.PHONE)
-                    Monitor.reconnect("paired")
-                    picking = null
-                }) { Text("Spárovat") }
-            },
-            dismissButton = { TextButton(onClick = { picking = null }) { Text("Zrušit") } },
-        )
+    picking?.let { name -> PairCodeDialog(name, dismiss = { picking = null }, paired = { picking = null; Monitor.reconnect("paired") }) }
+}
+
+/** The 6-digit code of the phone at the baby, by hand. It saves the pairing. */
+@Composable
+fun PairCodeDialog(name: String, dismiss: () -> Unit, paired: () -> Unit) {
+    var code by remember(name) { mutableStateOf("") }
+    AlertDialog(
+        onDismissRequest = dismiss,
+        title = { Text("Párovací kód") },
+        text = {
+            Column {
+                Text("Zadejte kód, který ukazuje telefon „$name“.")
+                Spacer(Modifier.height(12.dp))
+                OutlinedTextField(code, { v -> code = v.filter(Char::isDigit).take(6) }, singleLine = true,
+                    keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.NumberPassword), label = { Text("6 číslic") })
+            }
+        },
+        confirmButton = {
+            TextButton(enabled = code.length == 6, onClick = {
+                // Another phone: the addresses of the old one are no use.
+                if (name != Settings.babyName.value) Settings.setBabyAddresses(emptyList())
+                Settings.set(Settings.babyCode, "babyCode", code)
+                Settings.set(Settings.babyName, "babyName", name)
+                Settings.set(Settings.source, "source", Settings.Source.PHONE)
+                paired()
+            }) { Text("Spárovat") }
+        },
+        dismissButton = { TextButton(onClick = dismiss) { Text("Zrušit") } },
+    )
+}
+
+/** The QR scanner as a page of the settings. */
+@Composable
+fun ScannerPage(back: () -> Unit, paired: () -> Unit) {
+    Page("Naskenovat QR kód", back) {
+        QrScanner(found = { link -> PairLink.apply(link); paired() }, modifier = Modifier.padding(16.dp))
     }
 }
 

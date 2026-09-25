@@ -7,6 +7,9 @@ import java.io.OutputStream
 import java.net.InetSocketAddress
 import java.net.Socket
 import java.net.URI
+import java.net.URLDecoder
+import java.security.MessageDigest
+import kotlin.random.Random
 
 /**
  * A small RTSP client: RTP interleaved over the one TCP connection. The same as the RTSPClient
@@ -14,13 +17,23 @@ import java.net.URI
  *
  * The handshake runs on the caller's thread. After PLAY, [run] reads the packets until the
  * connection ends. A keepalive thread sends OPTIONS.
+ *
+ * An IP camera wants a user and a password: Digest (or Basic) authentication after a 401.
  */
-class RtspClient(private val url: String, private val host: String, private val port: Int) {
+class RtspClient(url: String, private val host: String, private val port: Int,
+                 private val user: String = "", private val password: String = "") {
     class Failure(message: String) : IOException(message)
 
     class Track(val sdp: SdpTrack, val channel: Int)
 
+    /** The URL without "user:pass@": the credentials go only in the Authorization header. */
+    private val url = url.replaceFirst(Regex("^(rtsp://)[^/@]+@", RegexOption.IGNORE_CASE), "\$1")
+    private val babyPhone = this.url.startsWith("rtsp://chuvicka/")
     private var socket: Socket? = null
+    /** The last challenge of the server: "realm", "nonce", "qop", "opaque", or null for Basic. */
+    private var digest: Map<String, String>? = null
+    private var basic = false
+    private var nonceCount = 0
     private lateinit var input: InputStream
     private lateinit var output: OutputStream
     private var cseq = 0
@@ -101,7 +114,24 @@ class RtspClient(private val url: String, private val host: String, private val 
     class Response(val status: Int, val reason: String, val headers: Map<String, String>, val body: ByteArray)
 
     private fun request(method: String, uri: String, headers: Map<String, String> = emptyMap()): Response {
-        val id = send(method, uri, headers)
+        var retried = false
+        while (true) {
+            val r = answer(send(method, uri, headers))
+            if (r.status == 401 && !retried && user.isNotEmpty() && !babyPhone) {
+                val challenge = r.headers["www-authenticate"]
+                if (challenge != null) { authenticate(challenge); retried = true; continue }
+            }
+            if (r.status == 401) throw Failure(when {
+                babyPhone -> "Nesprávný párovací kód. Zadejte kód z telefonu u miminka."
+                user.isEmpty() -> "Kamera chce uživatelské jméno a heslo."
+                else -> "Kamera nepřijala uživatelské jméno nebo heslo."
+            })
+            if (r.status !in 200..299) throw Failure("Server odpověděl ${r.status} ${r.reason}.")
+            return r
+        }
+    }
+
+    private fun answer(id: Int): Response {
         while (true) {
             val first = input.read()
             if (first < 0) throw Failure("Server ukončil spojení.")
@@ -110,18 +140,55 @@ class RtspClient(private val url: String, private val host: String, private val 
                 continue
             }
             val r = readResponse(first)
-            if (r.headers["cseq"]?.toIntOrNull() != id) continue
-            if (r.status == 401) throw Failure("Nesprávný párovací kód. Zadejte kód z telefonu u miminka.")
-            if (r.status !in 200..299) throw Failure("Server odpověděl ${r.status} ${r.reason}.")
-            return r
+            if (r.headers["cseq"]?.toIntOrNull() == id) return r
         }
     }
+
+    // MARK: The authentication (RFC 2617), as the IP cameras use it
+
+    private fun authenticate(header: String) {
+        if (header.trim().startsWith("Basic", ignoreCase = true)) { basic = true; digest = null; return }
+        val fields = HashMap<String, String>()
+        for (m in Regex("(\\w+)=(?:\"([^\"]*)\"|([^,\\s]*))").findAll(header.substringAfter(' '))) {
+            fields[m.groupValues[1].lowercase()] = m.groupValues[2].ifEmpty { m.groupValues[3] }
+        }
+        basic = false
+        digest = fields
+        nonceCount = 0
+    }
+
+    private fun authorization(method: String, uri: String): String? {
+        if (user.isEmpty()) return null
+        if (basic) return "Basic " + android.util.Base64.encodeToString("$user:$password".toByteArray(Charsets.UTF_8), android.util.Base64.NO_WRAP)
+        val d = digest ?: return null
+        val realm = d["realm"] ?: ""
+        val nonce = d["nonce"] ?: ""
+        val ha1 = md5("$user:$realm:$password")
+        val ha2 = md5("$method:$uri")
+        val b = StringBuilder("Digest username=\"$user\", realm=\"$realm\", nonce=\"$nonce\", uri=\"$uri\"")
+        val qop = d["qop"]?.split(",")?.map { it.trim() }?.firstOrNull { it == "auth" }
+        if (qop != null) {
+            nonceCount++
+            val nc = "%08x".format(nonceCount)
+            val cnonce = "%016x".format(Random.nextLong())
+            b.append(", qop=$qop, nc=$nc, cnonce=\"$cnonce\", response=\"${md5("$ha1:$nonce:$nc:$cnonce:$qop:$ha2")}\"")
+        } else {
+            b.append(", response=\"${md5("$ha1:$nonce:$ha2")}\"")
+        }
+        d["opaque"]?.let { b.append(", opaque=\"$it\"") }
+        d["algorithm"]?.let { b.append(", algorithm=$it") }
+        return b.toString()
+    }
+
+    private fun md5(text: String): String =
+        MessageDigest.getInstance("MD5").digest(text.toByteArray(Charsets.UTF_8)).joinToString("") { "%02x".format(it) }
 
     @Synchronized
     private fun send(method: String, uri: String, headers: Map<String, String>): Int {
         cseq++
         val text = StringBuilder("$method $uri RTSP/1.0\r\nCSeq: $cseq\r\nUser-Agent: Chuvicka-Android/1.0\r\n")
         session?.let { text.append("Session: $it\r\n") }
+        authorization(method, uri)?.let { text.append("Authorization: $it\r\n") }
         for ((k, v) in headers) text.append("$k: $v\r\n")
         text.append("\r\n")
         output.write(text.toString().toByteArray(Charsets.UTF_8))
@@ -140,7 +207,11 @@ class RtspClient(private val url: String, private val host: String, private val 
         val headers = HashMap<String, String>()
         for (line in lines.drop(1)) {
             val colon = line.indexOf(':')
-            if (colon > 0) headers[line.substring(0, colon).lowercase()] = line.substring(colon + 1).trim()
+            if (colon <= 0) continue
+            val key = line.substring(0, colon).lowercase()
+            // A camera may offer Basic and Digest: keep Digest.
+            if (key == "www-authenticate" && headers[key]?.startsWith("Digest", ignoreCase = true) == true) continue
+            headers[key] = line.substring(colon + 1).trim()
         }
         val body = readFully(headers["content-length"]?.toIntOrNull() ?: 0)
         return Response(status.getOrNull(1)?.toIntOrNull() ?: 0, status.getOrNull(2) ?: "", headers, body)
@@ -181,10 +252,13 @@ class RtspClient(private val url: String, private val host: String, private val 
         fun isUsable(t: SdpTrack) =
             (t.kind == "video" && t.codec == "H264") || (t.kind == "audio" && (t.codec == "PCMA" || t.codec == "PCMU"))
 
-        /** "rtsp://192.168.0.136:8554/nursery" to its host and port. */
+        /** "rtsp://user:pass@192.168.0.136:8554/nursery" to its host, port, user, and password. */
         fun forUrl(url: String): RtspClient {
-            val u = URI(url)
-            return RtspClient(url, u.host ?: throw Failure("Adresa streamu není platná."), if (u.port > 0) u.port else 554)
+            val u = try { URI(url) } catch (e: Exception) { throw Failure("Adresa kamery není platná.") }
+            val info = u.rawUserInfo ?: ""
+            val user = URLDecoder.decode(info.substringBefore(':'), "UTF-8")
+            val password = if (':' in info) URLDecoder.decode(info.substringAfter(':'), "UTF-8") else ""
+            return RtspClient(url, u.host ?: throw Failure("Adresa kamery není platná."), if (u.port > 0) u.port else 554, user, password)
         }
     }
 }

@@ -163,7 +163,8 @@ object Monitor {
                 if (intentional) { intentional = false; continue }
                 failures++
                 val why = (e.message ?: "Spojení se ukončilo.").let {
-                    if (failures >= 2 && Settings.source.value == Settings.Source.CAMERA && "Tailscale" !in it)
+                    if (failures >= 2 && Settings.source.value == Settings.Source.CAMERA &&
+                        Settings.cameraKind.value == Settings.KIND_GO2RTC && "Tailscale" !in it)
                         "$it Mimo domov zapněte v telefonu Tailscale." else it
                 }
                 Log.add("connection ended: $why")
@@ -184,6 +185,12 @@ object Monitor {
      */
     private fun open(): RtspClient {
         if (Settings.source.value == Settings.Source.CAMERA) {
+            if (Settings.cameraKind.value == Settings.KIND_RTSP) {
+                // An IP camera cannot run Tailscale: only at home.
+                Settings.activeHost.value = ""
+                viaTailscale.value = false
+                return RtspClient.forUrl(Settings.cameraUrl(soundOnly))
+            }
             val home = Settings.host.value.trim()
             val remote = Settings.remoteHost.value.trim()
             val host = if (remote.isNotEmpty() && remote != home && !RtspClient.canConnect(home, 8554)) remote else home
@@ -316,7 +323,8 @@ object Monitor {
     fun snapshot(): ByteArray? {
         if (App.demo) return null
         val url = if (Settings.source.value == Settings.Source.CAMERA) {
-            "http://${Settings.serverHost}:1984/api/frame.jpeg?src=nursery_sd"
+            if (Settings.cameraKind.value == Settings.KIND_RTSP) return null      // An IP camera gives no photo here.
+            "http://${Settings.serverHost}:1984/api/frame.jpeg?src=${Settings.encode(Settings.streamSmall.value.trim().ifEmpty { "nursery_sd" })}"
         } else {
             val (host, port) = babyDirect ?: BabyFinder.resolve(context, Settings.babyName.value) ?: return null
             "http://$host:$port/${Settings.babyCode.value}/frame.jpeg"
