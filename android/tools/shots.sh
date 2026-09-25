@@ -17,4 +17,5 @@ for s in parent sound muted volume night settings baby baby-live; do shot "$s" "
 for s in wizard wizard-role wizard-source wizard-camera wizard-remote; do shot "$s" "$s"; done
 shot parent-dark parent-dark
 shot sound-dark sound-dark
+shot paused paused
 adb logcat -d -s Chuvicka AndroidRuntime:E > shots/logcat.txt || true

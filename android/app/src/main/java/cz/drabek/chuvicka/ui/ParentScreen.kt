@@ -30,6 +30,7 @@ import androidx.compose.material.icons.filled.Bedtime
 import androidx.compose.material.icons.filled.GraphicEq
 import androidx.compose.material.icons.filled.Notifications
 import androidx.compose.material.icons.filled.PictureInPictureAlt
+import androidx.compose.material.icons.filled.PowerSettingsNew
 import androidx.compose.material.icons.filled.Settings
 import androidx.compose.material.icons.filled.Videocam
 import androidx.compose.material.icons.filled.Visibility
@@ -78,6 +79,12 @@ fun ParentScreen(openSettings: () -> Unit, pip: Boolean, enterPip: () -> Unit) {
         onDispose { view.keepScreenOn = false }
     }
     if (pip) { VideoSurface(Modifier.fillMaxSize()); return }
+    val paused by Monitor.paused.collectAsState()
+    val context = androidx.compose.ui.platform.LocalContext.current
+    if (paused) {
+        PausedScreen { Monitor.paused.value = false; cz.drabek.chuvicka.parent.ParentService.start(context) }
+        return
+    }
     Box(Modifier.fillMaxSize().background(colors.sky)) {
         Column(Modifier.fillMaxSize().systemBarsPadding().padding(horizontal = 16.dp)) {
             TopRow(openSettings)
@@ -118,6 +125,16 @@ private fun TopRow(openSettings: () -> Unit) {
             Text(text, fontWeight = FontWeight.SemiBold, fontSize = 15.sp, color = colors.ink)
         }
         Text("Chůvička", Modifier.weight(1f), textAlign = TextAlign.Center, fontWeight = FontWeight.SemiBold, fontSize = 18.sp, color = colors.ink)
+        val context = androidx.compose.ui.platform.LocalContext.current
+        // The clear way to stop: no sound, no stream, no notification.
+        IconButton(onClick = {
+            Monitor.night.value = false
+            Monitor.paused.value = true
+            cz.drabek.chuvicka.parent.ParentService.stop(context)
+        }, Modifier.clip(CircleShape).background(colors.card)) {
+            Icon(Icons.Filled.PowerSettingsNew, "Ukončit hlídání", tint = colors.alarm)
+        }
+        Spacer(Modifier.width(8.dp))
         IconButton(onClick = openSettings, Modifier.clip(CircleShape).background(colors.card)) {
             Icon(Icons.Filled.Settings, "Nastavení", tint = colors.accent)
         }
@@ -464,5 +481,24 @@ fun NightScreen(close: () -> Unit) {
         Spacer(Modifier.height(60.dp))
         Text("Můžete zhasnout displej. Zvuk poběží dál. Klepnutím Noční režim ukončíte.", fontSize = 12.sp,
             color = Color.White.copy(alpha = 0.2f), textAlign = TextAlign.Center)
+    }
+}
+
+/** The monitor is off. It says so plainly, and one button starts it again. */
+@Composable
+private fun PausedScreen(resume: () -> Unit) {
+    Column(Modifier.fillMaxSize().background(colors.sky).systemBarsPadding().padding(24.dp),
+        horizontalAlignment = Alignment.CenterHorizontally) {
+        Spacer(Modifier.weight(1f))
+        Icon(Icons.Filled.Bedtime, null, Modifier.size(64.dp), tint = colors.accent)
+        Spacer(Modifier.height(18.dp))
+        Text("Hlídání je vypnuté", fontSize = 30.sp, fontWeight = FontWeight.Bold, color = colors.ink, textAlign = TextAlign.Center)
+        Spacer(Modifier.height(10.dp))
+        Text("Chůvička teď neposlouchá a nic nevysílá. Můžete ji klidně zavřít.", color = colors.muted, textAlign = TextAlign.Center)
+        Spacer(Modifier.weight(1f))
+        Button(onClick = resume, Modifier.fillMaxWidth().height(58.dp), shape = RoundedCornerShape(20.dp),
+            colors = ButtonDefaults.buttonColors(containerColor = colors.moon, contentColor = Color.Black)) {
+            Text("Znovu hlídat", fontWeight = FontWeight.SemiBold, fontSize = 17.sp)
+        }
     }
 }

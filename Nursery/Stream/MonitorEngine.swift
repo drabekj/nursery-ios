@@ -1,3 +1,4 @@
+import ActivityKit
 import AVFoundation
 import MediaPlayer
 import Combine
@@ -144,6 +145,9 @@ final class MonitorEngine: ObservableObject {
             .store(in: &bag)
 
         let center = NotificationCenter.default
+        center.addObserver(forName: .stopMonitoring, object: nil, queue: .main) { [weak self] _ in
+            MainActor.assumeIsolated { self?.pause(why: "lock screen button") }
+        }
         center.addObserver(forName: AVAudioSession.interruptionNotification, object: nil, queue: .main) { [weak self] note in
             MainActor.assumeIsolated { self?.audioInterrupted(note) }
         }
@@ -200,6 +204,38 @@ final class MonitorEngine: ObservableObject {
         NurseryAlerts.clearLoss()
         activity.update(status: .muted, enabled: false)
         MPNowPlayingInfoCenter.default().nowPlayingInfo = nil
+    }
+
+    /// The parent turned the monitor off: "Ukončit hlídání" in the app or on the lock screen.
+    @Published private(set) var paused = false
+
+    func pause(why: String) {
+        guard !paused else { return }
+        Log.shared.add("monitoring off: \(why)")
+        paused = true
+        suspend()
+    }
+
+    func unpause() {
+        guard paused else { return }
+        paused = false
+        resume()
+    }
+
+    /// The user closed the app (swiped it away). Nothing may look as if it still watches:
+    /// the Live Activity goes at once, and the "stopped watching" alarm is not needed, because
+    /// the user stopped it. When iOS itself ends the app, this does not run, and the alarm fires.
+    func appWillTerminate() {
+        Log.shared.add("app closed by the user")
+        NurseryAlerts.disarmWatchdog()
+        NurseryAlerts.clearLoss()
+        MPNowPlayingInfoCenter.default().nowPlayingInfo = nil
+        let done = DispatchSemaphore(value: 0)
+        Task.detached {
+            for a in Activity<NurseryActivityAttributes>.activities { await a.end(nil, dismissalPolicy: .immediate) }
+            done.signal()
+        }
+        _ = done.wait(timeout: .now() + 1.5)       // iOS gives the app a few seconds here.
     }
 
     func resume() {

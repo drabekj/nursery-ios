@@ -56,6 +56,7 @@ class MainActivity : ComponentActivity() {
             Settings.unitCode.value = "482913"
             if (App.demoScreen == "wizard-remote") Settings.source.value = Settings.Source.PHONE
             if (App.demoScreen == "wizard-camera") Settings.rtspBrand.value = Settings.CameraBrand.TAPO
+            if (App.demoScreen == "paused") Monitor.paused.value = true
         }
         // The demo shows the wizard only for its own screens. Otherwise: until it is done once.
         wizardOpen = if (App.demo) App.demoScreen.startsWith("wizard") else !Settings.onboarded.value
@@ -75,7 +76,7 @@ class MainActivity : ComponentActivity() {
             }
             // The monitor waits while the wizard runs: its connection test needs the camera to itself.
             LaunchedEffect(role, wizardOpen) {
-                if (role == Settings.Role.PARENT && !wizardOpen) ParentService.start(this@MainActivity)
+                if (role == Settings.Role.PARENT && !wizardOpen && !Monitor.paused.value) ParentService.start(this@MainActivity)
                 else ParentService.stop(this@MainActivity)
             }
             LaunchedEffect(Unit) {

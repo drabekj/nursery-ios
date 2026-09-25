@@ -1,4 +1,5 @@
 import ActivityKit
+import AppIntents
 import SwiftUI
 import WidgetKit
 
@@ -59,10 +60,18 @@ struct NurseryLiveActivity: Widget {
                         .padding(.trailing, 4)
                 }
                 DynamicIslandExpandedRegion(.bottom) {
-                    Label(status.title, systemImage: status.symbol)
-                        .foregroundStyle(status.color)
-                        .font(.system(.subheadline, design: .rounded))
-                        .padding(.horizontal, 4)
+                    HStack {
+                        Label(status.title, systemImage: status.symbol)
+                            .foregroundStyle(status.color)
+                            .font(.system(.subheadline, design: .rounded))
+                        Spacer()
+                        Button(intent: StopMonitoringIntent()) {
+                            Label("Ukončit", systemImage: "stop.fill").font(.system(.caption, design: .rounded).weight(.semibold))
+                        }
+                        .buttonStyle(.bordered)
+                        .tint(moon)
+                    }
+                    .padding(.horizontal, 4)
                 }
             } compactLeading: {
                 Image(systemName: status.symbol).foregroundStyle(status.color)
@@ -100,13 +109,17 @@ private struct LockScreenView: View {
                     .foregroundStyle(status.hearsRoom ? .white.opacity(0.7) : status.color)
             }
             Spacer()
-            VStack(alignment: .trailing, spacing: 2) {
-                Text("od")
-                    .font(.system(.caption, design: .rounded))
-                    .foregroundStyle(.white.opacity(0.5))
-                Text(started, format: .dateTime.hour().minute())
-                    .font(.system(.title3, design: .rounded).weight(.semibold).monospacedDigit())
+            VStack(alignment: .trailing, spacing: 6) {
+                Text("od \(started.formatted(.dateTime.hour().minute().locale(Locale(identifier: "cs_CZ"))))")
+                    .font(.system(.subheadline, design: .rounded).weight(.semibold).monospacedDigit())
                     .foregroundStyle(.white.opacity(0.85))
+                // The clear way to stop, right where the parent sees that it runs.
+                Button(intent: StopMonitoringIntent()) {
+                    Label("Ukončit", systemImage: "stop.fill")
+                        .font(.system(.caption, design: .rounded).weight(.semibold))
+                }
+                .buttonStyle(.bordered)
+                .tint(moon)
             }
         }
         .padding(16)

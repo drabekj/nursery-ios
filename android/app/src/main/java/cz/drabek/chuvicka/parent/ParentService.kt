@@ -34,7 +34,7 @@ class ParentService : Service() {
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
         if (intent?.action == ACTION_STOP) {
-            Monitor.setMode(SoundMode.OFF)
+            Monitor.paused.value = true
             stopSelf()
             return START_NOT_STICKY
         }
@@ -72,6 +72,13 @@ class ParentService : Service() {
             .setContentIntent(open)
             .addAction(0, "Ukončit hlídání", stop)
             .build()
+    }
+
+    /** Swiped away from the recent apps: the user closed Chůvička, so it stops watching. */
+    override fun onTaskRemoved(rootIntent: Intent?) {
+        cz.drabek.chuvicka.Log.add("app closed by the user")
+        stopSelf()                       // The next start of the app watches again, as on the iPhone.
+        super.onTaskRemoved(rootIntent)
     }
 
     override fun onDestroy() {

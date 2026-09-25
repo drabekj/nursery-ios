@@ -59,6 +59,8 @@ object Monitor {
     val viaTailscale = MutableStateFlow(false)
     /** The address of the phone at the baby now, when Bonjour does not find it (away from home). */
     @Volatile private var babyDirect: Pair<String, Int>? = null
+    /** The parent turned the monitor off: in the app, in the notification, or by closing the app. */
+    val paused = MutableStateFlow(false)
     /** Night mode: the picture is not needed. */
     val night = MutableStateFlow(false)
 

@@ -148,6 +148,13 @@ class BabyService : LifecycleService() {
         getSystemService(android.app.NotificationManager::class.java).notify(2, notification(parents))
     }
 
+    /** Swiped away from the recent apps: the user closed Chůvička, so it stops sending. */
+    override fun onTaskRemoved(rootIntent: Intent?) {
+        Log.add("app closed by the user")
+        stopSelf()
+        super.onTaskRemoved(rootIntent)
+    }
+
     override fun onDestroy() {
         timer?.cancel()
         registration?.let { try { nsd?.unregisterService(it) } catch (_: Exception) {} }

@@ -42,6 +42,11 @@ struct MonitorView: View {
                     .transition(.opacity)
                     .zIndex(5)
             }
+            if engine.paused {
+                PausedView { withAnimation(.easeInOut(duration: 0.4)) { engine.unpause() } }
+                    .transition(.opacity)
+                    .zIndex(6)
+            }
         }
         .overlay(alignment: .top) { toastView }
         .sheet(item: $sheet) { s in
@@ -190,6 +195,10 @@ struct MonitorView: View {
                 Button { sheet = .settings } label: { Label("Nastavení", systemImage: "gearshape") }
                 Divider()
                 Button { engine.reconnect(why: "menu") } label: { Label("Znovu připojit", systemImage: "arrow.clockwise") }
+                Button(role: .destructive) {
+                    night = false
+                    withAnimation(.easeInOut(duration: 0.4)) { engine.pause(why: "menu") }
+                } label: { Label("Ukončit hlídání", systemImage: "stop.circle") }
             } label: {
                 Image(systemName: "ellipsis")
                     .accessibilityLabel("Další")
@@ -274,6 +283,7 @@ struct MonitorView: View {
         case "settings": sheet = .settings
         case "help": sheet = .help
         case "alerts": askAlerts = true
+        case "paused": engine.pause(why: "demo")
         default: break
         }
     }
@@ -377,5 +387,38 @@ struct AlertOffer: View {
         }
         .padding(14)
         .glass(in: RoundedRectangle(cornerRadius: 22, style: .continuous))
+    }
+}
+
+/// The monitor is off. It says so plainly, and one button starts it again.
+struct PausedView: View {
+    let resume: () -> Void
+
+    var body: some View {
+        VStack(spacing: 18) {
+            Spacer()
+            Image(systemName: "moon.zzz.fill")
+                .font(.system(size: 64))
+                .foregroundStyle(Theme.accent)
+            Text("Hlídání je vypnuté")
+                .font(.system(.largeTitle, design: .rounded).weight(.bold))
+                .multilineTextAlignment(.center)
+            Text("Chůvička teď neposlouchá a nic neukazuje na zamčené obrazovce. Můžete ji klidně zavřít.")
+                .font(.body)
+                .foregroundStyle(.secondary)
+                .multilineTextAlignment(.center)
+                .padding(.horizontal, 32)
+            Spacer()
+            Button(action: resume) {
+                Text("Znovu hlídat").font(.headline).foregroundStyle(.black)
+                    .frame(maxWidth: .infinity, minHeight: 58)
+                    .background(Theme.moon, in: RoundedRectangle(cornerRadius: 20, style: .continuous))
+            }
+            .buttonStyle(PressScale())
+            .padding(.horizontal, 24)
+            .padding(.bottom, 24)
+        }
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
+        .background(Theme.skyTop.ignoresSafeArea())
     }
 }

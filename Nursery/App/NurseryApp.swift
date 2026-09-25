@@ -1,7 +1,14 @@
 import SwiftUI
 
+/// iOS tells the app delegate when the user closes the app.
+final class AppDelegate: NSObject, UIApplicationDelegate {
+    static var onTerminate: (() -> Void)?
+    func applicationWillTerminate(_ application: UIApplication) { Self.onTerminate?() }
+}
+
 @main
 struct NurseryApp: App {
+    @UIApplicationDelegateAdaptor(AppDelegate.self) private var appDelegate
     @StateObject private var settings: Settings
     @StateObject private var engine: MonitorEngine
     @StateObject private var camera: CameraControl
@@ -57,6 +64,7 @@ struct NurseryApp: App {
                     started = true
                     battery.start()
                     engine.snapshotProvider = { [camera] in await camera.snapshot() }
+                    AppDelegate.onTerminate = { [engine] in MainActor.assumeIsolated { engine.appWillTerminate() } }
                     // The phone at the baby, or the guide still open: the monitor waits.
                     if settings.role == .baby || !settings.onboarded {
                         engine.suspend()

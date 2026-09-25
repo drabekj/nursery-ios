@@ -69,6 +69,7 @@ jobs:
           for s in wizard wizard-role wizard-source wizard-pair wizard-camera wizard-test wizard-remote wizard-baby; do shot "$s" "$s" light; done
           shot main-dark main dark
           shot sound-dark sound dark
+          shot paused paused light
           shot muted muted light
           shot volume volume light
           shot baby baby light
