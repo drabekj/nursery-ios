@@ -1,3 +1,4 @@
+import CryptoKit
 import Foundation
 import Network
 
@@ -17,7 +18,9 @@ final class RTSPClient: @unchecked Sendable {
             case .unreachable(let why): return "Server neodpovídá (\(why))."
             case .closed: return "Server ukončil spojení."
             case .timeout(let what): return "Žádná odpověď na \(what)."
-            case .status(401, _): return "Nesprávný párovací kód. Zadejte kód z telefonu u miminka."
+            case .status(401, "pairing"): return "Nesprávný párovací kód. Zadejte kód z telefonu u miminka."
+            case .status(401, "login"): return "Kamera chce přihlášení. Zadejte uživatele a heslo kamery."
+            case .status(401, _): return "Kamera odmítla uživatele nebo heslo."
             case .status(let code, let reason): return "Server odpověděl \(code) \(reason)."
             case .noUsableTrack: return "Stream nemá video H.264 ani zvuk G.711."
             case .badURL: return "Adresa streamu není platná."
@@ -61,11 +64,63 @@ final class RTSPClient: @unchecked Sendable {
     var serverAddresses: [String] { queue.sync { reported } }
 
     init(url: String, endpoint: NWEndpoint? = nil) throws {
-        guard let u = URLComponents(string: url), u.scheme == "rtsp", let host = u.host else { throw Failure.badURL }
-        self.url = url
+        guard var u = URLComponents(string: url), u.scheme == "rtsp", let host = u.host else { throw Failure.badURL }
+        // The user and the password leave the URL. They go only in the Authorization header,
+        // hashed (Digest), after the camera asks for them.
+        user = u.user
+        password = u.password
+        u.user = nil
+        u.password = nil
+        self.url = u.string ?? url
         self.host = host
         self.port = UInt16(u.port ?? 554)
         self.endpoint = endpoint
+    }
+
+    // MARK: Login (RFC 2617): IP cameras such as Tapo, Hikvision and Dahua ask for it
+
+    private let user: String?
+    private let password: String?
+    private var challenge: [String: String]?        // The fields of WWW-Authenticate, and "scheme".
+    private var nonceCount = 0
+
+    private static func md5(_ s: String) -> String {
+        Insecure.MD5.hash(data: Data(s.utf8)).map { String(format: "%02x", $0) }.joined()
+    }
+
+    /// `Digest realm="x", nonce="y", qop="auth"` to its fields.
+    private static func parseChallenge(_ header: String) -> [String: String] {
+        var fields: [String: String] = ["scheme": header.split(separator: " ").first.map { $0.lowercased() } ?? ""]
+        let pattern = try! NSRegularExpression(pattern: #"(\w+)=(?:"([^"]*)"|([^,\s]*))"#)
+        let ns = header as NSString
+        for m in pattern.matches(in: header, range: NSRange(location: 0, length: ns.length)) {
+            let key = ns.substring(with: m.range(at: 1)).lowercased()
+            let value = m.range(at: 2).location != NSNotFound ? ns.substring(with: m.range(at: 2)) : ns.substring(with: m.range(at: 3))
+            fields[key] = value
+        }
+        return fields
+    }
+
+    /// The Authorization header for one request. The caller is on `queue`.
+    private func authorization(method: String, uri: String) -> String? {
+        guard let c = challenge, let user, let password else { return nil }
+        if c["scheme"] == "basic" {
+            return "Basic " + Data("\(user):\(password)".utf8).base64EncodedString()
+        }
+        let realm = c["realm"] ?? "", nonce = c["nonce"] ?? ""
+        let ha1 = Self.md5("\(user):\(realm):\(password)")
+        let ha2 = Self.md5("\(method):\(uri)")
+        var header = "Digest username=\"\(user)\", realm=\"\(realm)\", nonce=\"\(nonce)\", uri=\"\(uri)\""
+        if let qop = c["qop"], qop.split(separator: ",").contains(where: { $0.trimmingCharacters(in: .whitespaces) == "auth" }) {
+            nonceCount += 1
+            let nc = String(format: "%08x", nonceCount)
+            let cnonce = String(format: "%08x", UInt32.random(in: 0...UInt32.max))
+            header += ", qop=auth, nc=\(nc), cnonce=\"\(cnonce)\", response=\"\(Self.md5("\(ha1):\(nonce):\(nc):\(cnonce):auth:\(ha2)"))\""
+        } else {
+            header += ", response=\"\(Self.md5("\(ha1):\(nonce):\(ha2)"))\""
+        }
+        if let opaque = c["opaque"] { header += ", opaque=\"\(opaque)\"" }
+        return header
     }
 
     // MARK: The public steps
@@ -208,14 +263,32 @@ final class RTSPClient: @unchecked Sendable {
     // MARK: The requests
 
     private func request(_ method: String, _ uri: String, _ headers: [String: String] = [:]) async throws -> Response {
+        let r = try await exchange(method, uri, headers)
+        if (200..<300).contains(r.status) { return r }
+        if r.status == 401 {
+            // The phone at the baby: a wrong pairing code. A camera: it asks for the login, one time.
+            if endpoint != nil { throw Failure.status(401, "pairing") }
+            let alreadyTried = queue.sync { challenge != nil }
+            guard user != nil, !alreadyTried, let header = r.headers["www-authenticate"] else {
+                throw Failure.status(401, user == nil ? "login" : "rejected")
+            }
+            queue.sync { challenge = Self.parseChallenge(header) }
+            let again = try await exchange(method, uri, headers)
+            if (200..<300).contains(again.status) { return again }
+            throw Failure.status(again.status, again.status == 401 ? "rejected" : again.reason)
+        }
+        throw Failure.status(r.status, r.reason)
+    }
+
+    /// One request and its answer, of any status.
+    private func exchange(_ method: String, _ uri: String, _ headers: [String: String]) async throws -> Response {
         try await withCheckedThrowingContinuation { (cont: CheckedContinuation<Response, Error>) in
             queue.async {
                 guard !self.closed else { cont.resume(throwing: Failure.closed); return }
                 let id = self.send(method, uri, headers)
                 self.pending[id] = { result in
                     switch result {
-                    case .success(let r) where (200..<300).contains(r.status): cont.resume(returning: r)
-                    case .success(let r): cont.resume(throwing: Failure.status(r.status, r.reason))
+                    case .success(let r): cont.resume(returning: r)
                     case .failure(let e): cont.resume(throwing: e)
                     }
                 }
@@ -235,6 +308,7 @@ final class RTSPClient: @unchecked Sendable {
         cseq += 1
         var text = "\(method) \(uri) RTSP/1.0\r\nCSeq: \(cseq)\r\nUser-Agent: Nursery/1.0\r\n"
         if let session { text += "Session: \(session)\r\n" }
+        if let auth = authorization(method: method, uri: uri) { text += "Authorization: \(auth)\r\n" }
         for (k, v) in headers { text += "\(k): \(v)\r\n" }
         text += "\r\n"
         connection?.send(content: Data(text.utf8), completion: .contentProcessed { _ in })
