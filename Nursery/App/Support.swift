@@ -1,6 +1,7 @@
 import Combine
 import Foundation
 import os
+import UIKit
 
 /// The last 200 events, for the diagnosis screen. The telephone gives no console,
 /// so this list is the only way to see why the sound stopped at 3 a.m.
@@ -36,6 +37,14 @@ final class Settings: ObservableObject {
         var decibels: Float { switch self { case .normal: 0; case .loud: 12; case .max: 20 } }
     }
 
+    /// The level at which a sound counts as an event, for the activity and the alerts.
+    enum Sensitivity: String, CaseIterable, Identifiable {
+        case low, medium, high
+        var id: String { rawValue }
+        var title: String { switch self { case .low: "Only loud crying"; case .medium: "Crying and fussing"; case .high: "Every small sound" } }
+        var threshold: Float { switch self { case .low: 0.68; case .medium: 0.52; case .high: 0.38 } }
+    }
+
     enum Quality: String, CaseIterable, Identifiable {
         case high, low
         var id: String { rawValue }
@@ -50,6 +59,8 @@ final class Settings: ObservableObject {
     @Published var keepAwake: Bool { didSet { d.set(keepAwake, forKey: "keepAwake") } }
     @Published var liveActivity: Bool { didSet { d.set(liveActivity, forKey: "liveActivity") } }
     @Published var alertOnLoss: Bool { didSet { d.set(alertOnLoss, forKey: "alertOnLoss") } }
+    @Published var alertOnSound: Bool { didSet { d.set(alertOnSound, forKey: "alertOnSound") } }
+    @Published var sensitivity: Sensitivity { didSet { d.set(sensitivity.rawValue, forKey: "sensitivity") } }
 
     init() {
         host = d.string(forKey: "host") ?? "192.168.0.136"
@@ -58,6 +69,8 @@ final class Settings: ObservableObject {
         keepAwake = d.object(forKey: "keepAwake") as? Bool ?? true
         liveActivity = d.object(forKey: "liveActivity") as? Bool ?? true
         alertOnLoss = d.object(forKey: "alertOnLoss") as? Bool ?? true
+        alertOnSound = d.object(forKey: "alertOnSound") as? Bool ?? false
+        sensitivity = Sensitivity(rawValue: d.string(forKey: "sensitivity") ?? "") ?? .medium
     }
 
     var trimmedHost: String { host.trimmingCharacters(in: .whitespacesAndNewlines) }
@@ -120,6 +133,23 @@ final class CameraControl: ObservableObject {
               let m = re.firstMatch(in: text, range: NSRange(text.startIndex..., in: text)),
               let r = Range(m.range(at: 1), in: text) else { return nil }
         return String(text[r])
+    }
+
+    /// One full-size frame from go2rtc, to save or to share.
+    func snapshot() async -> UIImage? {
+        if MonitorEngine.isDemo { return UIImage(named: "DemoFrame") }
+        let src = settings.quality == .high ? "nursery" : "nursery_sd"
+        guard let url = URL(string: "http://\(settings.trimmedHost):1984/api/frame.jpeg?src=\(src)") else { return nil }
+        var req = URLRequest(url: url)
+        req.timeoutInterval = 8          // go2rtc waits for a keyframe.
+        do {
+            let (data, response) = try await session.data(for: req)
+            guard (response as? HTTPURLResponse)?.statusCode == 200 else { return nil }
+            return UIImage(data: data)
+        } catch {
+            Log.shared.add("snapshot failed: \(error.localizedDescription)")
+            return nil
+        }
     }
 
     func move(_ direction: Direction) async -> Bool {

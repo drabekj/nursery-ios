@@ -16,6 +16,21 @@ final class MonitorEngine: ObservableObject {
     enum Connection: Equatable { case idle, connecting, live, retrying(String) }
     typealias SoundStatus = NurseryActivityAttributes.Status
 
+    /// Live: you hear the room. Silent: you hear nothing, and a sound gives a notification.
+    /// Off: no sound. In the background, Live and Silent keep the app awake.
+    enum SoundMode: String, CaseIterable, Identifiable {
+        case live, silent, off
+        var id: String { rawValue }
+        var title: String { switch self { case .live: "Live sound"; case .silent: "Silent, alert on sound"; case .off: "Off" } }
+        var symbol: String { switch self { case .live: "speaker.wave.2.fill"; case .silent: "bell.badge.fill"; case .off: "speaker.slash.fill" } }
+    }
+
+    /// The one state that the screen shows. It joins the connection and the picture.
+    enum Overall: Equatable { case live, soundOnly, connecting, reconnecting, offline(String) }
+
+    /// The demo mode shows a still picture and a fake sound. Start the app with `-demo YES`.
+    static let isDemo = UserDefaults.standard.bool(forKey: "demo")
+
     @Published private(set) var connection: Connection = .idle
     @Published private(set) var pictureLive = false
     @Published private(set) var soundStatus: SoundStatus = .connecting
@@ -26,16 +41,30 @@ final class MonitorEngine: ObservableObject {
     @Published private(set) var videoSize = CGSize(width: 16, height: 9)
     @Published private(set) var audioOnly = false
     @Published private(set) var delayMilliseconds = 0
-    @Published var listening: Bool {
+    @Published private(set) var failures = 0
+    @Published var mode: SoundMode {
         didSet {
-            UserDefaults.standard.set(listening, forKey: "listening")
-            applyListening()
+            guard mode != oldValue else { return }
+            UserDefaults.standard.set(mode.rawValue, forKey: "soundMode")
+            if mode != .off { lastOnMode = mode }
+            applyMode()
+        }
+    }
+    /// The mode to use when the sound goes on again.
+    private(set) var lastOnMode: SoundMode = .live
+
+    var overall: Overall {
+        switch connection {
+        case .live: return audioOnly ? .soundOnly : .live
+        case .idle, .connecting: return .connecting
+        case .retrying(let why): return failures >= 2 ? .offline(why) : .reconnecting
         }
     }
 
     let settings: Settings
     let videoView: VideoLayerView
     let pip = PictureInPicture()
+    let activityLog = SoundActivity()
 
     private struct Shared {
         var lastAudio = Date.distantPast
@@ -59,6 +88,7 @@ final class MonitorEngine: ObservableObject {
     private var everHeard = false
     private var lostSince: Date?
     private var alerted = false
+    private var lastSoundAlert = Date.distantPast
     private var ticks = 0
     private var timer: Timer?
     private let pathMonitor = NWPathMonitor()
@@ -66,7 +96,8 @@ final class MonitorEngine: ObservableObject {
 
     init(settings: Settings) {
         self.settings = settings
-        listening = UserDefaults.standard.object(forKey: "listening") as? Bool ?? true
+        mode = SoundMode(rawValue: UserDefaults.standard.string(forKey: "soundMode") ?? "") ?? .live
+        lastOnMode = mode == .off ? .live : mode
         let view = VideoLayerView()
         videoView = view
         renderer = VideoRenderer(layer: view.displayLayer)
@@ -78,8 +109,12 @@ final class MonitorEngine: ObservableObject {
         pip.attach(to: videoView.displayLayer)
         pip.onActiveChange = { [weak self] active in self?.pictureInPictureChanged(active) }
 
-        nowPlaying.onPlay = { [weak self] in self?.listening = true }
-        nowPlaying.onPause = { [weak self] in self?.listening = false }
+        nowPlaying.onPlay = { [weak self] in self?.soundOn() }
+        nowPlaying.onPause = { [weak self] in self?.mode = .off }
+
+        activityLog.threshold = settings.sensitivity.threshold
+        activityLog.onEventStart = { [weak self] event in self?.soundEventStarted(event) }
+        settings.$sensitivity.sink { [weak self] s in self?.activityLog.threshold = s.threshold }.store(in: &bag)
 
         settings.$loudness.dropFirst().sink { [weak self] l in self?.audio.setGain(decibels: l.decibels) }.store(in: &bag)
         settings.$quality.dropFirst().removeDuplicates().sink { [weak self] _ in
@@ -108,21 +143,46 @@ final class MonitorEngine: ObservableObject {
             }
         }
         pathMonitor.start(queue: DispatchQueue(label: "nursery.path"))
+
+        // "Hey Siri, listen to the nursery" (see Intents.swift).
+        center.addObserver(forName: .nurseryListen, object: nil, queue: .main) { [weak self] _ in
+            MainActor.assumeIsolated { self?.mode = .live }
+        }
     }
+
+    func soundOn() { mode = lastOnMode }
 
     // MARK: The life cycle
 
     func start() {
-        activateAudioSession()
-        nowPlaying.configure()
-        applyListening()
         if timer == nil {
             timer = Timer.scheduledTimer(withTimeInterval: 0.1, repeats: true) { [weak self] _ in
                 MainActor.assumeIsolated { self?.tick() }
             }
         }
-        if listening, settings.alertOnLoss { LossAlert.requestPermission() }
+        if Self.isDemo { startDemo(); return }
+        activateAudioSession()
+        nowPlaying.configure()
+        applyMode()
         connect()
+    }
+
+    private func startDemo() {
+        connection = .live
+        everHeard = true
+        activityLog.loadDemo()
+        if let image = UIImage(named: "DemoFrame") { renderer.showStill(image) }
+        shared.withLock { $0.lastVideo = .distantFuture; $0.lastAudio = .distantFuture; $0.lastPacket = .distantFuture }
+    }
+
+    /// A fake room for the demo: a quiet hiss, and a short cry each 12 seconds.
+    private func demoLevel() -> Float {
+        let t = Date().timeIntervalSince1970
+        let phase = t.truncatingRemainder(dividingBy: 12)
+        let noise = Float.random(in: 0.06...0.16)
+        guard phase > 8.5 else { return noise }
+        let cry = Float(abs(sin(t * 5.5))) * 0.55 + 0.3
+        return max(noise, cry)
     }
 
     func reconnect(why: String) {
@@ -155,7 +215,7 @@ final class MonitorEngine: ObservableObject {
     private func enterBackgroundMode() {
         guard !isForeground, !pip.isActive else { return }
         shared.withLock { $0.renderVideo = false }
-        if listening {
+        if mode != .off {
             if !audioOnly { reconnect(why: "background: sound only") }
         } else {
             // No sound and no picture: nothing to do. Close the stream.
@@ -177,9 +237,10 @@ final class MonitorEngine: ObservableObject {
 
     // MARK: The connection
 
-    private var wantsAudioOnly: Bool { !isForeground && !pip.isActive && listening }
+    private var wantsAudioOnly: Bool { !isForeground && !pip.isActive && mode != .off }
 
     private func stopClient() {
+        guard !Self.isDemo else { return }
         retryTask?.cancel()
         generation += 1          // An onClose from the old client is now stale. It does not reconnect.
         client?.stop()
@@ -187,6 +248,7 @@ final class MonitorEngine: ObservableObject {
     }
 
     private func connect() {
+        guard !Self.isDemo else { return }
         stopClient()
         generation += 1
         let gen = generation
@@ -268,6 +330,7 @@ final class MonitorEngine: ObservableObject {
         Log.shared.add("playing: \(names)")
         connection = .live
         retryDelay = 1
+        failures = 0
     }
 
     private func connectionEnded(_ gen: Int, _ error: Error?) {
@@ -276,6 +339,7 @@ final class MonitorEngine: ObservableObject {
         let message = (error as? LocalizedError)?.errorDescription ?? error?.localizedDescription ?? "The connection closed."
         Log.shared.add("connection ended: \(message)")
         connection = .retrying(message)
+        failures += 1
         pictureLive = false
         let delay = retryDelay
         retryDelay = min(retryDelay * 2, 8)
@@ -300,17 +364,34 @@ final class MonitorEngine: ObservableObject {
         }
     }
 
-    private func applyListening() {
-        if listening {
+    private func applyMode() {
+        guard !Self.isDemo else { updateStatus(force: true); return }
+        switch mode {
+        case .live, .silent:
             activateAudioSession()
             audio.start()
+            // Silent mode plays the stream at zero volume. The app stays awake and hears the room.
+            audio.setMuted(mode == .silent)
             alerted = false
-        } else {
+            if mode == .silent { NurseryAlerts.requestPermission() }
+        case .off:
             audio.stop()
-            LossAlert.clear()
+            activityLog.interrupt()
+            NurseryAlerts.clearLoss()
         }
         updateStatus(force: true)
         if !isForeground { enterBackgroundMode() }
+        if !isForeground, mode != .off, client == nil { reconnect(why: "sound on in the background") }
+    }
+
+    /// A sound starts in the room. In silent mode, or with the loud-sound alert on, tell the parent.
+    private func soundEventStarted(_ event: SoundActivity.Event) {
+        Log.shared.add(String(format: "sound event, level %.2f", event.peak))
+        let wanted = mode == .silent || (mode == .live && settings.alertOnSound)
+        guard wanted, UIApplication.shared.applicationState != .active,
+              Date().timeIntervalSince(lastSoundAlert) > 60 else { return }
+        lastSoundAlert = Date()
+        NurseryAlerts.postSound(at: event.start)
     }
 
     private func audioInterrupted(_ note: Notification) {
@@ -321,10 +402,11 @@ final class MonitorEngine: ObservableObject {
             Log.shared.add("sound interrupted (for example a call)")
         case .ended:
             Log.shared.add("sound interruption ended")
-            if listening {
+            if mode != .off {
                 audio.stop()
                 activateAudioSession()
                 audio.start()
+                audio.setMuted(mode == .silent)
             }
         @unknown default:
             break
@@ -343,7 +425,8 @@ final class MonitorEngine: ObservableObject {
         }
 
         // Fast attack, slow release. This is how a VU meter moves.
-        let target = listening ? s.peak : 0
+        let raw = Self.isDemo ? demoLevel() : s.peak
+        let target = mode != .off ? raw : 0
         let smoothed = target > level ? target : level * 0.82 + target * 0.18
         if isForeground || pip.isActive {
             level = smoothed
@@ -351,6 +434,10 @@ final class MonitorEngine: ObservableObject {
             history.append(smoothed)
         } else {
             level = smoothed        // The Live Activity still needs it.
+        }
+
+        if mode != .off, soundStatus == .listening || soundStatus == .silent {
+            activityLog.feed(level: smoothed, at: now)
         }
 
         guard ticks % 5 == 0 else { return }       // The rest runs at 2 Hz.
@@ -369,8 +456,8 @@ final class MonitorEngine: ObservableObject {
     private func updateStatus(force: Bool, lastAudio: Date? = nil) {
         let heardRecently = Date().timeIntervalSince(lastAudio ?? shared.withLock { $0.lastAudio }) < 3
         let status: SoundStatus
-        if !listening { status = .muted }
-        else if heardRecently { status = .listening }
+        if mode == .off { status = .muted }
+        else if heardRecently { status = mode == .silent ? .silent : .listening }
         else if !everHeard { status = .connecting }
         else { status = .lost }
 
@@ -385,15 +472,16 @@ final class MonitorEngine: ObservableObject {
             if lostSince == nil { lostSince = Date() }
             if !alerted, settings.alertOnLoss, let since = lostSince, Date().timeIntervalSince(since) > 20 {
                 alerted = true
-                LossAlert.post()
+                NurseryAlerts.postLoss()
             }
         } else {
             lostSince = nil
-            if alerted, status == .listening { alerted = false; LossAlert.clear() }
+            if alerted, status == .listening || status == .silent { alerted = false; NurseryAlerts.clearLoss() }
         }
 
         let bucket = min(4, Int(level * 5))
-        activity.update(status: status, level: status == .listening ? bucket : 0,
-                        enabled: settings.liveActivity && listening)
+        guard !Self.isDemo else { return }
+        activity.update(status: status, level: status == .listening || status == .silent ? bucket : 0,
+                        enabled: settings.liveActivity && mode != .off)
     }
 }

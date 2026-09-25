@@ -18,14 +18,17 @@ private extension NurseryActivityAttributes.Status {
     var color: Color {
         switch self {
         case .listening: calm
+        case .silent: moon
         case .connecting: warn
         case .lost: alarm
         case .muted: .gray
         }
     }
+    var hearsRoom: Bool { self == .listening || self == .silent }
     var symbol: String {
         switch self {
         case .listening: "ear.fill"
+        case .silent: "bell.badge.fill"
         case .connecting: "antenna.radiowaves.left.and.right"
         case .lost: "exclamationmark.triangle.fill"
         case .muted: "speaker.slash.fill"
@@ -67,7 +70,7 @@ struct NurseryLiveActivity: Widget {
                         .padding(.leading, 4)
                 }
                 DynamicIslandExpandedRegion(.trailing) {
-                    LevelBars(level: status == .listening ? context.state.level : -1, color: status.color, height: 22)
+                    LevelBars(level: status.hearsRoom ? context.state.level : -1, color: status.color, height: 22)
                         .padding(.trailing, 4)
                 }
                 DynamicIslandExpandedRegion(.bottom) {
@@ -85,7 +88,7 @@ struct NurseryLiveActivity: Widget {
             } compactLeading: {
                 Image(systemName: status.symbol).foregroundStyle(status.color)
             } compactTrailing: {
-                LevelBars(level: status == .listening ? context.state.level : -1, color: status.color, height: 14)
+                LevelBars(level: status.hearsRoom ? context.state.level : -1, color: status.color, height: 14)
             } minimal: {
                 Image(systemName: status.symbol).foregroundStyle(status.color)
             }
@@ -115,10 +118,10 @@ private struct LockScreenView: View {
                     .foregroundStyle(.white)
                 Text(stale ? "The app stopped. Open it again." : status.title)
                     .font(.system(.subheadline, design: .rounded))
-                    .foregroundStyle(status == .listening ? .white.opacity(0.7) : status.color)
+                    .foregroundStyle(status.hearsRoom ? .white.opacity(0.7) : status.color)
             }
             Spacer()
-            if status == .listening {
+            if status.hearsRoom {
                 LevelBars(level: state.level, color: status.color, height: 26)
             } else {
                 Text(state.since, style: .timer)

@@ -30,6 +30,7 @@ enum Theme {
     static func color(for status: NurseryActivityAttributes.Status) -> Color {
         switch status {
         case .listening: calm
+        case .silent: moon
         case .connecting: warn
         case .lost: alarm
         case .muted: secondaryText
@@ -39,6 +40,7 @@ enum Theme {
     static func symbol(for status: NurseryActivityAttributes.Status) -> String {
         switch status {
         case .listening: "ear.fill"
+        case .silent: "bell.badge.fill"
         case .connecting: "antenna.radiowaves.left.and.right"
         case .lost: "exclamationmark.triangle.fill"
         case .muted: "speaker.slash.fill"
@@ -78,8 +80,7 @@ struct GlassCircleButton: View {
                 .font(.system(size: size * 0.42, weight: .semibold))
                 .foregroundStyle(tint)
                 .frame(width: size, height: size)
-                .background(.ultraThinMaterial, in: Circle())
-                .overlay(Circle().strokeBorder(Color.white.opacity(0.12)))
+                .glass(in: Circle(), interactive: true)
         }
         .buttonStyle(PressScale())
         .accessibilityLabel(label)

@@ -116,16 +116,51 @@ final class VideoRenderer: @unchecked Sendable {
               let sample else { return nil }
 
         // Show each frame at once. This gives the lowest delay for a live picture.
-        if let attachments = CMSampleBufferGetSampleAttachmentsArray(sample, createIfNecessary: true),
-           CFArrayGetCount(attachments) > 0 {
-            let dict = unsafeBitCast(CFArrayGetValueAtIndex(attachments, 0), to: CFMutableDictionary.self)
-            CFDictionarySetValue(dict, Unmanaged.passUnretained(kCMSampleAttachmentKey_DisplayImmediately).toOpaque(),
-                                 Unmanaged.passUnretained(kCFBooleanTrue).toOpaque())
-            if !unit.isKeyframe {
-                CFDictionarySetValue(dict, Unmanaged.passUnretained(kCMSampleAttachmentKey_NotSync).toOpaque(),
-                                     Unmanaged.passUnretained(kCFBooleanTrue).toOpaque())
-            }
-        }
+        setAttachments(sample, keyframe: unit.isKeyframe)
         return sample
+    }
+
+    private static func setAttachments(_ sample: CMSampleBuffer, keyframe: Bool) {
+        guard let attachments = CMSampleBufferGetSampleAttachmentsArray(sample, createIfNecessary: true),
+              CFArrayGetCount(attachments) > 0 else { return }
+        let dict = unsafeBitCast(CFArrayGetValueAtIndex(attachments, 0), to: CFMutableDictionary.self)
+        CFDictionarySetValue(dict, Unmanaged.passUnretained(kCMSampleAttachmentKey_DisplayImmediately).toOpaque(),
+                             Unmanaged.passUnretained(kCFBooleanTrue).toOpaque())
+        if !keyframe {
+            CFDictionarySetValue(dict, Unmanaged.passUnretained(kCMSampleAttachmentKey_NotSync).toOpaque(),
+                                 Unmanaged.passUnretained(kCFBooleanTrue).toOpaque())
+        }
+    }
+
+    /// It shows one still image. The demo mode uses it, for the screenshots.
+    func showStill(_ image: UIImage) {
+        guard let cg = image.cgImage else { return }
+        let w = cg.width, h = cg.height
+        var buffer: CVPixelBuffer?
+        let attrs: [CFString: Any] = [kCVPixelBufferCGImageCompatibilityKey: true,
+                                      kCVPixelBufferCGBitmapContextCompatibilityKey: true,
+                                      kCVPixelBufferIOSurfacePropertiesKey: [String: Any]()]
+        guard CVPixelBufferCreate(kCFAllocatorDefault, w, h, kCVPixelFormatType_32BGRA, attrs as CFDictionary, &buffer) == kCVReturnSuccess,
+              let buffer else { return }
+        CVPixelBufferLockBaseAddress(buffer, [])
+        let context = CGContext(data: CVPixelBufferGetBaseAddress(buffer), width: w, height: h, bitsPerComponent: 8,
+                                bytesPerRow: CVPixelBufferGetBytesPerRow(buffer), space: CGColorSpaceCreateDeviceRGB(),
+                                bitmapInfo: CGImageAlphaInfo.premultipliedFirst.rawValue | CGBitmapInfo.byteOrder32Little.rawValue)
+        context?.draw(cg, in: CGRect(x: 0, y: 0, width: w, height: h))
+        CVPixelBufferUnlockBaseAddress(buffer, [])
+
+        var format: CMVideoFormatDescription?
+        CMVideoFormatDescriptionCreateForImageBuffer(allocator: kCFAllocatorDefault, imageBuffer: buffer, formatDescriptionOut: &format)
+        guard let format else { return }
+        var timing = CMSampleTimingInfo(duration: .invalid, presentationTimeStamp: .zero, decodeTimeStamp: .invalid)
+        var sample: CMSampleBuffer?
+        CMSampleBufferCreateReadyWithImageBuffer(allocator: kCFAllocatorDefault, imageBuffer: buffer,
+                                                 formatDescription: format, sampleTiming: &timing, sampleBufferOut: &sample)
+        guard let sample else { return }
+        Self.setAttachments(sample, keyframe: true)
+        renderer.flush()
+        renderer.enqueue(sample)
+        let size = CGSize(width: w, height: h)
+        DispatchQueue.main.async { self.onSize?(size) }
     }
 }

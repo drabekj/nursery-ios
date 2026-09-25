@@ -109,28 +109,42 @@ final class LiveActivityController {
     }
 }
 
-// MARK: - The alert when the sound is lost
+// MARK: - The notifications
 
 @MainActor
-enum LossAlert {
-    private static let id = "nursery.sound.lost"
+enum NurseryAlerts {
+    private static let lossID = "nursery.sound.lost"
+    private static let soundID = "nursery.sound.event"
 
     static func requestPermission() {
         UNUserNotificationCenter.current().requestAuthorization(options: [.alert, .sound]) { _, _ in }
     }
 
-    static func post() {
-        let content = UNMutableNotificationContent()
-        content.title = "No sound from the nursery"
-        content.body = "The connection to the camera stopped. The app tries again."
-        content.sound = .default
-        content.interruptionLevel = .active
-        let request = UNNotificationRequest(identifier: id, content: content, trigger: nil)
-        UNUserNotificationCenter.current().add(request)
+    static func authorizationStatus() async -> UNAuthorizationStatus {
+        await UNUserNotificationCenter.current().notificationSettings().authorizationStatus
     }
 
-    static func clear() {
-        UNUserNotificationCenter.current().removeDeliveredNotifications(withIdentifiers: [id])
+    static func postLoss() {
+        post(id: lossID, title: "No sound from the nursery",
+             body: "The connection to the camera stopped. Nursery tries again by itself.")
+    }
+
+    static func clearLoss() {
+        UNUserNotificationCenter.current().removeDeliveredNotifications(withIdentifiers: [lossID])
+    }
+
+    static func postSound(at date: Date) {
+        let time = date.formatted(date: .omitted, time: .shortened)
+        post(id: soundID, title: "Sound in the nursery", body: "It started at \(time). Tap to look.")
+    }
+
+    private static func post(id: String, title: String, body: String) {
+        let content = UNMutableNotificationContent()
+        content.title = title
+        content.body = body
+        content.sound = .default
+        content.interruptionLevel = .active
+        UNUserNotificationCenter.current().add(UNNotificationRequest(identifier: id, content: content, trigger: nil))
     }
 }
 

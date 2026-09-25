@@ -11,59 +11,90 @@ struct SettingsView: View {
         NavigationStack {
             Form {
                 Section {
+                    Picker(selection: $engine.mode) {
+                        ForEach(MonitorEngine.SoundMode.allCases) { Label($0.title, systemImage: $0.symbol).tag($0) }
+                    } label: {
+                        Label("Sound", systemImage: "speaker.wave.2")
+                    }
+                    Picker(selection: $settings.loudness) {
+                        ForEach(Settings.Loudness.allCases) { Text($0.title).tag($0) }
+                    } label: {
+                        Label("Loudness", systemImage: "speaker.plus")
+                    }
+                } header: {
+                    Text("Sound")
+                } footer: {
+                    Text("Silent plays nothing, but Nursery keeps listening and alerts you when the baby makes a sound. Loud adds 12 dB and Max adds 20 dB for a quiet room; the side buttons still set the volume.")
+                }
+
+                Section {
+                    Picker(selection: $settings.sensitivity) {
+                        ForEach(Settings.Sensitivity.allCases) { Text($0.title).tag($0) }
+                    } label: {
+                        Label("Sensitivity", systemImage: "waveform.badge.magnifyingglass")
+                    }
+                    Toggle(isOn: $settings.alertOnSound) {
+                        Label("Alert on sound in Live mode", systemImage: "bell.badge")
+                    }
+                    Toggle(isOn: $settings.alertOnLoss) {
+                        Label("Alert when the sound stops", systemImage: "wifi.exclamationmark")
+                    }
+                    Toggle(isOn: $settings.liveActivity) {
+                        Label("Show on the Lock Screen", systemImage: "platter.filled.bottom.iphone")
+                    }
+                } header: {
+                    Text("Alerts")
+                } footer: {
+                    Text("Sensitivity sets what counts as a sound, for the alerts and the Activity. Alerts come only while Nursery is in the background, at most one each minute.")
+                }
+                .onChange(of: settings.alertOnSound) { _, on in if on { NurseryAlerts.requestPermission() } }
+                .onChange(of: settings.alertOnLoss) { _, on in if on { NurseryAlerts.requestPermission() } }
+
+                Section {
+                    Picker(selection: $settings.quality) {
+                        ForEach(Settings.Quality.allCases) { Text($0.title).tag($0) }
+                    } label: {
+                        Label("Quality", systemImage: "sparkles.tv")
+                    }
+                    Toggle(isOn: $settings.keepAwake) {
+                        Label("Keep the Screen On", systemImage: "sun.max")
+                    }
+                } header: {
+                    Text("Picture")
+                } footer: {
+                    Text("Only while Nursery is open. Night mode makes the screen almost black.")
+                }
+
+                Section {
                     TextField("192.168.0.136", text: $host)
                         .keyboardType(.numbersAndPunctuation)
                         .textInputAutocapitalization(.never)
                         .autocorrectionDisabled()
                         .onSubmit(applyHost)
                     if host.trimmingCharacters(in: .whitespaces) != settings.trimmedHost {
-                        Button("Connect to this address", action: applyHost)
+                        Button("Connect to This Address", action: applyHost)
                     }
                 } header: {
                     Text("Server")
                 } footer: {
-                    Text("The address of the computer that runs go2rtc. The app reads the stream from go2rtc, and never from the camera. The camera accepts only 2 connections.")
-                }
-
-                Section("Picture") {
-                    Picker("Quality", selection: $settings.quality) {
-                        ForEach(Settings.Quality.allCases) { Text($0.title).tag($0) }
-                    }
-                }
-
-                Section {
-                    Picker("Loudness", selection: $settings.loudness) {
-                        ForEach(Settings.Loudness.allCases) { Text($0.title).tag($0) }
-                    }
-                    Toggle("Alert when the sound stops", isOn: $settings.alertOnLoss)
-                        .onChange(of: settings.alertOnLoss) { _, on in if on { LossAlert.requestPermission() } }
-                    Toggle("Show on the lock screen", isOn: $settings.liveActivity)
-                } header: {
-                    Text("Sound")
-                } footer: {
-                    Text("Loud adds 12 dB and Max adds 20 dB, for a quiet room. The side buttons of the phone set the volume. The alert comes when the app hears nothing for 20 seconds.")
-                }
-
-                Section {
-                    Toggle("Keep the screen on", isOn: $settings.keepAwake)
-                } header: {
-                    Text("Screen")
-                } footer: {
-                    Text("Only while the app is open. Night mode (the moon) makes the screen almost black.")
+                    Text("The computer that runs go2rtc. Nursery reads the stream from go2rtc and never from the camera, which accepts only two connections.")
                 }
 
                 Section("Status") {
                     row("Connection", connectionText)
                     row("Sound", engine.soundStatus.title)
                     row("Sound delay", "\(engine.delayMilliseconds) ms")
-                    row("Picture", "\(Int(engine.videoSize.width))×\(Int(engine.videoSize.height))")
+                    row("Picture", "\(Int(engine.videoSize.width)) × \(Int(engine.videoSize.height))")
                     row("Camera control", camera.ptzReady ? "Ready" : "Not found")
-                    NavigationLink("Event log") { EventLogView() }
+                    NavigationLink("Event Log") { EventLogView() }
+                    Button("Reconnect Now") { engine.reconnect(why: "settings") }
+                    Button("Reload Camera Control") { Task { await camera.loadConfig() } }
                 }
 
                 Section {
-                    Button("Reconnect now") { engine.reconnect(why: "settings") }
-                    Button("Reload the camera control") { Task { await camera.loadConfig() } }
+                    row("Version", Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String ?? "–")
+                } footer: {
+                    Text("Nursery works only on your home network. No picture or sound leaves the house.")
                 }
             }
             .navigationTitle("Settings")
@@ -73,15 +104,15 @@ struct SettingsView: View {
             }
             .onAppear { host = settings.host }
         }
-        .presentationDragIndicator(.visible)
     }
 
     private var connectionText: String {
-        switch engine.connection {
-        case .idle: "Closed"
+        switch engine.overall {
+        case .live: "Live"
+        case .soundOnly: "Live (sound only)"
         case .connecting: "Connecting"
-        case .live: engine.audioOnly ? "Live (sound only)" : "Live"
-        case .retrying: "Retrying"
+        case .reconnecting: "Reconnecting"
+        case .offline: "Offline"
         }
     }
 
@@ -110,7 +141,8 @@ struct EventLogView: View {
                 Text(e.text).font(.callout)
             }
         }
-        .navigationTitle("Event log")
+        .overlay { if log.entries.isEmpty { ContentUnavailableView("No Events", systemImage: "list.bullet.rectangle") } }
+        .navigationTitle("Event Log")
         .toolbar { ShareLink(item: log.text) }
     }
 }

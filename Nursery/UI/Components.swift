@@ -136,46 +136,7 @@ struct Waveform: View {
     }
 }
 
-// MARK: - The direction pad
-
-/// Four arrows in a ring. A tap moves the camera one step. A hold repeats the step.
-struct DirectionPad: View {
-    let enabled: Bool
-    let onMove: (CameraControl.Direction) -> Void
-    var size: CGFloat = 156
-
-    var body: some View {
-        ZStack {
-            Circle()
-                .fill(.ultraThinMaterial)
-                .overlay(Circle().strokeBorder(Color.white.opacity(0.1)))
-            Circle()
-                .fill(Theme.card)
-                .frame(width: size * 0.34, height: size * 0.34)
-                .overlay(Image(systemName: "video.fill").font(.system(size: size * 0.1)).foregroundStyle(Theme.secondaryText))
-            arrow(.up, "chevron.up").offset(y: -size * 0.33)
-            arrow(.down, "chevron.down").offset(y: size * 0.33)
-            arrow(.left, "chevron.left").offset(x: -size * 0.33)
-            arrow(.right, "chevron.right").offset(x: size * 0.33)
-        }
-        .frame(width: size, height: size)
-        .opacity(enabled ? 1 : 0.4)
-        .disabled(!enabled)
-    }
-
-    private func arrow(_ d: CameraControl.Direction, _ symbol: String) -> some View {
-        RepeatButton(interval: 0.7, action: { onMove(d) }) { pressed in
-            Image(systemName: symbol)
-                .font(.system(size: size * 0.14, weight: .bold))
-                .foregroundStyle(pressed ? Theme.moon : .white)
-                .frame(width: size * 0.3, height: size * 0.3)       // At least 46 pt. It is easy to hit in the dark.
-                .background(Circle().fill(pressed ? Theme.moon.opacity(0.18) : .clear))
-                .scaleEffect(pressed ? 0.9 : 1)
-                .animation(.spring(response: 0.2, dampingFraction: 0.7), value: pressed)
-        }
-        .accessibilityLabel("Turn the camera \(d.rawValue)")
-    }
-}
+// MARK: - The repeat button
 
 /// A button that acts on the press, and again at each interval while the finger stays.
 struct RepeatButton<Label: View>: View {
@@ -211,38 +172,5 @@ struct RepeatButton<Label: View>: View {
     private func fire() {
         Haptics.tap()
         action()
-    }
-}
-
-// MARK: - The status pill
-
-struct StatusPill: View {
-    let text: String
-    let color: Color
-    var pulsing = false
-    @State private var pulse = false
-
-    var body: some View {
-        HStack(spacing: 7) {
-            Circle()
-                .fill(color)
-                .frame(width: 8, height: 8)
-                .shadow(color: color.opacity(0.8), radius: pulse ? 5 : 1)
-                .scaleEffect(pulse ? 1.25 : 1)
-            Text(text)
-                .font(.rounded(.footnote, .semibold))
-                .foregroundStyle(.white.opacity(0.92))
-                .contentTransition(.opacity)
-        }
-        .padding(.horizontal, 10)
-        .padding(.vertical, 6)
-        .background(.ultraThinMaterial, in: Capsule())
-        .onAppear { startPulse() }
-        .onChange(of: pulsing) { _, _ in startPulse() }
-    }
-
-    private func startPulse() {
-        guard pulsing else { withAnimation(.default) { pulse = false }; return }
-        withAnimation(.easeInOut(duration: 1.2).repeatForever(autoreverses: true)) { pulse = true }
     }
 }

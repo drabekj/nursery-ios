@@ -35,6 +35,11 @@ final class LiveAudioPlayer: @unchecked Sendable {
         gain = powf(10, decibels / 20)
     }
 
+    /// Silent mode: the stream plays at zero volume. The meter still works.
+    func setMuted(_ muted: Bool) {
+        player.volume = muted ? 0 : 1
+    }
+
     func start() {
         guard !running else { return }
         do {

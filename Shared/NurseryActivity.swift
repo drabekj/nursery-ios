@@ -5,11 +5,12 @@ import Foundation
 /// It shows whether the app hears the room, and how loud the room is.
 struct NurseryActivityAttributes: ActivityAttributes {
     enum Status: String, Codable, Hashable {
-        case listening, connecting, lost, muted
+        case listening, silent, connecting, lost, muted
 
         var title: String {
             switch self {
             case .listening: "Listening"
+            case .silent: "Silent · alert on sound"
             case .connecting: "Connecting…"
             case .lost: "No sound"
             case .muted: "Sound off"

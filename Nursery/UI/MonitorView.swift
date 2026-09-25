@@ -1,363 +1,322 @@
 import SwiftUI
 
+/// The main screen. It adapts to three shapes:
+/// - iPhone portrait: the picture at the top, the room below, the controls at the thumb.
+/// - Landscape: the picture fills the screen, and the controls fade.
+/// - iPad: the picture on the left, the room and the controls on the right.
 struct MonitorView: View {
     @EnvironmentObject private var engine: MonitorEngine
     @EnvironmentObject private var camera: CameraControl
     @EnvironmentObject private var settings: Settings
     @Environment(\.verticalSizeClass) private var vSize
+    @Environment(\.horizontalSizeClass) private var hSize
     @StateObject private var zoom = ZoomState()
-    @State private var showSettings = false
+    @State private var aiming = false
     @State private var night = false
+    @State private var sheet: Sheet?
+    @State private var shared: SharedImage?
     @State private var toast: String?
+    @State private var flash = false
+    @State private var askAlerts = false
+
+    enum Sheet: String, Identifiable { case settings, activity; var id: String { rawValue } }
 
     var body: some View {
         ZStack {
-            Theme.background
+            AmbientBackground(level: engine.level, status: engine.soundStatus)
             if vSize == .compact {
-                FullScreenMonitor(zoom: zoom, onMove: move)
+                FullScreenMonitor(zoom: zoom, pip: engine.pip, aiming: $aiming, actions: actions)
+            } else if hSize == .regular {
+                wideLayout
             } else {
-                portrait
+                phoneLayout
+            }
+            if flash {
+                Color.white.ignoresSafeArea().transition(.opacity).allowsHitTesting(false).zIndex(4)
             }
             if night {
-                NightView { withAnimation(.easeInOut(duration: 0.4)) { night = false } }
+                NightView(activity: engine.activityLog) { withAnimation(.easeInOut(duration: 0.5)) { night = false } }
                     .transition(.opacity)
-                    .zIndex(2)
-            }
-            if let toast {
-                Text(toast)
-                    .font(.rounded(.subheadline, .medium))
-                    .padding(.horizontal, 16).padding(.vertical, 10)
-                    .background(.ultraThinMaterial, in: Capsule())
-                    .frame(maxHeight: .infinity, alignment: .bottom)
-                    .padding(.bottom, 24)
-                    .transition(.move(edge: .bottom).combined(with: .opacity))
-                    .zIndex(3)
+                    .zIndex(5)
             }
         }
-        .sheet(isPresented: $showSettings) { SettingsView() }
+        .overlay(alignment: .top) { toastView }
+        .sheet(item: $sheet) { s in
+            switch s {
+            case .settings: SettingsView()
+            case .activity: ActivityView(activity: engine.activityLog).presentationDetents([.medium, .large])
+            }
+        }
+        .sheet(item: $shared) { item in ShareSheet(items: [item.image]).presentationDetents([.medium, .large]) }
         .statusBarHidden(night)
-    }
-
-    // MARK: Portrait
-
-    private var portrait: some View {
-        ScrollView {
-            VStack(spacing: 14) {
-                header
-                VideoCard(zoom: zoom, pip: engine.pip)
-                SoundCard()
-                if camera.ptzReady { cameraCard }
-                if camera.powerReady { powerCard }
-            }
-            .padding(.horizontal, 16)
-            .padding(.bottom, 24)
+        .persistentSystemOverlays(night ? .hidden : .automatic)
+        .onChange(of: engine.connection) { _, c in
+            if c == .live { Task { await offerAlerts() } }
         }
-        .scrollIndicators(.hidden)
-        .scrollBounceBehavior(.basedOnSize)
+        .onAppear(perform: applyDemoScreen)
     }
 
-    private var header: some View {
-        HStack(alignment: .center) {
-            VStack(alignment: .leading, spacing: 6) {
-                Text("Nursery")
-                    .font(.rounded(.largeTitle, .bold))
-                    .foregroundStyle(.white)
-                StatusPill(text: statusText, color: statusColor, pulsing: engine.soundStatus == .listening)
-            }
-            Spacer()
-            GlassCircleButton(symbol: "moon.fill", tint: Theme.moon, label: "Night mode") {
-                Haptics.tap()
-                withAnimation(.easeInOut(duration: 0.4)) { night = true }
-            }
-            GlassCircleButton(symbol: "gearshape.fill", label: "Settings") { showSettings = true }
-        }
-        .padding(.top, 8)
+    private var actions: MonitorActions {
+        MonitorActions(snapshot: snapshot, night: { enterNight() }, move: move)
     }
 
-    private var statusText: String {
-        switch engine.connection {
-        case .live where engine.audioOnly: return "Sound only"
-        case .live: return engine.pictureLive ? "Live" : "Waiting for the picture"
-        case .connecting, .idle: return "Connecting…"
-        case .retrying: return "Reconnecting…"
-        }
-    }
+    // MARK: iPhone portrait
 
-    private var statusColor: Color {
-        switch engine.connection {
-        case .live: engine.pictureLive || engine.audioOnly ? Theme.calm : Theme.warn
-        case .connecting, .idle: Theme.warn
-        case .retrying: Theme.alarm
-        }
-    }
+    private var phoneLayout: some View {
+        NavigationStack {
+            VStack(spacing: 0) {
+                VideoHero(zoom: zoom, pip: engine.pip, aiming: $aiming, onMove: move, fullScreen: {
+                    Orientation.request(.landscapeRight)
+                })
+                .padding(.horizontal, 8)
 
-    private var cameraCard: some View {
-        Card {
-            HStack(spacing: 18) {
-                DirectionPad(enabled: engine.connection == .live, onMove: move)
-                VStack(alignment: .leading, spacing: 8) {
-                    Text("Move camera")
-                        .font(.rounded(.headline, .semibold))
-                    Text("Tap an arrow to turn the camera. Hold it to keep turning.")
-                        .font(.rounded(.footnote))
-                        .foregroundStyle(Theme.secondaryText)
-                    Label("Pinch the picture to zoom. The camera does not move.", systemImage: "hand.pinch")
-                        .font(.rounded(.caption))
-                        .foregroundStyle(Theme.secondaryText.opacity(0.8))
+                RoomPanel(activity: engine.activityLog) { sheet = .activity }
+                    .padding(.horizontal, 20)
+                    .padding(.top, 22)
+
+                Spacer(minLength: 12)
+
+                if askAlerts {
+                    AlertOffer(allow: allowAlerts, dismiss: { withAnimation { askAlerts = false } })
+                        .padding(.horizontal, 16)
+                        .padding(.bottom, 12)
+                        .transition(.move(edge: .bottom).combined(with: .opacity))
                 }
+
+                ControlBar(aiming: $aiming, actions: actions)
+                    .padding(.horizontal, 16)
+                    .padding(.bottom, 8)
+            }
+            .toolbar { toolbar }
+            .navigationTitle("Nursery")
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbarBackground(.hidden, for: .navigationBar)
+        }
+    }
+
+    // MARK: iPad
+
+    private var wideLayout: some View {
+        NavigationStack {
+            HStack(alignment: .top, spacing: 24) {
+                VideoHero(zoom: zoom, pip: engine.pip, aiming: $aiming, onMove: move, fullScreen: nil)
+                VStack(spacing: 20) {
+                    RoomPanel(activity: engine.activityLog) { sheet = .activity }
+                    Spacer()
+                    if askAlerts { AlertOffer(allow: allowAlerts, dismiss: { askAlerts = false }) }
+                    ControlBar(aiming: $aiming, actions: actions)
+                }
+                .frame(width: 360)
+            }
+            .padding(24)
+            .toolbar { toolbar }
+            .navigationTitle("Nursery")
+            .navigationBarTitleDisplayMode(.inline)
+        }
+    }
+
+    @ToolbarContentBuilder
+    private var toolbar: some ToolbarContent {
+        ToolbarItem(placement: .topBarLeading) {
+            StatusBadge(overall: engine.overall, pictureLive: engine.pictureLive)
+        }
+        ToolbarItem(placement: .topBarTrailing) {
+            Menu {
+                Button { sheet = .activity } label: { Label("Activity", systemImage: "waveform.path.ecg") }
+                Button { sheet = .settings } label: { Label("Settings", systemImage: "gearshape") }
+                Divider()
+                Button { engine.reconnect(why: "menu") } label: { Label("Reconnect", systemImage: "arrow.clockwise") }
+            } label: {
+                Image(systemName: "ellipsis")
+                    .accessibilityLabel("More")
             }
         }
     }
 
-    private var powerCard: some View {
-        Card {
-            HStack {
-                Label("Camera power", systemImage: "power")
-                    .font(.rounded(.headline, .semibold))
-                Spacer()
-                Button("Off") { power(false) }.buttonStyle(.bordered).tint(Theme.alarm)
-                Button("On") { power(true) }.buttonStyle(.borderedProminent).tint(Theme.calm)
-            }
-        }
-    }
-
-    // MARK: Actions
+    // MARK: The actions
 
     private func move(_ d: CameraControl.Direction) {
         Task {
-            if !(await camera.move(d)) { show(camera.lastError ?? "The camera did not move."); Haptics.error() }
+            if !(await camera.move(d)) {
+                Haptics.error()
+                show(camera.lastError ?? "The camera did not move.")
+            }
         }
     }
 
-    private func power(_ on: Bool) {
-        Haptics.firm()
+    private func snapshot() {
         Task {
-            if await camera.power(on: on) { show(on ? "The camera starts. Wait 30 seconds." : "The camera is off.") }
-            else { show(camera.lastError ?? "No answer."); Haptics.error() }
+            guard let image = await camera.snapshot() else {
+                Haptics.error()
+                show("No picture. Is the camera on?")
+                return
+            }
+            Haptics.firm()
+            withAnimation(.easeOut(duration: 0.08)) { flash = true }
+            try? await Task.sleep(for: .milliseconds(120))
+            withAnimation(.easeIn(duration: 0.35)) { flash = false }
+            shared = SharedImage(image: image)
         }
+    }
+
+    private func enterNight() {
+        Haptics.tap()
+        aiming = false
+        withAnimation(.easeInOut(duration: 0.5)) { night = true }
     }
 
     private func show(_ text: String) {
-        withAnimation(.spring(response: 0.35)) { toast = text }
+        withAnimation(.spring(response: 0.35, dampingFraction: 0.8)) { toast = text }
         Task {
             try? await Task.sleep(for: .seconds(2.5))
             withAnimation(.easeOut) { if toast == text { toast = nil } }
         }
     }
-}
 
-// MARK: - The picture card
-
-struct VideoCard: View {
-    @EnvironmentObject private var engine: MonitorEngine
-    @ObservedObject var zoom: ZoomState
-    @ObservedObject var pip: PictureInPicture
-
-    var body: some View {
-        let aspect = engine.videoSize.width / max(engine.videoSize.height, 1)
-        ZStack {
-            ZoomableVideo(videoView: engine.videoView, zoom: zoom)
-            if !engine.pictureLive || pip.isActive { placeholder }
+    @ViewBuilder private var toastView: some View {
+        if let toast {
+            Label(toast, systemImage: "exclamationmark.circle.fill")
+                .font(.subheadline.weight(.medium))
+                .padding(.horizontal, 16).padding(.vertical, 11)
+                .glass(in: Capsule())
+                .padding(.top, 6)
+                .transition(.move(edge: .top).combined(with: .opacity))
         }
-        .aspectRatio(aspect, contentMode: .fit)
-        .clipShape(RoundedRectangle(cornerRadius: 22, style: .continuous))
-        .overlay(RoundedRectangle(cornerRadius: 22, style: .continuous).strokeBorder(Theme.cardStroke))
-        .overlay(alignment: .topLeading) {
-            if engine.pictureLive {
-                Label("LIVE", systemImage: "circle.fill")
-                    .labelStyle(LiveBadgeStyle())
-                    .padding(10)
-            }
-        }
-        .overlay(alignment: .topTrailing) {
-            if zoom.scale > 1.05 {
-                Button { zoom.reset(); Haptics.tap() } label: {
-                    Text(String(format: "%.1f×", zoom.scale))
-                        .font(.rounded(.caption, .bold)).monospacedDigit()
-                        .padding(.horizontal, 10).padding(.vertical, 6)
-                        .background(.ultraThinMaterial, in: Capsule())
-                }
-                .padding(10)
-                .accessibilityLabel("Reset the zoom")
-            }
-        }
-        .overlay(alignment: .bottomTrailing) {
-            PiPButton(pip: pip).padding(10)
-        }
-        .animation(.easeInOut(duration: 0.25), value: engine.pictureLive)
-        .animation(.easeInOut(duration: 0.2), value: zoom.scale > 1.05)
     }
 
-    private var placeholder: some View {
-        VStack(spacing: 10) {
-            if pip.isActive {
-                Image(systemName: "pip.fill").font(.system(size: 30))
-                Text("The picture is in the small window.").font(.rounded(.subheadline))
-            } else if case .retrying(let why) = engine.connection {
-                Image(systemName: "wifi.exclamationmark").font(.system(size: 30)).foregroundStyle(Theme.alarm)
-                Text("The nursery does not answer").font(.rounded(.headline))
-                Text(why).font(.rounded(.caption)).foregroundStyle(Theme.secondaryText).multilineTextAlignment(.center)
-                Text("Are you on the home Wi-Fi? The app tries again.")
-                    .font(.rounded(.caption)).foregroundStyle(Theme.secondaryText)
-                Button("Try now") { engine.reconnect(why: "user asked") }
-                    .buttonStyle(.bordered).tint(Theme.moon).padding(.top, 4)
-            } else {
-                ProgressView().tint(Theme.moon)
-                Text("Connecting to the nursery…").font(.rounded(.subheadline)).foregroundStyle(Theme.secondaryText)
-            }
+    /// After the first good connection, offer the alerts. A prompt at launch has no context.
+    private func offerAlerts() async {
+        guard !MonitorEngine.isDemo, !UserDefaults.standard.bool(forKey: "alertOfferShown") else { return }
+        if await NurseryAlerts.authorizationStatus() == .notDetermined {
+            try? await Task.sleep(for: .seconds(2))
+            withAnimation(.spring(response: 0.5, dampingFraction: 0.85)) { askAlerts = true }
         }
-        .padding()
-        .frame(maxWidth: .infinity, maxHeight: .infinity)
-        .background(Color.black.opacity(0.75))
-        .transition(.opacity)
     }
-}
 
-struct PiPButton: View {
-    @ObservedObject var pip: PictureInPicture
-    var body: some View {
-        if pip.isPossible || pip.isActive {
-            GlassCircleButton(symbol: pip.isActive ? "pip.exit" : "pip.enter", size: 36,
-                              label: pip.isActive ? "Close the small window" : "Open the small window") {
-                Haptics.tap()
-                pip.toggle()
-            }
+    private func allowAlerts() {
+        UserDefaults.standard.set(true, forKey: "alertOfferShown")
+        NurseryAlerts.requestPermission()
+        withAnimation { askAlerts = false }
+    }
+
+    /// `-demoScreen aim|night|activity|settings` opens a screen at launch, for the screenshots.
+    private func applyDemoScreen() {
+        guard MonitorEngine.isDemo else { return }
+        switch UserDefaults.standard.string(forKey: "demoScreen") {
+        case "aim": aiming = true
+        case "night": night = true
+        case "activity": sheet = .activity
+        case "settings": sheet = .settings
+        case "alerts": askAlerts = true
+        default: break
         }
     }
 }
 
-struct LiveBadgeStyle: LabelStyle {
-    func makeBody(configuration: Configuration) -> some View {
-        HStack(spacing: 5) {
-            configuration.icon.font(.system(size: 7)).foregroundStyle(Theme.alarm)
-            configuration.title.font(.rounded(.caption2, .heavy)).tracking(1)
-        }
-        .padding(.horizontal, 8).padding(.vertical, 5)
-        .background(.ultraThinMaterial, in: Capsule())
-    }
+struct MonitorActions {
+    let snapshot: () -> Void
+    let night: () -> Void
+    let move: (CameraControl.Direction) -> Void
 }
 
-// MARK: - The sound card
+// MARK: - The ambient light
 
-struct SoundCard: View {
-    @EnvironmentObject private var engine: MonitorEngine
-    @EnvironmentObject private var settings: Settings
-
-    var body: some View {
-        Card {
-            VStack(alignment: .leading, spacing: 14) {
-                HStack {
-                    Label(engine.soundStatus.title, systemImage: Theme.symbol(for: engine.soundStatus))
-                        .font(.rounded(.headline, .semibold))
-                        .foregroundStyle(Theme.color(for: engine.soundStatus))
-                        .contentTransition(.symbolEffect(.replace))
-                    Spacer()
-                    if engine.soundStatus == .listening {
-                        Text(Waveform.word(for: engine.level))
-                            .font(.rounded(.subheadline, .medium))
-                            .foregroundStyle(Theme.secondaryText)
-                            .contentTransition(.opacity)
-                            .animation(.easeInOut, value: Waveform.word(for: engine.level))
-                    }
-                }
-
-                Waveform(history: engine.history, dim: engine.soundStatus != .listening)
-                    .frame(height: 56)
-
-                HStack(spacing: 12) {
-                    Button {
-                        Haptics.firm()
-                        engine.listening.toggle()
-                    } label: {
-                        Label(engine.listening ? "Listening" : "Listen",
-                              systemImage: engine.listening ? "speaker.wave.2.fill" : "speaker.slash.fill")
-                            .font(.rounded(.subheadline, .semibold))
-                            .frame(maxWidth: .infinity)
-                            .padding(.vertical, 12)
-                            .foregroundStyle(engine.listening ? Color.black : .white)
-                            .background(engine.listening ? Theme.moon : Color.white.opacity(0.1),
-                                        in: RoundedRectangle(cornerRadius: 14, style: .continuous))
-                    }
-                    .buttonStyle(PressScale())
-                    .accessibilityHint("Turns the sound of the nursery on or off")
-
-                    Picker("Loudness", selection: $settings.loudness) {
-                        ForEach(Settings.Loudness.allCases) { Text($0.title).tag($0) }
-                    }
-                    .pickerStyle(.segmented)
-                    .frame(maxWidth: 190)
-                }
-
-                if engine.soundStatus == .listening {
-                    Text("Delay \(engine.delayMilliseconds) ms · Continues on the lock screen")
-                        .font(.rounded(.caption2))
-                        .foregroundStyle(Theme.secondaryText.opacity(0.7))
-                        .monospacedDigit()
-                }
-            }
-        }
-    }
-}
-
-// MARK: - Landscape: the picture fills the screen
-
-struct FullScreenMonitor: View {
-    @EnvironmentObject private var engine: MonitorEngine
-    @EnvironmentObject private var camera: CameraControl
-    @ObservedObject var zoom: ZoomState
-    let onMove: (CameraControl.Direction) -> Void
-    @State private var chrome = true
-    @State private var hideTask: Task<Void, Never>?
+/// A soft glow behind the room panel. It follows the loudness, so the whole screen breathes
+/// with the room. It is dim on purpose: this screen is often the only light at night.
+struct AmbientBackground: View {
+    let level: Float
+    let status: NurseryActivityAttributes.Status
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
     var body: some View {
         ZStack {
-            Color.black.ignoresSafeArea()
-            ZoomableVideo(videoView: engine.videoView, zoom: zoom, onTap: toggleChrome)
-                .aspectRatio(engine.videoSize.width / max(engine.videoSize.height, 1), contentMode: .fit)
+            Theme.skyTop.ignoresSafeArea()
+            RadialGradient(colors: [glow.opacity(0.10 + Double(level) * 0.28), .clear],
+                           center: UnitPoint(x: 0.5, y: 0.62), startRadius: 10, endRadius: 420)
                 .ignoresSafeArea()
-            if chrome {
-                VStack {
-                    HStack {
-                        StatusPill(text: engine.soundStatus.title, color: Theme.color(for: engine.soundStatus),
-                                   pulsing: engine.soundStatus == .listening)
-                        Spacer()
-                        if zoom.scale > 1.05 {
-                            GlassCircleButton(symbol: "arrow.down.right.and.arrow.up.left", size: 36, label: "Reset the zoom") {
-                                zoom.reset()
-                            }
-                        }
-                        PiPButton(pip: engine.pip)
-                    }
-                    Spacer()
-                    HStack(alignment: .bottom) {
-                        Waveform(history: Array(engine.history.suffix(30)))
-                            .frame(width: 150, height: 34)
-                            .padding(10)
-                            .background(.ultraThinMaterial, in: RoundedRectangle(cornerRadius: 14, style: .continuous))
-                        Spacer()
-                        if camera.ptzReady {
-                            DirectionPad(enabled: engine.connection == .live, onMove: { d in onMove(d); scheduleHide() }, size: 120)
-                        }
-                    }
-                }
-                .padding(20)
-                .transition(.opacity)
+                .animation(reduceMotion ? nil : .easeOut(duration: 0.35), value: level)
+        }
+    }
+
+    private var glow: Color {
+        switch status {
+        case .lost: Theme.alarm
+        case .muted, .connecting: Color.white.opacity(0.4)
+        default: Theme.level(level)
+        }
+    }
+}
+
+// MARK: - The status badge
+
+struct StatusBadge: View {
+    let overall: MonitorEngine.Overall
+    let pictureLive: Bool
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
+    @State private var pulse = false
+
+    var body: some View {
+        HStack(spacing: 6) {
+            Circle()
+                .fill(color)
+                .frame(width: 8, height: 8)
+                .opacity(pulse ? 0.45 : 1)
+            Text(text)
+                .font(.subheadline.weight(.semibold))
+                .contentTransition(.opacity)
+        }
+        .fixedSize()
+        .accessibilityElement(children: .combine)
+        .onAppear {
+            guard !reduceMotion else { return }
+            withAnimation(.easeInOut(duration: 1.1).repeatForever(autoreverses: true)) { pulse = true }
+        }
+        .animation(.easeInOut, value: text)
+    }
+
+    private var text: String {
+        switch overall {
+        case .live: pictureLive ? "Live" : "Waiting for picture"
+        case .soundOnly: "Sound only"
+        case .connecting: "Connecting"
+        case .reconnecting: "Reconnecting"
+        case .offline: "Offline"
+        }
+    }
+
+    private var color: Color {
+        switch overall {
+        case .live, .soundOnly: pictureLive || overall == .soundOnly ? Theme.alarm : Theme.warn   // Red dot: live, as in the Camera app.
+        case .connecting, .reconnecting: Theme.warn
+        case .offline: Color.gray
+        }
+    }
+}
+
+// MARK: - The alert offer
+
+struct AlertOffer: View {
+    let allow: () -> Void
+    let dismiss: () -> Void
+
+    var body: some View {
+        HStack(spacing: 14) {
+            Image(systemName: "bell.badge.fill")
+                .font(.title2)
+                .foregroundStyle(Theme.moon)
+                .symbolEffect(.bounce, options: .nonRepeating)
+            VStack(alignment: .leading, spacing: 2) {
+                Text("Know when the sound stops").font(.subheadline.weight(.semibold))
+                Text("Nursery can alert you if the connection drops, or when the baby makes a sound.")
+                    .font(.caption).foregroundStyle(.secondary)
+            }
+            Spacer(minLength: 0)
+            VStack(spacing: 6) {
+                Button("Allow", action: allow).buttonStyle(.borderedProminent).controlSize(.small)
+                Button("Later", action: dismiss).font(.caption).foregroundStyle(.secondary)
             }
         }
-        .onAppear(perform: scheduleHide)
-        .animation(.easeInOut(duration: 0.25), value: chrome)
-    }
-
-    private func toggleChrome() {
-        chrome.toggle()
-        if chrome { scheduleHide() }
-    }
-
-    private func scheduleHide() {
-        hideTask?.cancel()
-        hideTask = Task {
-            try? await Task.sleep(for: .seconds(5))
-            if !Task.isCancelled { chrome = false }
-        }
+        .padding(14)
+        .glass(in: RoundedRectangle(cornerRadius: 22, style: .continuous))
     }
 }
