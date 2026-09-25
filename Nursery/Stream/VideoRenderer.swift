@@ -20,7 +20,8 @@ final class VideoLayerView: UIView {
 
 /// It turns H.264 access units into sample buffers, and it sends them to the layer.
 /// The caller is on the RTSP queue. The renderer of the layer accepts calls from any thread.
-final class VideoRenderer {
+/// All calls come from the RTSP queue, one at a time.
+final class VideoRenderer: @unchecked Sendable {
     private let renderer: AVSampleBufferVideoRenderer
     private var format: CMVideoFormatDescription?
     private var formatVersion = -1
