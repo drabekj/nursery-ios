@@ -133,7 +133,7 @@ private struct BabySetupView: View {
             if settings.unitVideo {
                 LabeledContent("Kamera") {
                     Picker("Kamera", selection: $settings.unitFront) {
-                        Text("Zadní (lepší obraz)").tag(false)
+                        Text("Zadní").tag(false)
                         Text("Přední").tag(true)
                     }
                     .labelsHidden()
