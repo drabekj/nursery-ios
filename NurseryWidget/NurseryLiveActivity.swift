@@ -58,13 +58,14 @@ struct NurseryLiveActivity: Widget {
     var body: some WidgetConfiguration {
         ActivityConfiguration(for: NurseryActivityAttributes.self) { context in
             LockScreenView(state: context.state, stale: context.isStale)
+                .environment(\.locale, Locale(identifier: "cs_CZ"))
                 .activityBackgroundTint(Color(red: 0.05, green: 0.07, blue: 0.15).opacity(0.92))
                 .activitySystemActionForegroundColor(moon)
         } dynamicIsland: { context in
             let status = context.isStale ? .lost : context.state.status
             return DynamicIsland {
                 DynamicIslandExpandedRegion(.leading) {
-                    Label("Nursery", systemImage: "moon.stars.fill")
+                    Label("Chůvička", systemImage: "moon.stars.fill")
                         .font(.system(.headline, design: .rounded))
                         .foregroundStyle(moon)
                         .padding(.leading, 4)
@@ -75,7 +76,7 @@ struct NurseryLiveActivity: Widget {
                 }
                 DynamicIslandExpandedRegion(.bottom) {
                     HStack {
-                        Label(context.isStale ? "The app stopped" : status.title, systemImage: status.symbol)
+                        Label(context.isStale ? "Aplikace neběží" : status.title, systemImage: status.symbol)
                             .foregroundStyle(status.color)
                         Spacer()
                         Text(context.state.since, style: .relative)
@@ -113,10 +114,10 @@ private struct LockScreenView: View {
             .frame(width: 46, height: 46)
 
             VStack(alignment: .leading, spacing: 3) {
-                Text("Nursery")
+                Text("Chůvička")
                     .font(.system(.headline, design: .rounded))
                     .foregroundStyle(.white)
-                Text(stale ? "The app stopped. Open it again." : status.title)
+                Text(stale ? "Aplikace neběží. Otevřete ji znovu." : status.title)
                     .font(.system(.subheadline, design: .rounded))
                     .foregroundStyle(status.hearsRoom ? .white.opacity(0.7) : status.color)
             }

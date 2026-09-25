@@ -32,6 +32,7 @@ struct NurseryApp: App {
                 .environmentObject(camera)
                 .preferredColorScheme(scheme)
                 .tint(Theme.accent)
+                .environment(\.locale, Locale(identifier: "cs_CZ"))   // Czech dates and times, also on an English phone.
                 .task {
                     guard !started else { return }
                     started = true

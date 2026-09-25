@@ -33,7 +33,7 @@ final class Settings: ObservableObject {
     enum Loudness: String, CaseIterable, Identifiable {
         case normal, loud, max
         var id: String { rawValue }
-        var title: String { switch self { case .normal: "Normal"; case .loud: "Loud"; case .max: "Max" } }
+        var title: String { switch self { case .normal: "Normální"; case .loud: "Zesílená"; case .max: "Maximální" } }
         var decibels: Float { switch self { case .normal: 0; case .loud: 12; case .max: 20 } }
     }
 
@@ -41,20 +41,20 @@ final class Settings: ObservableObject {
     enum Sensitivity: String, CaseIterable, Identifiable {
         case low, medium, high
         var id: String { rawValue }
-        var title: String { switch self { case .low: "Only loud crying"; case .medium: "Crying and fussing"; case .high: "Every small sound" } }
+        var title: String { switch self { case .low: "Jen hlasitý pláč"; case .medium: "Pláč i fňukání"; case .high: "Každý zvuk" } }
         var threshold: Float { switch self { case .low: 0.68; case .medium: 0.52; case .high: 0.38 } }
     }
 
     enum Quality: String, CaseIterable, Identifiable {
         case high, low
         var id: String { rawValue }
-        var title: String { switch self { case .high: "2K (sharp zoom)"; case .low: "360p (saves battery)" } }
+        var title: String { switch self { case .high: "2K (ostré přiblížení)"; case .low: "360p (úspora baterie)" } }
     }
 
     enum Appearance: String, CaseIterable, Identifiable {
         case light, dark, automatic
         var id: String { rawValue }
-        var title: String { switch self { case .light: "Light"; case .dark: "Dark"; case .automatic: "Automatic" } }
+        var title: String { switch self { case .light: "Světlý"; case .dark: "Tmavý"; case .automatic: "Automaticky" } }
     }
 
     private let d = UserDefaults.standard
@@ -95,7 +95,11 @@ final class Settings: ObservableObject {
 /// Thus no id is in the app, and no setup is necessary on a new telephone.
 @MainActor
 final class CameraControl: ObservableObject {
-    enum Direction: String { case up, down, left, right }
+    enum Direction: String {
+        case up, down, left, right
+        /// For VoiceOver: "Otočit kameru nahoru".
+        var czech: String { switch self { case .up: "nahoru"; case .down: "dolů"; case .left: "doleva"; case .right: "doprava" } }
+    }
 
     @Published private(set) var ptzReady = false
     @Published private(set) var powerReady = false
@@ -179,10 +183,10 @@ final class CameraControl: ObservableObject {
         do {
             let (_, response) = try await session.data(for: req)
             let ok = (response as? HTTPURLResponse).map { (200..<300).contains($0.statusCode) } ?? false
-            lastError = ok ? nil : "Home Assistant refused the command."
+            lastError = ok ? nil : "Home Assistant příkaz odmítl."
             return ok
         } catch {
-            lastError = "Home Assistant does not answer."
+            lastError = "Home Assistant neodpovídá."
             Log.shared.add("webhook failed: \(error.localizedDescription)")
             return false
         }

@@ -13,28 +13,28 @@ struct ActivityView: View {
             List {
                 Section {
                     if activity.minutes.isEmpty {
-                        Text("The chart fills while Nursery listens.")
+                        Text("Graf se začne plnit, jakmile Chůvička poslouchá.")
                             .font(.subheadline).foregroundStyle(.secondary)
                             .frame(maxWidth: .infinity, minHeight: 120)
                     } else {
                         chart.frame(height: 150).padding(.vertical, 6)
                     }
                 } header: {
-                    Text("Last hour")
+                    Text("Poslední hodina")
                 } footer: {
-                    Text("The dashed line is the sensitivity. A sound above it for 1 second counts as a sound event.")
+                    Text("Čárkovaná čára značí citlivost. Zvuk nad ní, který trvá aspoň 1 sekundu, se zaznamená jako událost.")
                 }
 
-                Section("Today") {
+                Section("Dnes") {
                     if let now = activity.current {
                         EventRow(event: now, live: true)
                     }
                     let events = activity.todayEvents.reversed()
                     if events.isEmpty && activity.current == nil {
                         ContentUnavailableView {
-                            Label("A quiet day", systemImage: "moon.zzz.fill")
+                            Label("Klidný den", systemImage: "moon.zzz.fill")
                         } description: {
-                            Text("Sound events appear here while the sound is on.")
+                            Text("Zvuky se tu objeví, když je zapnutý zvuk.")
                         }
                     } else {
                         ForEach(Array(events)) { EventRow(event: $0, live: false) }
@@ -42,20 +42,20 @@ struct ActivityView: View {
                 }
 
                 Section {
-                    Picker("Sensitivity", selection: $settings.sensitivity) {
+                    Picker("Citlivost", selection: $settings.sensitivity) {
                         ForEach(Settings.Sensitivity.allCases) { Text($0.title).tag($0) }
                     }
-                    Button("Clear History", role: .destructive) { confirmClear = true }
+                    Button("Smazat historii", role: .destructive) { confirmClear = true }
                         .disabled(activity.events.isEmpty)
                 }
             }
-            .navigationTitle("Activity")
+            .navigationTitle("Aktivita")
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
-                ToolbarItem(placement: .confirmationAction) { Button("Done") { dismiss() } }
+                ToolbarItem(placement: .confirmationAction) { Button("Hotovo") { dismiss() } }
             }
-            .confirmationDialog("Clear the sound history?", isPresented: $confirmClear, titleVisibility: .visible) {
-                Button("Clear History", role: .destructive) { activity.clear() }
+            .confirmationDialog("Smazat historii zvuků?", isPresented: $confirmClear, titleVisibility: .visible) {
+                Button("Smazat historii", role: .destructive) { activity.clear() }
             }
         }
     }
@@ -63,11 +63,11 @@ struct ActivityView: View {
     private var chart: some View {
         Chart {
             ForEach(activity.minutes) { m in
-                BarMark(x: .value("Time", m.start, unit: .minute), y: .value("Loudness", m.peak))
+                BarMark(x: .value("Čas", m.start, unit: .minute), y: .value("Hlasitost", m.peak))
                     .foregroundStyle(Theme.level(m.peak).gradient)
                     .cornerRadius(2)
             }
-            RuleMark(y: .value("Sensitivity", activity.threshold))
+            RuleMark(y: .value("Citlivost", activity.threshold))
                 .lineStyle(StrokeStyle(lineWidth: 1, dash: [4, 4]))
                 .foregroundStyle(.secondary)
         }
@@ -79,7 +79,7 @@ struct ActivityView: View {
                 AxisValueLabel(format: .dateTime.hour().minute())
             }
         }
-        .accessibilityLabel("Loudness in the last hour")
+        .accessibilityLabel("Hlasitost za poslední hodinu")
     }
 }
 
@@ -96,7 +96,7 @@ private struct EventRow: View {
                 .frame(width: 28)
             VStack(alignment: .leading, spacing: 2) {
                 Text(event.start, style: .time).font(.headline).monospacedDigit()
-                Text(live ? "Sound now" : duration).font(.subheadline).foregroundStyle(.secondary)
+                Text(live ? "Ozývá se" : duration).font(.subheadline).foregroundStyle(.secondary)
             }
             Spacer()
             Text(Waveform.word(for: event.peak))
@@ -124,19 +124,19 @@ struct HourStrip: View {
         Button(action: open) {
             VStack(alignment: .leading, spacing: 10) {
                 HStack(alignment: .firstTextBaseline) {
-                    Text("Last hour").font(.subheadline.weight(.semibold))
+                    Text("Poslední hodina").font(.subheadline.weight(.semibold))
                     Spacer()
                     Text(summary).font(.footnote).foregroundStyle(.secondary)
                     Image(systemName: "chevron.right").font(.caption.weight(.semibold)).foregroundStyle(.tertiary)
                 }
                 if activity.minutes.isEmpty {
-                    Text("Fills while Nursery listens")
+                    Text("Plní se, jakmile Chůvička poslouchá")
                         .font(.caption).foregroundStyle(.tertiary)
                         .frame(maxWidth: .infinity, minHeight: 44)
                 } else {
                     Chart {
                         ForEach(activity.minutes) { m in
-                            BarMark(x: .value("Time", m.start, unit: .minute), y: .value("Loudness", max(m.peak, 0.04)))
+                            BarMark(x: .value("Čas", m.start, unit: .minute), y: .value("Hlasitost", max(m.peak, 0.04)))
                                 .foregroundStyle(Theme.level(m.peak).opacity(m.peak >= activity.threshold ? 1 : 0.55))
                                 .cornerRadius(1.5)
                         }
@@ -146,9 +146,9 @@ struct HourStrip: View {
                     .chartYAxis(.hidden)
                     .frame(height: 44)
                     HStack {
-                        Text("60 min ago")
+                        Text("před hodinou")
                         Spacer()
-                        Text("now")
+                        Text("teď")
                     }
                     .font(.caption2).foregroundStyle(.tertiary)
                 }
@@ -158,16 +158,18 @@ struct HourStrip: View {
             .contentShape(RoundedRectangle(cornerRadius: 24, style: .continuous))
         }
         .buttonStyle(.plain)
-        .accessibilityLabel("Last hour. \(summary)")
-        .accessibilityHint("Opens the sound activity")
+        .accessibilityLabel("Poslední hodina. \(summary)")
+        .accessibilityHint("Otevře přehled zvuků")
     }
 
     private var summary: String {
         let hour = activity.events.filter { $0.end > Date().addingTimeInterval(-3600) }
+        // Czech plural: 1 zvuk, 2–4 zvuky, 5 a více zvuků.
         switch hour.count {
-        case 0: return activity.current == nil ? "No sounds" : "Sound now"
-        case 1: return "1 sound"
-        default: return "\(hour.count) sounds"
+        case 0: return activity.current == nil ? "Bez zvuků" : "Ozývá se"
+        case 1: return "1 zvuk"
+        case 2...4: return "\(hour.count) zvuky"
+        default: return "\(hour.count) zvuků"
         }
     }
 }

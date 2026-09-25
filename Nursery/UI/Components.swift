@@ -122,7 +122,7 @@ struct Waveform: View {
             }
         }
         .accessibilityElement()
-        .accessibilityLabel("Sound level")
+        .accessibilityLabel("Úroveň zvuku")
         .accessibilityValue(Text(Waveform.word(for: history.last ?? 0)))
     }
 

@@ -57,7 +57,7 @@ jobs:
           mkdir -p shots
           shot() {  # shot <file> <screen> <appearance>
             xcrun simctl terminate "$UDID" cz.drabek.nursery || true
-            xcrun simctl launch "$UDID" cz.drabek.nursery -demo YES -demoScreen "$2" -appearance "$3" -AppleLocale en_GB
+            xcrun simctl launch "$UDID" cz.drabek.nursery -demo YES -demoScreen "$2" -appearance "$3" -AppleLanguages "(cs)" -AppleLocale cs_CZ
             sleep 9
             xcrun simctl io "$UDID" screenshot "shots/$1.png"
           }

@@ -92,7 +92,7 @@ struct MonitorView: View {
                     .padding(.bottom, 8)
             }
             .toolbar { toolbar }
-            .navigationTitle("Nursery")
+            .navigationTitle("Chůvička")
             .navigationBarTitleDisplayMode(.inline)
             .toolbarBackground(.hidden, for: .navigationBar)
         }
@@ -115,7 +115,7 @@ struct MonitorView: View {
             }
             .padding(24)
             .toolbar { toolbar }
-            .navigationTitle("Nursery")
+            .navigationTitle("Chůvička")
             .navigationBarTitleDisplayMode(.inline)
         }
     }
@@ -127,13 +127,13 @@ struct MonitorView: View {
         }
         ToolbarItem(placement: .topBarTrailing) {
             Menu {
-                Button { sheet = .activity } label: { Label("Activity", systemImage: "waveform.path.ecg") }
-                Button { sheet = .settings } label: { Label("Settings", systemImage: "gearshape") }
+                Button { sheet = .activity } label: { Label("Aktivita", systemImage: "waveform.path.ecg") }
+                Button { sheet = .settings } label: { Label("Nastavení", systemImage: "gearshape") }
                 Divider()
-                Button { engine.reconnect(why: "menu") } label: { Label("Reconnect", systemImage: "arrow.clockwise") }
+                Button { engine.reconnect(why: "menu") } label: { Label("Znovu připojit", systemImage: "arrow.clockwise") }
             } label: {
                 Image(systemName: "ellipsis")
-                    .accessibilityLabel("More")
+                    .accessibilityLabel("Další")
             }
         }
     }
@@ -144,7 +144,7 @@ struct MonitorView: View {
         Task {
             if !(await camera.move(d)) {
                 Haptics.error()
-                show(camera.lastError ?? "The camera did not move.")
+                show(camera.lastError ?? "Kamera se neotočila.")
             }
         }
     }
@@ -153,7 +153,7 @@ struct MonitorView: View {
         Task {
             guard let image = await camera.snapshot() else {
                 Haptics.error()
-                show("No picture. Is the camera on?")
+                show("Žádný obraz. Je kamera zapnutá?")
                 return
             }
             Haptics.firm()
@@ -269,11 +269,11 @@ struct StatusBadge: View {
 
     private var text: String {
         switch overall {
-        case .live: pictureLive ? "Live" : "Waiting for picture"
-        case .soundOnly: "Sound only"
-        case .connecting: "Connecting"
-        case .reconnecting: "Reconnecting"
-        case .offline: "Offline"
+        case .live: pictureLive ? "Živě" : "Čekání na obraz"
+        case .soundOnly: "Jen zvuk"
+        case .connecting: "Připojování"
+        case .reconnecting: "Obnovování spojení"
+        case .offline: "Nedostupné"
         }
     }
 
@@ -298,18 +298,18 @@ struct AlertOffer: View {
                 .font(.title2)
                 .foregroundStyle(Theme.accent)
             VStack(alignment: .leading, spacing: 2) {
-                Text("Know when the sound stops").font(.subheadline.weight(.semibold))
-                Text("Nursery can alert you if the connection drops, or when the baby makes a sound.")
+                Text("Upozornění na výpadek i na pláč").font(.subheadline.weight(.semibold))
+                Text("Chůvička vás upozorní, když se přeruší spojení nebo když se miminko ozve.")
                     .font(.caption).foregroundStyle(.secondary)
             }
             Spacer(minLength: 0)
             VStack(spacing: 6) {
                 Button(action: allow) {
-                    Text("Allow").fontWeight(.semibold).foregroundStyle(.black)
+                    Text("Povolit").fontWeight(.semibold).foregroundStyle(.black)
                 }
                 .buttonStyle(.borderedProminent)
                 .controlSize(.small)
-                Button("Later", action: dismiss).font(.caption).foregroundStyle(.secondary)
+                Button("Později", action: dismiss).font(.caption).foregroundStyle(.secondary)
             }
         }
         .padding(14)

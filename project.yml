@@ -6,7 +6,7 @@ options:
   deploymentTarget:
     iOS: "17.0"
   createIntermediateGroups: true
-  developmentLanguage: en
+  developmentLanguage: cs
 
 settings:
   base:
@@ -29,7 +29,10 @@ targets:
     info:
       path: Nursery/Info.plist
       properties:
-        CFBundleDisplayName: Nursery
+        CFBundleDisplayName: Chůvička
+        # Czech is the only language of the app, so it is Czech also on an English phone.
+        CFBundleDevelopmentRegion: cs
+        CFBundleLocalizations: [cs]
         CFBundleShortVersionString: $(MARKETING_VERSION)
         CFBundleVersion: $(CURRENT_PROJECT_VERSION)
         LSRequiresIPhoneOS: true
@@ -50,7 +53,7 @@ targets:
         UIBackgroundModes:
           - audio
         NSSupportsLiveActivities: true
-        NSLocalNetworkUsageDescription: Nursery connects to the baby monitor server on your home network.
+        NSLocalNetworkUsageDescription: Chůvička se připojuje ke kameře přes vaši domácí síť. Obraz ani zvuk neopustí váš domov.
         # The server is a LAN address on plain HTTP and RTSP.
         NSAppTransportSecurity:
           NSAllowsArbitraryLoads: true
@@ -72,7 +75,9 @@ targets:
     info:
       path: NurseryWidget/Info.plist
       properties:
-        CFBundleDisplayName: Nursery
+        CFBundleDisplayName: Chůvička
+        CFBundleDevelopmentRegion: cs
+        CFBundleLocalizations: [cs]
         CFBundleShortVersionString: $(MARKETING_VERSION)
         CFBundleVersion: $(CURRENT_PROJECT_VERSION)
         NSExtension:

@@ -39,7 +39,7 @@ struct VideoHero: View {
                 }
                 .buttonStyle(.plain)
                 .padding(12)
-                .accessibilityLabel("Zoom \(String(format: "%.1f", zoom.scale)) times. Tap to reset.")
+                .accessibilityLabel("Přiblížení \(String(format: "%.1f", zoom.scale))×. Klepnutím zrušíte.")
                 .transition(.scale.combined(with: .opacity))
             }
         }
@@ -48,7 +48,7 @@ struct VideoHero: View {
                 HStack(spacing: 8) {
                     PiPButton(pip: pip)
                     if let fullScreen {
-                        GlassCircleButton(symbol: "arrow.up.left.and.arrow.down.right", size: 38, label: "Full screen", action: fullScreen)
+                        GlassCircleButton(symbol: "arrow.up.left.and.arrow.down.right", size: 38, label: "Celá obrazovka", action: fullScreen)
                     }
                 }
                 .padding(12)
@@ -72,20 +72,20 @@ struct VideoPlaceholder: View {
         VStack(spacing: 10) {
             if inPictureInPicture {
                 Image(systemName: "pip.fill").font(.largeTitle).foregroundStyle(.secondary)
-                Text("Playing in picture in picture").font(.subheadline).foregroundStyle(.secondary)
+                Text("Přehrává se v obrazu v obraze").font(.subheadline).foregroundStyle(.secondary)
             } else if case .offline(let why) = engine.overall {
                 Image(systemName: "wifi.exclamationmark").font(.system(size: 30)).foregroundStyle(Theme.alarm)
                     .symbolEffect(.pulse)
-                Text("Can’t reach the nursery").font(.headline)
-                Text("Check that this phone is on the home Wi-Fi, and that Nursery may use the local network.")
+                Text("Kamera je nedostupná").font(.headline)
+                Text("Zkontrolujte, že je telefon připojený k domácí Wi-Fi a že má Chůvička povolený přístup k místní síti.")
                     .font(.caption).foregroundStyle(.secondary).multilineTextAlignment(.center)
                     .padding(.horizontal, 24)
                 HStack(spacing: 10) {
                     Button { engine.reconnect(why: "user asked") } label: {
-                        Text("Try Again").foregroundStyle(.black)
+                        Text("Zkusit znovu").foregroundStyle(.black)
                     }
                     .buttonStyle(.borderedProminent)
-                    Button("Settings") {
+                    Button("Nastavení") {
                         if let url = URL(string: UIApplication.openSettingsURLString) { UIApplication.shared.open(url) }
                     }
                     .buttonStyle(.bordered)
@@ -95,7 +95,7 @@ struct VideoPlaceholder: View {
                 Text(why).font(.caption2).foregroundStyle(.tertiary).lineLimit(1)
             } else {
                 ProgressView().controlSize(.large).tint(.white)
-                Text(engine.overall == .reconnecting ? "Reconnecting…" : "Connecting to the nursery…")
+                Text(engine.overall == .reconnecting ? "Obnovování spojení…" : "Připojování ke kameře…")
                     .font(.subheadline).foregroundStyle(.secondary)
             }
         }
@@ -118,7 +118,7 @@ struct AimOverlay: View {
             VStack { arrow(.up); Spacer(); arrow(.down) }.padding(10)
             HStack { arrow(.left); Spacer(); arrow(.right) }.padding(10)
             if hint {
-                Text("Tap or hold an arrow to turn the camera")
+                Text("Klepnutím nebo podržením šipky otočíte kameru")
                     .font(.footnote.weight(.medium))
                     .padding(.horizontal, 14).padding(.vertical, 8)
                     .glass(in: Capsule())
@@ -126,7 +126,7 @@ struct AimOverlay: View {
             }
         }
         .overlay(alignment: .topTrailing) {
-            Button("Done", action: done)
+            Button("Hotovo", action: done)
                 .font(.subheadline.weight(.semibold))
                 .padding(.horizontal, 14).padding(.vertical, 8)
                 .glass(in: Capsule(), interactive: true)
@@ -157,7 +157,7 @@ struct AimOverlay: View {
                 .scaleEffect(pressed ? 0.9 : 1)
                 .animation(.spring(response: 0.2, dampingFraction: 0.7), value: pressed)
         }
-        .accessibilityLabel("Turn the camera \(d.rawValue)")
+        .accessibilityLabel("Otočit kameru \(d.czech)")
     }
 }
 
@@ -166,7 +166,7 @@ struct PiPButton: View {
     var body: some View {
         if pip.isPossible || pip.isActive {
             GlassCircleButton(symbol: pip.isActive ? "pip.exit" : "pip.enter", size: 38,
-                              label: pip.isActive ? "Stop picture in picture" : "Picture in picture") {
+                              label: pip.isActive ? "Ukončit obraz v obraze" : "Obraz v obraze") {
                 Haptics.tap()
                 pip.toggle()
             }
@@ -212,9 +212,9 @@ struct RoomPanel: View {
     private var headline: String {
         switch engine.soundStatus {
         case .listening, .silent: engine.roomLevel.title
-        case .connecting: "Connecting"
-        case .lost: "No sound"
-        case .muted: "Sound off"
+        case .connecting: "Připojování"
+        case .lost: "Zvuk vypadl"
+        case .muted: "Zvuk vypnut"
         }
     }
 
@@ -229,11 +229,11 @@ struct RoomPanel: View {
     private var subline: String {
         switch engine.soundStatus {
         case .listening:
-            settings.loudness == .normal ? "Live sound" : "Live sound · \(settings.loudness.title) +\(Int(settings.loudness.decibels)) dB"
-        case .silent: "Silent · you get an alert on sound"
-        case .connecting: "Starting the live sound…"
-        case .lost: "Reconnecting to the camera…"
-        case .muted: "Tap Sound to listen"
+            settings.loudness == .normal ? "Živý zvuk" : "Živý zvuk · \(settings.loudness.title) +\(Int(settings.loudness.decibels)) dB"
+        case .silent: "Tichý režim · při zvuku přijde upozornění"
+        case .connecting: "Spouštění živého zvuku…"
+        case .lost: "Obnovování spojení s kamerou…"
+        case .muted: "Zapnete ho tlačítkem Zvuk"
         }
     }
 
@@ -242,21 +242,26 @@ struct RoomPanel: View {
             if activity.current != nil {
                 HStack(spacing: 7) {
                     PulseDot(color: Theme.warn)
-                    Text("Sound now")
+                    Text("Ozývá se")
                 }
                 .font(.footnote.weight(.semibold))
                 .foregroundStyle(Theme.warn)
             } else if let last = activity.lastSound {
-                Text("Last sound").font(.caption).foregroundStyle(.secondary)
-                (Text(last, style: .relative) + Text(" ago"))
-                    .font(.footnote.weight(.semibold)).monospacedDigit()
+                Text("Poslední zvuk").font(.caption).foregroundStyle(.secondary)
+                // "před 7 s", "před 3 min": the Czech relative form, updated each second.
+                TimelineView(.periodic(from: .now, by: 1)) { context in
+                    Text(last.formatted(.relative(presentation: .numeric, unitsStyle: .abbreviated)
+                        .locale(Locale(identifier: "cs_CZ"))))
+                        .font(.footnote.weight(.semibold)).monospacedDigit()
+                        .id(context.date)
+                }
             } else {
-                Text("No sounds yet").font(.footnote).foregroundStyle(.secondary)
+                Text("Zatím žádný zvuk").font(.footnote).foregroundStyle(.secondary)
             }
         }
         .padding(.top, 6)
         .contentShape(Rectangle())
-        .accessibilityHint("Shows the sound activity")
+        .accessibilityHint("Zobrazí aktivitu zvuků")
     }
 }
 
@@ -280,17 +285,17 @@ struct ControlBar: View {
                         Haptics.tap()
                         withAnimation(.spring(response: 0.35)) { aiming.toggle() }
                     } label: {
-                        BarLabel(title: "Move", symbol: "arrow.up.and.down.and.arrow.left.and.right", isOn: aiming, tint: Theme.moon)
+                        BarLabel(title: "Otočit", symbol: "arrow.up.and.down.and.arrow.left.and.right", isOn: aiming, tint: Theme.moon)
                     }
                     .buttonStyle(PressScale())
                     .disabled(engine.connection != .live)
                 }
                 Button(action: actions.snapshot) {
-                    BarLabel(title: "Photo", symbol: "camera.fill", isOn: false, tint: Theme.moon)
+                    BarLabel(title: "Fotka", symbol: "camera.fill", isOn: false, tint: Theme.moon)
                 }
                 .buttonStyle(PressScale())
                 Button(action: actions.night) {
-                    BarLabel(title: "Night", symbol: "moon.fill", isOn: false, tint: Theme.moon)
+                    BarLabel(title: "Noční", symbol: "moon.fill", isOn: false, tint: Theme.moon)
                 }
                 .buttonStyle(PressScale())
             }
@@ -299,10 +304,10 @@ struct ControlBar: View {
 
     private var soundButton: some View {
         Menu {
-            Picker("Sound", selection: $engine.mode) {
+            Picker("Režim zvuku", selection: $engine.mode) {
                 ForEach(MonitorEngine.SoundMode.allCases) { Label($0.title, systemImage: $0.symbol).tag($0) }
             }
-            Picker("Loudness", selection: $settings.loudness) {
+            Picker("Hlasitost", selection: $settings.loudness) {
                 ForEach(Settings.Loudness.allCases) { Text($0.title).tag($0) }
             }
             .pickerStyle(.menu)
@@ -314,16 +319,16 @@ struct ControlBar: View {
         }
         .menuStyle(.button)
         .buttonStyle(PressScale())
-        .accessibilityLabel("Sound")
+        .accessibilityLabel("Zvuk")
         .accessibilityValue(engine.mode.title)
-        .accessibilityHint("Double tap to turn the sound on or off. Touch and hold for more options.")
+        .accessibilityHint("Dvojitým klepnutím zvuk zapnete nebo vypnete. Podržením zobrazíte další volby.")
     }
 
     private var soundTitle: String {
         switch engine.mode {
-        case .live: "Sound"
-        case .silent: "Silent"
-        case .off: "Muted"
+        case .live: "Zvuk"
+        case .silent: "Tichý"
+        case .off: "Vypnuto"
         }
     }
 }
@@ -385,10 +390,10 @@ struct FullScreenMonitor: View {
                             .glass(in: Capsule())
                         Spacer()
                         if zoom.scale > 1.05 {
-                            GlassCircleButton(symbol: "arrow.down.right.and.arrow.up.left", size: 40, label: "Reset the zoom") { zoom.reset() }
+                            GlassCircleButton(symbol: "arrow.down.right.and.arrow.up.left", size: 40, label: "Zrušit přiblížení") { zoom.reset() }
                         }
                         PiPButton(pip: pip)
-                        GlassCircleButton(symbol: "xmark", size: 40, label: "Leave full screen") {
+                        GlassCircleButton(symbol: "xmark", size: 40, label: "Zavřít celou obrazovku") {
                             Orientation.request(.portrait)
                         }
                     }
@@ -402,17 +407,17 @@ struct FullScreenMonitor: View {
                         GlassGroup(spacing: 10) {
                             HStack(spacing: 10) {
                                 GlassCircleButton(symbol: engine.mode.symbol, size: 50,
-                                                  tint: engine.mode == .off ? .primary : Theme.moon, label: "Sound") {
+                                                  tint: engine.mode == .off ? .primary : Theme.moon, label: "Zvuk") {
                                     Haptics.firm()
                                     if engine.mode == .off { engine.soundOn() } else { engine.mode = .off }
                                     scheduleHide()
                                 }
                                 if camera.ptzReady || MonitorEngine.isDemo {
-                                    GlassCircleButton(symbol: "arrow.up.and.down.and.arrow.left.and.right", size: 50, label: "Move camera") {
+                                    GlassCircleButton(symbol: "arrow.up.and.down.and.arrow.left.and.right", size: 50, label: "Otočit kameru") {
                                         aiming = true
                                     }
                                 }
-                                GlassCircleButton(symbol: "camera.fill", size: 50, label: "Photo") { actions.snapshot() }
+                                GlassCircleButton(symbol: "camera.fill", size: 50, label: "Fotka") { actions.snapshot() }
                             }
                         }
                     }

@@ -21,7 +21,7 @@ final class MonitorEngine: ObservableObject {
     enum SoundMode: String, CaseIterable, Identifiable {
         case live, silent, off
         var id: String { rawValue }
-        var title: String { switch self { case .live: "Live sound"; case .silent: "Silent, alert on sound"; case .off: "Off" } }
+        var title: String { switch self { case .live: "Živý zvuk"; case .silent: "Tichý režim s upozorněním"; case .off: "Vypnuto" } }
         var symbol: String { switch self { case .live: "speaker.wave.2.fill"; case .silent: "bell.badge.fill"; case .off: "speaker.slash.fill" } }
     }
 
@@ -264,7 +264,7 @@ final class MonitorEngine: ObservableObject {
 
         let client: RTSPClient
         do { client = try RTSPClient(url: url) } catch {
-            connection = .retrying("The server address is not valid.")
+            connection = .retrying("Adresa serveru není platná.")
             return
         }
         self.client = client
@@ -341,7 +341,7 @@ final class MonitorEngine: ObservableObject {
     private func connectionEnded(_ gen: Int, _ error: Error?) {
         guard gen == generation else { return }
         client = nil
-        let message = (error as? LocalizedError)?.errorDescription ?? error?.localizedDescription ?? "The connection closed."
+        let message = (error as? LocalizedError)?.errorDescription ?? error?.localizedDescription ?? "Spojení se ukončilo."
         Log.shared.add("connection ended: \(message)")
         connection = .retrying(message)
         failures += 1

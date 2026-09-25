@@ -40,7 +40,7 @@ final class NowPlaying {
 
     func update(status: NurseryActivityAttributes.Status) {
         var info: [String: Any] = [
-            MPMediaItemPropertyTitle: "Nursery",
+            MPMediaItemPropertyTitle: "Chůvička",
             MPMediaItemPropertyArtist: status.title,
             MPNowPlayingInfoPropertyIsLiveStream: true,
             MPNowPlayingInfoPropertyMediaType: MPNowPlayingInfoMediaType.audio.rawValue,
@@ -86,7 +86,7 @@ final class LiveActivityController {
         } else if UIApplication.shared.applicationState == .active {
             do {
                 activity = try Activity<NurseryActivityAttributes>.request(
-                    attributes: NurseryActivityAttributes(room: "Nursery"), content: content, pushType: nil)
+                    attributes: NurseryActivityAttributes(room: "Chůvička"), content: content, pushType: nil)
                 lastSent = Date()
             } catch {
                 Log.shared.add("live activity not started: \(error.localizedDescription)")
@@ -125,8 +125,8 @@ enum NurseryAlerts {
     }
 
     static func postLoss() {
-        post(id: lossID, title: "No sound from the nursery",
-             body: "The connection to the camera stopped. Nursery tries again by itself.")
+        post(id: lossID, title: "Spojení s pokojíčkem se přerušilo",
+             body: "Zvuk vypadl. Chůvička se pokusí připojit znovu sama.")
     }
 
     static func clearLoss() {
@@ -134,8 +134,8 @@ enum NurseryAlerts {
     }
 
     static func postSound(at date: Date) {
-        let time = date.formatted(date: .omitted, time: .shortened)
-        post(id: soundID, title: "Sound in the nursery", body: "It started at \(time). Tap to look.")
+        let time = date.formatted(.dateTime.hour().minute().locale(Locale(identifier: "cs_CZ")))
+        post(id: soundID, title: "Miminko se ozvalo", body: "V \(time). Klepnutím zobrazíte kameru.")
     }
 
     private static func post(id: String, title: String, body: String) {

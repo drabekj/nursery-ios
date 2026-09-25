@@ -85,10 +85,10 @@ enum RoomLevel: Int, Comparable {
 
     var title: String {
         switch self {
-        case .quiet: "Quiet"
-        case .some: "Some sound"
-        case .loud: "Loud"
-        case .veryLoud: "Very loud"
+        case .quiet: "Ticho"
+        case .some: "Slabé zvuky"
+        case .loud: "Hlasitý zvuk"
+        case .veryLoud: "Velmi hlasitý zvuk"
         }
     }
 

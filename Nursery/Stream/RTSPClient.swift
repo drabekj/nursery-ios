@@ -14,12 +14,12 @@ final class RTSPClient: @unchecked Sendable {
 
         var errorDescription: String? {
             switch self {
-            case .unreachable(let why): return "The server does not answer (\(why))."
-            case .closed: return "The server closed the connection."
-            case .timeout(let what): return "No answer to \(what)."
-            case .status(let code, let reason): return "The server answered \(code) \(reason)."
-            case .noUsableTrack: return "The stream has no H.264 video and no G.711 audio."
-            case .badURL: return "The stream address is not valid."
+            case .unreachable(let why): return "Server neodpovídá (\(why))."
+            case .closed: return "Server ukončil spojení."
+            case .timeout(let what): return "Žádná odpověď na \(what)."
+            case .status(let code, let reason): return "Server odpověděl \(code) \(reason)."
+            case .noUsableTrack: return "Stream nemá video H.264 ani zvuk G.711."
+            case .badURL: return "Adresa streamu není platná."
             }
         }
     }

@@ -33,7 +33,7 @@ struct NightView: View {
                     // A fault stays bright. A normal state stays dim.
                     .foregroundStyle(engine.soundStatus == .lost ? Theme.alarm : Color.white.opacity(sound ? 0.6 : 0.28))
                 Spacer()
-                Text("Tap to wake")
+                Text("Klepnutím probudíte displej")
                     .font(.caption)
                     .foregroundStyle(.white.opacity(0.16))
                     .padding(.bottom, 20)
@@ -46,7 +46,7 @@ struct NightView: View {
             onClose()
         }
         .accessibilityAddTraits(.isButton)
-        .accessibilityLabel("Night mode. \(statusText). Double tap to wake the screen.")
+        .accessibilityLabel("Noční režim. \(statusText). Dvojitým klepnutím probudíte displej.")
         .onAppear(perform: dim)
         .onDisappear(perform: restore)
         .onReceive(NotificationCenter.default.publisher(for: UIApplication.willResignActiveNotification)) { _ in restore() }
@@ -54,7 +54,7 @@ struct NightView: View {
     }
 
     private var statusText: String {
-        activity.current != nil ? "Sound now" : engine.soundStatus.title
+        activity.current != nil ? "Ozývá se" : engine.soundStatus.title
     }
 
     private func dim() {
