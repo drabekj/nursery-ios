@@ -81,7 +81,8 @@ final class RTSPClient: @unchecked Sendable {
                                           ["Transport": "RTP/AVP/TCP;unicast;interleaved=\(channel)-\(channel + 1)"])
             if session == nil, let s = setup.headers["session"] {
                 let parts = s.split(separator: ";")
-                session = parts.first.map { $0.trimmingCharacters(in: .whitespaces) }
+                let id = parts.first.map { $0.trimmingCharacters(in: .whitespaces) }
+                queue.sync { self.session = id }       // send() reads it on the queue.
                 let timeout = parts.dropFirst().first { $0.trimmingCharacters(in: .whitespaces).hasPrefix("timeout=") }
                     .flatMap { Int($0.split(separator: "=").last ?? "") } ?? 60
                 queue.async { self.startKeepAlive(every: max(5, timeout / 3)) }

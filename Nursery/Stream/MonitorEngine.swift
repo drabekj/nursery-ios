@@ -93,6 +93,8 @@ final class MonitorEngine: ObservableObject {
     private var louderSince: Date?
     private var quieterSince: Date?
     private var lastSoundAlert = Date.distantPast
+    private var lastWatchdog = Date.distantPast
+    private var lastAlive = Date()
     private var ticks = 0
     private var timer: Timer?
     private let pathMonitor = NWPathMonitor()
@@ -133,8 +135,16 @@ final class MonitorEngine: ObservableObject {
         center.addObserver(forName: AVAudioSession.mediaServicesWereResetNotification, object: nil, queue: .main) { [weak self] _ in
             MainActor.assumeIsolated {
                 Log.shared.add("media services reset")
-                self?.audio.stop()
+                self?.audio.recreate()
                 self?.applyMode()
+            }
+        }
+
+        center.addObserver(forName: AVAudioSession.routeChangeNotification, object: nil, queue: .main) { [weak self] note in
+            let raw = note.userInfo?[AVAudioSessionRouteChangeReasonKey] as? UInt ?? 0
+            MainActor.assumeIsolated {
+                Log.shared.add("audio route change, reason \(raw)")
+                self?.audio.heal()
             }
         }
 
@@ -160,6 +170,7 @@ final class MonitorEngine: ObservableObject {
     // MARK: The life cycle
 
     func start() {
+        Log.shared.add("app started, version \(Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String ?? "?")")
         if timer == nil {
             timer = Timer.scheduledTimer(withTimeInterval: 0.1, repeats: true) { [weak self] _ in
                 MainActor.assumeIsolated { self?.tick() }
@@ -198,6 +209,8 @@ final class MonitorEngine: ObservableObject {
 
     func sceneBecameActive() {
         isForeground = true
+        Log.shared.add("foreground")
+        NurseryAlerts.disarmWatchdog()
         audioOnlyTask?.cancel()
         UIApplication.shared.isIdleTimerDisabled = settings.keepAwake
         shared.withLock { $0.renderVideo = true }
@@ -207,6 +220,7 @@ final class MonitorEngine: ObservableObject {
 
     func sceneEnteredBackground() {
         isForeground = false
+        Log.shared.add("background, sound \(mode.rawValue)")
         UIApplication.shared.isIdleTimerDisabled = false
         // Wait a moment. The small window can open during the move to the background.
         audioOnlyTask?.cancel()
@@ -255,6 +269,9 @@ final class MonitorEngine: ObservableObject {
     private func connect() {
         guard !Self.isDemo else { return }
         stopClient()
+        // Each attempt gets 6 s before the "no data" check can fire. Without this, the check fired
+        // again every 0.5 s and killed each new attempt before it could finish.
+        shared.withLock { $0.lastPacket = Date() }
         generation += 1
         let gen = generation
         let onlyAudio = wantsAudioOnly
@@ -339,7 +356,8 @@ final class MonitorEngine: ObservableObject {
     }
 
     private func connectionEnded(_ gen: Int, _ error: Error?) {
-        guard gen == generation else { return }
+        // onClose and the thrown error both report the same end. Count it one time.
+        guard gen == generation, client != nil else { return }
         client = nil
         let message = (error as? LocalizedError)?.errorDescription ?? error?.localizedDescription ?? "Spojení se ukončilo."
         Log.shared.add("connection ended: \(message)")
@@ -363,6 +381,8 @@ final class MonitorEngine: ObservableObject {
         do {
             // .playback: the sound continues on the lock screen and with the silent switch on.
             try session.setCategory(.playback, mode: .default, options: [])
+            // An incoming-call banner does not interrupt the sound (a full-screen call still does).
+            try session.setPrefersNoInterruptionsFromSystemAlerts(true)
             try session.setActive(true)
         } catch {
             Log.shared.add("audio session: \(error.localizedDescription)")
@@ -383,6 +403,7 @@ final class MonitorEngine: ObservableObject {
             audio.stop()
             activityLog.interrupt()
             NurseryAlerts.clearLoss()
+            NurseryAlerts.disarmWatchdog()
         }
         updateStatus(force: true)
         if !isForeground { enterBackgroundMode() }
@@ -404,12 +425,15 @@ final class MonitorEngine: ObservableObject {
               let type = AVAudioSession.InterruptionType(rawValue: raw) else { return }
         switch type {
         case .began:
-            Log.shared.add("sound interrupted (for example a call)")
+            let reason = note.userInfo?[AVAudioSessionInterruptionReasonKey] as? UInt ?? 0
+            Log.shared.add("sound interrupted, reason \(reason)")   // 1 = the app was suspended.
+            audio.setInterrupted(true)
         case .ended:
+            // A monitor resumes always, also without the "should resume" option.
             Log.shared.add("sound interruption ended")
+            activateAudioSession()
+            audio.setInterrupted(false)
             if mode != .off {
-                audio.stop()
-                activateAudioSession()
                 audio.start()
                 audio.setMuted(mode == .silent)
             }
@@ -456,7 +480,18 @@ final class MonitorEngine: ObservableObject {
             reconnect(why: "no data for 6 s")
         }
         updateStatus(force: false, lastAudio: s.lastAudio)
-        if ticks % 100 == 0 { activity.heartbeat() }
+
+        if mode != .off { audio.heal() }
+        // The watchdog: while the app runs in the background, keep the "stopped" alert 150 s away.
+        if !isForeground, mode != .off, !Self.isDemo, now.timeIntervalSince(lastWatchdog) >= 30 {
+            lastWatchdog = now
+            NurseryAlerts.armWatchdog()
+        }
+        // A sign of life each 5 minutes in the background. A gap in the log shows a stop by iOS.
+        if !isForeground, now.timeIntervalSince(lastAlive) >= 300 {
+            lastAlive = now
+            Log.shared.add("alive in the background, audio engine \(audio.isRunning ? "on" : "OFF"), \(soundStatus.rawValue)")
+        }
     }
 
     /// A louder word shows when the room stays louder for 0.4 s, whatever the louder word is.
@@ -508,9 +543,7 @@ final class MonitorEngine: ObservableObject {
             if alerted, status == .listening || status == .silent { alerted = false; NurseryAlerts.clearLoss() }
         }
 
-        let bucket = min(4, Int(level * 5))
         guard !Self.isDemo else { return }
-        activity.update(status: status, level: status == .listening || status == .silent ? bucket : 0,
-                        enabled: settings.liveActivity && mode != .off)
+        activity.update(status: status, enabled: settings.liveActivity && mode != .off)
     }
 }

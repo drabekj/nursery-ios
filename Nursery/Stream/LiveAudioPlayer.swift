@@ -5,89 +5,180 @@ import os
 ///
 /// The latency rule: keep 80 to 400 ms of audio in the queue. Above the limit, drop packets.
 /// Thus a network stall never adds a permanent delay. A Safari stream cannot do this.
+///
+/// The threading rule: every call to the engine and the player node runs on one serial queue.
+/// An engine call from two threads at once can raise an Objective-C exception, which crashes the app.
+/// In the background that looks exactly like "the app stopped".
 final class LiveAudioPlayer: @unchecked Sendable {
-    /// The level of the room, 0...1, before the gain. It runs on the RTSP queue.
+    /// The level of the room, 0...1, before the gain. It runs on the caller's queue.
     var onLevel: ((Float) -> Void)?
 
-    private let engine = AVAudioEngine()
-    private let player = AVAudioPlayerNode()
-    private var format: AVAudioFormat?
-    private let lock = OSAllocatedUnfairLock(initialState: 0)   // The queued frames.
-    private var priming = true
-    private var gain: Float = 1
-    private var running = false
-
+    private let q = DispatchQueue(label: "nursery.audio", qos: .userInteractive)
+    private var engine = AVAudioEngine()
+    private var player = AVAudioPlayerNode()
+    private let format: AVAudioFormat
+    private let sampleRate: Double
     private let startFrames: Int
     private let maxFrames: Int
-    private let sampleRate: Double
+
+    // Only `q` touches these.
+    private var wantRunning = false
+    private var interrupted = false
+    private var priming = true
+    private var gain: Float = 1
+    private var muted = false
+    private var lastHeal = Date.distantPast
+    private var observer: NSObjectProtocol?
+
+    // Read from other threads.
+    private let queuedFrames = OSAllocatedUnfairLock(initialState: 0)
+    private let engineRunning = OSAllocatedUnfairLock(initialState: false)
 
     init(sampleRate: Double = 8000) {
         self.sampleRate = sampleRate
         startFrames = Int(sampleRate * 0.12)
         maxFrames = Int(sampleRate * 0.40)
-        engine.attach(player)
-        NotificationCenter.default.addObserver(self, selector: #selector(configurationChanged),
-                                               name: .AVAudioEngineConfigurationChange, object: engine)
+        format = AVAudioFormat(commonFormat: .pcmFormatFloat32, sampleRate: sampleRate, channels: 1, interleaved: false)!
+        q.sync { buildGraph() }
     }
+
+    // MARK: The public calls. Each one goes to the queue.
 
     /// The gain in dB. The phone buttons set the output level. This makes a quiet room audible.
     func setGain(decibels: Float) {
-        gain = powf(10, decibels / 20)
+        let g = powf(10, decibels / 20)
+        q.async { self.gain = g }
     }
 
     /// Silent mode: the stream plays at zero volume. The meter still works.
-    func setMuted(_ muted: Bool) {
-        player.volume = muted ? 0 : 1
+    func setMuted(_ m: Bool) {
+        q.async {
+            self.muted = m
+            self.player.volume = m ? 0 : 1
+        }
     }
 
     func start() {
-        guard !running else { return }
-        do {
-            let fmt = AVAudioFormat(commonFormat: .pcmFormatFloat32, sampleRate: sampleRate, channels: 1, interleaved: false)!
-            format = fmt
-            engine.disconnectNodeOutput(player)
-            engine.connect(player, to: engine.mainMixerNode, format: fmt)
-            engine.prepare()
-            try engine.start()
-            lock.withLock { $0 = 0 }
-            running = true
-            priming = true        // The player starts when the cushion is full.
-        } catch {
-            Log.shared.add("audio engine did not start: \(error.localizedDescription)")
+        q.async {
+            self.wantRunning = true
+            self.startEngine()
         }
     }
 
     func stop() {
-        guard running else { return }
-        player.stop()
-        engine.stop()
-        running = false
-        lock.withLock { $0 = 0 }
+        q.async {
+            self.wantRunning = false
+            self.stopEngine()
+        }
     }
 
-    var isRunning: Bool { running && engine.isRunning }
+    /// A phone call, Siri, or an alarm stops the engine. Do not try to restart it until the end.
+    func setInterrupted(_ value: Bool) {
+        q.async {
+            self.interrupted = value
+            if value { self.stopEngine() } else if self.wantRunning { self.startEngine() }
+        }
+    }
+
+    /// It restarts the engine if it stopped behind our back. The monitor calls it twice a second.
+    func heal() {
+        q.async {
+            guard self.wantRunning, !self.interrupted, !self.engine.isRunning,
+                  Date().timeIntervalSince(self.lastHeal) > 2 else { return }
+            self.lastHeal = Date()
+            Log.shared.add("audio engine is not running: restart")
+            self.stopEngine()
+            self.startEngine()
+        }
+    }
+
+    /// After "media services were reset", the old engine and node are dead. Build new ones.
+    func recreate() {
+        q.async {
+            Log.shared.add("audio engine rebuilt")
+            self.stopEngine()
+            if let observer = self.observer { NotificationCenter.default.removeObserver(observer) }
+            self.engine = AVAudioEngine()
+            self.player = AVAudioPlayerNode()
+            self.buildGraph()
+            if self.wantRunning, !self.interrupted { self.startEngine() }
+        }
+    }
+
+    var isRunning: Bool { engineRunning.withLock { $0 } }
 
     /// The current delay of the queue, in seconds.
-    var bufferedSeconds: Double { Double(lock.withLock { $0 }) / sampleRate }
+    var bufferedSeconds: Double { Double(queuedFrames.withLock { $0 }) / sampleRate }
 
     /// It decodes one RTP payload and plays it.
     func enqueue(payload: ArraySlice<UInt8>, uLaw: Bool) {
         let table = uLaw ? G711.uLaw : G711.aLaw
-        let count = payload.count
-        guard count > 0 else { return }
+        guard !payload.isEmpty else { return }
 
-        // The level of the room, from the raw samples.
+        // The level of the room, from the raw samples, on the caller's queue.
         var sum: Float = 0
         for byte in payload {
             let s = Float(table[Int(byte)]) / 32768
             sum += s * s
         }
-        let rms = sqrtf(sum / Float(count))
-        onLevel?(Self.level(fromRMS: rms))
+        onLevel?(Self.level(fromRMS: sqrtf(sum / Float(payload.count))))
 
-        // A phone call stops the engine. play() on a stopped engine throws an exception.
-        guard running, engine.isRunning, let format else { return }
-        let queued = lock.withLock { $0 }
+        let bytes = Array(payload)
+        q.async { self.schedule(bytes, table: table) }
+    }
+
+    /// It maps the RMS to 0...1 on a dB scale. -58 dBFS is silence, and -12 dBFS is a cry.
+    static func level(fromRMS rms: Float) -> Float {
+        let db = 20 * log10f(max(rms, 1e-6))
+        return min(1, max(0, (db + 58) / 46))
+    }
+
+    // MARK: The queue-only work
+
+    private func buildGraph() {
+        engine.attach(player)
+        engine.connect(player, to: engine.mainMixerNode, format: format)
+        observer = NotificationCenter.default.addObserver(forName: .AVAudioEngineConfigurationChange,
+                                                          object: engine, queue: nil) { [weak self] _ in
+            // A route change (for example headphones) stops the engine. Start it again, on the queue.
+            guard let self else { return }
+            self.q.async {
+                Log.shared.add("audio configuration changed")
+                self.stopEngine()
+                if self.wantRunning, !self.interrupted { self.startEngine() }
+            }
+        }
+    }
+
+    private func startEngine() {
+        guard wantRunning, !interrupted, !engine.isRunning else { return }
+        engine.prepare()
+        do {
+            try engine.start()
+        } catch {
+            Log.shared.add("audio engine did not start: \(error.localizedDescription)")
+            engineRunning.withLock { $0 = false }
+            return
+        }
+        player.volume = muted ? 0 : 1
+        queuedFrames.withLock { $0 = 0 }
+        priming = true              // The player starts when the cushion is full.
+        engineRunning.withLock { $0 = true }
+    }
+
+    private func stopEngine() {
+        player.stop()
+        engine.stop()
+        queuedFrames.withLock { $0 = 0 }
+        priming = true
+        engineRunning.withLock { $0 = false }
+    }
+
+    private func schedule(_ bytes: [UInt8], table: [Int16]) {
+        // A stopped engine: play() would raise an exception. Wait for heal() instead.
+        guard wantRunning, engine.isRunning else { return }
+        let count = bytes.count
+        let queued = queuedFrames.withLock { $0 }
         if queued > maxFrames { return }                   // Too late. Drop it to catch up.
         if queued == 0, !priming {                         // An underrun. Collect a new cushion.
             priming = true
@@ -98,32 +189,17 @@ final class LiveAudioPlayer: @unchecked Sendable {
               let out = buffer.floatChannelData?[0] else { return }
         buffer.frameLength = AVAudioFrameCount(count)
         let g = gain
-        var i = 0
-        for byte in payload {
+        for (i, byte) in bytes.enumerated() {
             let s = Float(table[Int(byte)]) / 32768 * g
             out[i] = g > 1 ? tanhf(s) : s                   // A soft limit. No hard clipping.
-            i += 1
         }
-        lock.withLock { $0 += count }
+        queuedFrames.withLock { $0 += count }
         player.scheduleBuffer(buffer, completionCallbackType: .dataPlayedBack) { [weak self] _ in
-            self?.lock.withLock { $0 = max(0, $0 - count) }
+            self?.queuedFrames.withLock { $0 = max(0, $0 - count) }
         }
-        if priming, lock.withLock({ $0 }) >= startFrames {
+        if priming, queuedFrames.withLock({ $0 }) >= startFrames {
             priming = false
             player.play()
         }
-    }
-
-    /// It maps the RMS to 0...1 on a dB scale. -58 dBFS is silence, and -12 dBFS is a cry.
-    static func level(fromRMS rms: Float) -> Float {
-        let db = 20 * log10f(max(rms, 1e-6))
-        return min(1, max(0, (db + 58) / 46))
-    }
-
-    @objc private func configurationChanged(_ note: Notification) {
-        // A route change (for example headphones) stops the engine. Start it again.
-        Log.shared.add("audio route changed")
-        running = false
-        start()
     }
 }

@@ -57,54 +57,73 @@ final class NowPlaying {
 final class LiveActivityController {
     private var activity: Activity<NurseryActivityAttributes>?
     private var current: NurseryActivityAttributes.ContentState?
-    private var lastSent = Date.distantPast
-    private var pending: Task<Void, Never>?
+    private var pendingStatus: NurseryActivityAttributes.Status?
+    private var pendingSince = Date()
+    private var chain: Task<Void, Never>?
+
+    /// iOS ends a Live Activity after 8 hours. Start a new one before that, when the app is open.
+    private static let renewAfter: TimeInterval = 7 * 3600
 
     init() {
-        // An activity from an earlier run is stale. End it.
+        // An activity from an earlier run belongs to a dead process. End it.
         for old in Activity<NurseryActivityAttributes>.activities {
             Task { await old.end(nil, dismissalPolicy: .immediate) }
         }
     }
 
-    /// The app must be in the foreground to start an activity. It can update it from the background.
-    func update(status: NurseryActivityAttributes.Status, level: Int, enabled: Bool) {
+    /// It sends a status change only when the status holds for 2 s (a lost sound goes at once),
+    /// so a flapping status does not spend the update budget. It never sets a stale date:
+    /// in the background iOS may refuse the updates, and a stale date would then falsely say
+    /// that the app stopped.
+    func update(status: NurseryActivityAttributes.Status, enabled: Bool) {
         guard enabled, ActivityAuthorizationInfo().areActivitiesEnabled else { end(); return }
-        let since = (current?.status == status ? current?.since : nil) ?? Date()
-        let state = NurseryActivityAttributes.ContentState(status: status, level: level, since: since)
-        guard state != current else { return }
-        let statusChanged = state.status != current?.status
-        current = state
+        let now = Date()
+        let appActive = UIApplication.shared.applicationState == .active
 
-        // If the app stops, the activity shows "stale" after 30 seconds. The parent then knows.
-        let content = ActivityContent(state: state, staleDate: Date().addingTimeInterval(30))
-        if let activity {
-            // A level change goes out at most once each 1.5 s. A status change goes out at once.
-            guard statusChanged || Date().timeIntervalSince(lastSent) > 1.5 else { return }
-            lastSent = Date()
-            Task { await activity.update(content) }
-        } else if UIApplication.shared.applicationState == .active {
+        if let a = activity, a.activityState == .dismissed || a.activityState == .ended {
+            activity = nil                              // The user swiped it away, or iOS ended it.
+            current = nil
+        }
+        if let a = activity, appActive, now.timeIntervalSince(a.attributes.started) > Self.renewAfter {
+            end()                                       // Renew before the 8-hour limit.
+        }
+
+        guard let activity else {
+            guard appActive else { return }            // Only the foreground can start an activity.
+            let state = NurseryActivityAttributes.ContentState(status: status, since: now)
             do {
-                activity = try Activity<NurseryActivityAttributes>.request(
-                    attributes: NurseryActivityAttributes(room: "Chůvička"), content: content, pushType: nil)
-                lastSent = Date()
+                self.activity = try Activity<NurseryActivityAttributes>.request(
+                    attributes: NurseryActivityAttributes(room: "Chůvička", started: now),
+                    content: ActivityContent(state: state, staleDate: nil), pushType: nil)
+                current = state
             } catch {
                 Log.shared.add("live activity not started: \(error.localizedDescription)")
             }
+            return
         }
-    }
 
-    /// It keeps the stale date in the future while the app runs. It runs each 10 s.
-    func heartbeat() {
-        guard let activity, let current else { return }
-        lastSent = Date()
-        Task { await activity.update(ActivityContent(state: current, staleDate: Date().addingTimeInterval(30))) }
+        guard status != current?.status else { pendingStatus = nil; return }
+        if pendingStatus != status {
+            pendingStatus = status
+            pendingSince = now
+        }
+        guard status == .lost || now.timeIntervalSince(pendingSince) >= 2 else { return }
+        pendingStatus = nil
+        let state = NurseryActivityAttributes.ContentState(status: status, since: now)
+        current = state
+        let content = ActivityContent(state: state, staleDate: nil)
+        let previous = chain
+        chain = Task {                                  // In order, never two at once.
+            await previous?.value
+            await activity.update(content)
+        }
     }
 
     func end() {
         guard let activity else { return }
         self.activity = nil
         current = nil
+        pendingStatus = nil
         Task { await activity.end(nil, dismissalPolicy: .immediate) }
     }
 }
@@ -115,6 +134,7 @@ final class LiveActivityController {
 enum NurseryAlerts {
     private static let lossID = "nursery.sound.lost"
     private static let soundID = "nursery.sound.event"
+    private static let watchdogID = "nursery.watchdog"
 
     static func requestPermission() {
         UNUserNotificationCenter.current().requestAuthorization(options: [.alert, .sound]) { _, _ in }
@@ -127,6 +147,24 @@ enum NurseryAlerts {
     static func postLoss() {
         post(id: lossID, title: "Spojení s pokojíčkem se přerušilo",
              body: "Zvuk vypadl. Chůvička se pokusí připojit znovu sama.")
+    }
+
+    /// The watchdog. While the app runs in the background, it moves this notification
+    /// 150 s into the future each 30 s. If iOS stops the app, or the app crashes, nothing moves it,
+    /// and it fires. This is the one signal that works when the app itself cannot run.
+    static func armWatchdog() {
+        let content = UNMutableNotificationContent()
+        content.title = "Chůvička přestala hlídat"
+        content.body = "Aplikace neběží, takže dětský pokoj neslyšíte. Otevřete ji znovu."
+        content.sound = .default
+        content.interruptionLevel = .active
+        let trigger = UNTimeIntervalNotificationTrigger(timeInterval: 150, repeats: false)
+        UNUserNotificationCenter.current().add(UNNotificationRequest(identifier: watchdogID, content: content, trigger: trigger))
+    }
+
+    static func disarmWatchdog() {
+        UNUserNotificationCenter.current().removePendingNotificationRequests(withIdentifiers: [watchdogID])
+        UNUserNotificationCenter.current().removeDeliveredNotifications(withIdentifiers: [watchdogID])
     }
 
     static func clearLoss() {

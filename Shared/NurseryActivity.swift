@@ -18,13 +18,18 @@ struct NurseryActivityAttributes: ActivityAttributes {
         }
     }
 
+    /// iOS refuses Live Activity updates from an app that runs in the background only for audio
+    /// ("Process is only playing background media so is forbidden to update activity").
+    /// So the activity shows only what stays true without updates: that the monitor runs,
+    /// and since when. The live state in the background is in the Now Playing controls,
+    /// and a real stop gives a notification (the watchdog in NurseryAlerts).
     struct ContentState: Codable, Hashable {
         var status: Status
-        /// 0...4. The loudness of the room, in 5 steps.
-        var level: Int
         /// The start of the current status.
         var since: Date
     }
 
     var room: String
+    /// When the monitoring started. The widget shows "od 21:40" from it, with no updates.
+    var started: Date
 }

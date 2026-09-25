@@ -3,27 +3,57 @@ import Foundation
 import os
 import UIKit
 
-/// The last 200 events, for the diagnosis screen. The telephone gives no console,
-/// so this list is the only way to see why the sound stopped at 3 a.m.
+/// The events, for the diagnosis screen. The telephone gives no console, so this list is the
+/// only way to see why the sound stopped at 3 a.m. It is saved to a file, so it survives a crash
+/// or a stop by iOS: a gap in the times shows when the app did not run.
 final class Log: ObservableObject, @unchecked Sendable {
     static let shared = Log()
     struct Entry: Identifiable { let id = UUID(); let time: Date; let text: String }
 
     @Published private(set) var entries: [Entry] = []
     private let logger = Logger(subsystem: "cz.drabek.nursery", category: "monitor")
+    private let fileQueue = DispatchQueue(label: "nursery.log")
+    private let url: URL = {
+        let dir = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask)[0]
+        try? FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
+        return dir.appendingPathComponent("events.log")
+    }()
+    private static let keep = 400
+
+    init() {
+        // Load the last events of earlier runs, and keep the file short.
+        let lines = ((try? String(contentsOf: url, encoding: .utf8)) ?? "")
+            .split(separator: "\n").suffix(Self.keep).map(String.init)
+        try? (lines.joined(separator: "\n") + (lines.isEmpty ? "" : "\n")).write(to: url, atomically: true, encoding: .utf8)
+        entries = lines.compactMap { line in
+            guard let tab = line.firstIndex(of: "\t"),
+                  let t = TimeInterval(line[..<tab]) else { return nil }
+            return Entry(time: Date(timeIntervalSince1970: t), text: String(line[line.index(after: tab)...]))
+        }
+    }
 
     func add(_ text: String) {
         logger.info("\(text, privacy: .public)")
         let entry = Entry(time: Date(), text: text)
+        let line = String(format: "%.0f\t", entry.time.timeIntervalSince1970) + text.replacingOccurrences(of: "\n", with: " ") + "\n"
+        fileQueue.async {
+            if let handle = try? FileHandle(forWritingTo: self.url) {
+                handle.seekToEndOfFile()
+                handle.write(Data(line.utf8))
+                try? handle.close()
+            } else {
+                try? line.write(to: self.url, atomically: true, encoding: .utf8)
+            }
+        }
         DispatchQueue.main.async {
             self.entries.append(entry)
-            if self.entries.count > 200 { self.entries.removeFirst(self.entries.count - 200) }
+            if self.entries.count > Self.keep { self.entries.removeFirst(self.entries.count - Self.keep) }
         }
     }
 
     var text: String {
         let f = DateFormatter()
-        f.dateFormat = "HH:mm:ss"
+        f.dateFormat = "dd.MM. HH:mm:ss"
         return entries.map { "\(f.string(from: $0.time))  \($0.text)" }.joined(separator: "\n")
     }
 }
