@@ -131,11 +131,22 @@ private struct BabySetupView: View {
             }
             .pickerStyle(.segmented)
             if settings.unitVideo {
-                Picker("Kamera", selection: $settings.unitFront) {
-                    Text("Zadní (lepší obraz)").tag(false)
-                    Text("Přední").tag(true)
+                LabeledContent("Kamera") {
+                    Picker("Kamera", selection: $settings.unitFront) {
+                        Text("Zadní (lepší obraz)").tag(false)
+                        Text("Přední").tag(true)
+                    }
+                    .labelsHidden()
                 }
                 Toggle("Otočit obraz o 180°", isOn: $settings.unitFlip)
+            }
+            Divider()
+            Toggle(isOn: $settings.unitDirect) {
+                VStack(alignment: .leading, spacing: 2) {
+                    Text("Spojení i bez Wi-Fi")
+                    Text("Pro místa bez Wi-Fi routeru. Stojí víc baterie, proto je běžně vypnuté.")
+                        .font(.caption).foregroundStyle(.secondary)
+                }
             }
         }
         .padding(18)
@@ -202,11 +213,12 @@ private struct BabySendingView: View {
                     .padding(.horizontal, 30)
                 Spacer()
                 batteryLine
-                Text(awake ? " " : "Klepnutím zobrazíte ovládání")
+                Text("Klepnutím zobrazíte ovládání")
                     .font(.caption)
                     .foregroundStyle(.white.opacity(0.16))
                     .padding(.bottom, 20)
             }
+            .opacity(awake ? 0 : 1)          // The controls read alone, with nothing behind them.
             if awake {
                 controls
                     .transition(.opacity)
@@ -219,6 +231,11 @@ private struct BabySendingView: View {
         .onTapGesture { wake() }
         .onAppear { wake() }
         .onDisappear { sleepTask?.cancel(); restore() }
+        // The brightness is the whole phone's. Give it back when Chůvička leaves the screen.
+        .onReceive(NotificationCenter.default.publisher(for: UIApplication.willResignActiveNotification)) { _ in restore() }
+        .onReceive(NotificationCenter.default.publisher(for: UIApplication.didBecomeActiveNotification)) { _ in
+            if !awake { dim() }
+        }
         .task(id: awake) {
             // While awake, a fresh preview each second helps to aim the phone at the cot.
             guard awake else { return }
@@ -265,6 +282,10 @@ private struct BabySendingView: View {
                     .font(.caption)
                     .foregroundStyle(.white.opacity(0.6))
             }
+            Label(statusText, systemImage: unit.parents > 0 ? "dot.radiowaves.left.and.right" : "hourglass")
+                .font(.subheadline.weight(.semibold))
+                .foregroundStyle(unit.cameraPaused ? Theme.warn : (unit.parents > 0 ? Theme.calm : Color.white.opacity(0.7)))
+                .multilineTextAlignment(.center)
             HStack(spacing: 8) {
                 Text("Kód").foregroundStyle(.white.opacity(0.5))
                 Text(spaced(settings.unitCode)).monospacedDigit().foregroundStyle(.white.opacity(0.85))
@@ -283,7 +304,7 @@ private struct BabySendingView: View {
         }
         .padding(20)
         .frame(maxWidth: .infinity, maxHeight: .infinity)
-        .background(Color.black.opacity(0.88))
+        .overlay(alignment: .bottom) { batteryLine.padding(.bottom, 20) }
     }
 
     /// The controls show for 20 s, then the screen goes dark again.

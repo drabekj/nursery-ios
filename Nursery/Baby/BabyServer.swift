@@ -18,10 +18,13 @@ enum BabyService {
 final class BabyServer: @unchecked Sendable {
     let queue = DispatchQueue(label: "nursery.baby.server", qos: .userInteractive)
 
-    /// The count of parents that receive the stream now. It runs on the main queue.
-    var onClients: ((Int) -> Void)?
+    /// The parents that receive the stream now, and how many of them take the picture.
+    /// A parent in the sound view takes no picture, so the phone need not encode it. Main queue.
+    var onClients: ((_ all: Int, _ video: Int) -> Void)?
     /// A parent started to play. The encoder must make a keyframe now.
     var onNeedKeyframe: (() -> Void)?
+    /// The server cannot run, for example with no permission for the local network. Main queue.
+    var onFailure: ((String) -> Void)?
     /// A parent asked for a photo. The callback gets a JPEG, or nil.
     var onFrameRequest: ((@escaping @Sendable (Data?) -> Void) -> Void)?
 
@@ -31,6 +34,9 @@ final class BabyServer: @unchecked Sendable {
     private var sessions: [ObjectIdentifier: Session] = [:]
     private var sps: [UInt8]?
     private var pps: [UInt8]?
+    /// Wrong codes in the last minute. After 10, all requests fail for a minute.
+    /// Thus nobody on the Wi-Fi can try the million codes in a short time.
+    private var wrongCodes: [Date] = []
 
     init(code: String, video: Bool) {
         self.code = code
@@ -39,19 +45,25 @@ final class BabyServer: @unchecked Sendable {
 
     // MARK: Start and stop
 
-    func start(name: String) throws {
+    /// `peerToPeer` also offers the stream over peer-to-peer Wi-Fi, for a home with no router.
+    /// Apple advises it only when necessary: it costs battery and Wi-Fi speed all night.
+    func start(name: String, peerToPeer: Bool) throws {
         let tcp = NWProtocolTCP.Options()
         tcp.noDelay = true
         tcp.enableKeepalive = true
         tcp.keepaliveIdle = 5
         let params = NWParameters(tls: nil, tcp: tcp)
-        params.includePeerToPeer = true         // Also with no router: the phones connect directly.
+        params.includePeerToPeer = peerToPeer
         params.serviceClass = .interactiveVideo
         let listener = try NWListener(using: params)
         listener.service = NWListener.Service(name: name, type: BabyService.type)
         listener.newConnectionHandler = { [weak self] conn in self?.accept(conn) }
-        listener.stateUpdateHandler = { state in
-            if case .failed(let error) = state { Log.shared.add("baby server failed: \(error)") }
+        listener.stateUpdateHandler = { [weak self] state in
+            guard case .failed(let error) = state else { return }
+            Log.shared.add("baby server failed: \(error)")
+            DispatchQueue.main.async {
+                self?.onFailure?("Vysílání se nepodařilo spustit (\(error.localizedDescription)). Povolte Chůvičce místní síť v Nastavení iPhonu.")
+            }
         }
         listener.start(queue: queue)
         self.listener = listener
@@ -112,8 +124,10 @@ final class BabyServer: @unchecked Sendable {
     }
 
     fileprivate func reportClients() {
-        let n = sessions.values.filter(\.playing).count
-        DispatchQueue.main.async { self.onClients?(n) }
+        let playing = sessions.values.filter(\.playing)
+        let all = playing.count
+        let video = playing.filter(\.takesVideo).count
+        DispatchQueue.main.async { self.onClients?(all, video) }
     }
 
     fileprivate func started(_ session: Session) {
@@ -126,7 +140,18 @@ final class BabyServer: @unchecked Sendable {
 
     // MARK: The requests
 
-    fileprivate func pathIsValid(_ uri: String) -> Bool {
+    /// It checks the code, and counts the wrong ones.
+    fileprivate func authorized(_ uri: String) -> Bool {
+        let now = Date()
+        wrongCodes.removeAll { now.timeIntervalSince($0) > 60 }
+        guard wrongCodes.count < 10 else { return false }
+        if pathIsValid(uri) { return true }
+        wrongCodes.append(now)
+        Log.shared.add("baby server: a phone with a wrong code")
+        return false
+    }
+
+    private func pathIsValid(_ uri: String) -> Bool {
         // "rtsp://host/482913?audio/trackID=1" or "/482913/frame.jpeg": the code is the first path part.
         let afterHost: Substring
         if let range = uri.range(of: "://") {
@@ -160,10 +185,12 @@ final class BabyServer: @unchecked Sendable {
 }
 
 /// One parent. It reads the requests, and sends RTP to the channels that SETUP chose.
-private final class Session {
+/// All its state is on the server queue.
+private final class Session: @unchecked Sendable {
     let connection: NWConnection
     weak var server: BabyServer?
     private(set) var playing = false
+    var takesVideo: Bool { videoChannel != nil }
     private var buffer: [UInt8] = []
     private var sessionID = String(UInt32.random(in: 100_000...UInt32.max))
     private var videoChannel: UInt8?
@@ -204,8 +231,9 @@ private final class Session {
             guard keyframe else { return }
             waitForKeyframe = false
         }
-        // Too much is waiting: skip the picture until the next keyframe. The sound goes on.
-        if inFlight > 768 * 1024 {
+        // More than about 1 s of picture waits: skip the picture until the next keyframe.
+        // A late picture is worse than a missing one. The sound goes on.
+        if inFlight > 256 * 1024 {
             waitForKeyframe = true
             server?.requestKeyframe()
             return
@@ -216,7 +244,7 @@ private final class Session {
     }
 
     func sendAudio(_ payload: [UInt8], timestamp: UInt32) {
-        guard let channel = audioChannel, inFlight < 2 * 1024 * 1024 else { return }
+        guard let channel = audioChannel, inFlight < 512 * 1024 else { return }
         write(interleaved(audio.packet(payload[...], timestamp: timestamp, marker: false), channel: channel))
     }
 
@@ -273,7 +301,7 @@ private final class Session {
         let cseq = headers["cseq"] ?? "0"
 
         if version.hasPrefix("HTTP") {
-            guard method == "GET", server.pathIsValid(uri), uri.hasSuffix("/frame.jpeg") else {
+            guard method == "GET", uri.hasSuffix("/frame.jpeg"), server.authorized(uri) else {
                 httpReply("401 Unauthorized", type: "text/plain", body: Data("wrong code".utf8))
                 return
             }
@@ -287,9 +315,8 @@ private final class Session {
             return
         }
 
-        if method != "OPTIONS" && method != "GET_PARAMETER" && !server.pathIsValid(uri) {
+        if method != "OPTIONS" && method != "GET_PARAMETER" && !server.authorized(uri) {
             reply(401, "Unauthorized", cseq: cseq)
-            Log.shared.add("baby server: a phone with a wrong code")
             return
         }
         switch method {

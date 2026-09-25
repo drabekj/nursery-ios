@@ -109,6 +109,9 @@ struct SettingsView: View {
                         Text("Druhý iPhone s Chůvičkou u postýlky posílá obraz a zvuk přímo do tohoto telefonu. Nic neodchází na internet.")
                     }
                 }
+                .onChange(of: settings.source) { _, source in
+                    if source == .camera { Task { await camera.loadConfig() } }
+                }
 
                 Section {
                     Button {

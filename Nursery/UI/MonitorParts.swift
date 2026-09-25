@@ -68,6 +68,7 @@ struct VideoHero: View {
 /// and a fault always gives an action.
 struct VideoPlaceholder: View {
     @EnvironmentObject private var engine: MonitorEngine
+    @EnvironmentObject private var settings: Settings
     let inPictureInPicture: Bool
 
     var body: some View {
@@ -78,8 +79,10 @@ struct VideoPlaceholder: View {
             } else if case .offline(let why) = engine.overall {
                 Image(systemName: "wifi.exclamationmark").font(.system(size: 30)).foregroundStyle(Theme.alarm)
                     .symbolEffect(.pulse)
-                Text("Kamera je nedostupná").font(.headline)
-                Text("Zkontrolujte, že je telefon připojený k domácí Wi-Fi a že má Chůvička povolený přístup k místní síti.")
+                Text(settings.source == .phone ? "iPhone u miminka je nedostupný" : "Kamera je nedostupná").font(.headline)
+                Text(settings.source == .phone
+                     ? "Zkontrolujte, že na iPhonu u miminka běží vysílání a že jsou oba telefony na stejné Wi-Fi."
+                     : "Zkontrolujte, že je telefon připojený k domácí Wi-Fi a že má Chůvička povolený přístup k místní síti.")
                     .font(.caption).foregroundStyle(.secondary).multilineTextAlignment(.center)
                     .padding(.horizontal, 24)
                 HStack(spacing: 10) {
@@ -97,12 +100,20 @@ struct VideoPlaceholder: View {
                 Text(why).font(.caption2).foregroundStyle(.tertiary).lineLimit(1)
             } else {
                 ProgressView().controlSize(.large).tint(.white)
-                Text(engine.overall == .reconnecting ? "Obnovování spojení…" : "Připojování ke kameře…")
-                    .font(.subheadline).foregroundStyle(.secondary)
+                Text(waitingText).font(.subheadline).foregroundStyle(.secondary)
+                    .multilineTextAlignment(.center).padding(.horizontal, 24)
             }
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
         .background(Color.black.opacity(0.8))
+    }
+
+    private var waitingText: String {
+        if engine.overall == .reconnecting { return "Obnovování spojení…" }
+        guard settings.source == .phone else { return "Připojování ke kameře…" }
+        // Live sound with no picture: iOS stopped the camera of the iPhone at the baby.
+        return engine.overall == .live ? "Obraz stojí. Je iPhone u miminka odemčený a Chůvička na něm otevřená?"
+                                       : "Připojování k iPhonu u miminka…"
     }
 }
 

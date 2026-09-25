@@ -22,6 +22,7 @@ final class BabyCapture: NSObject, AVCaptureVideoDataOutputSampleBufferDelegate,
     private var forceKeyframe = true
     private var encoding = false
     private var frameWaiters: [@Sendable (Data?) -> Void] = []
+    private var pressureObservation: NSKeyValueObservation?
     private lazy var ciContext = CIContext()
 
     // The sound. All on the audio tap thread, after start.
@@ -63,14 +64,12 @@ final class BabyCapture: NSObject, AVCaptureVideoDataOutputSampleBufferDelegate,
         }
         session.commitConfiguration()
 
-        try device.lockForConfiguration()
-        device.activeVideoMinFrameDuration = CMTime(value: 1, timescale: 15)
-        device.activeVideoMaxFrameDuration = CMTime(value: 1, timescale: 15)
-        // A dark nursery: the camera may use a longer exposure.
-        if device.isLowLightBoostSupported { device.automaticallyEnablesLowLightBoostWhenAvailable = true }
-        device.unlockForConfiguration()
-
+        try setFrameRate(15, device: device)
         try makeEncoder(width: 1280, height: 720)
+        // A phone that sends all night gets warm. Apple's advice: a lower frame rate under pressure.
+        pressureObservation = device.observe(\.systemPressureState, options: [.new]) { [weak self] device, _ in
+            self?.pressureChanged(device.systemPressureState.level, device: device)
+        }
         videoQueue.async { self.session.startRunning() }      // It blocks. Not on the main thread.
     }
 
@@ -98,6 +97,29 @@ final class BabyCapture: NSObject, AVCaptureVideoDataOutputSampleBufferDelegate,
         }
     }
 
+    private func setFrameRate(_ fps: Int32, device: AVCaptureDevice) throws {
+        try device.lockForConfiguration()
+        device.activeVideoMinFrameDuration = CMTime(value: 1, timescale: fps)
+        device.activeVideoMaxFrameDuration = CMTime(value: 1, timescale: fps)
+        device.unlockForConfiguration()
+    }
+
+    /// 15 fps and 1.5 Mbit/s normally, 10 fps when the phone is hot, 5 fps when it is very hot.
+    private func pressureChanged(_ level: AVCaptureDevice.SystemPressureState.Level, device: AVCaptureDevice) {
+        let (fps, bitrate): (Int32, Int) = switch level {
+        case .serious: (10, 900_000)
+        case .critical, .shutdown: (5, 500_000)
+        default: (15, 1_500_000)
+        }
+        Log.shared.add("baby camera pressure \(level.rawValue): \(fps) fps")
+        try? setFrameRate(fps, device: device)
+        videoQueue.async {
+            guard let c = self.compression else { return }
+            _ = VTSessionSetProperty(c, key: kVTCompressionPropertyKey_AverageBitRate, value: NSNumber(value: bitrate))
+            _ = VTSessionSetProperty(c, key: kVTCompressionPropertyKey_ExpectedFrameRate, value: NSNumber(value: fps))
+        }
+    }
+
     private func makeEncoder(width: Int32, height: Int32) throws {
         var session: VTCompressionSession?
         let status = VTCompressionSessionCreate(allocator: nil, width: width, height: height,
@@ -105,7 +127,7 @@ final class BabyCapture: NSObject, AVCaptureVideoDataOutputSampleBufferDelegate,
                                                 imageBufferAttributes: nil, compressedDataAllocator: nil,
                                                 outputCallback: nil, refcon: nil, compressionSessionOut: &session)
         guard status == noErr, let session else { throw CaptureError.noEncoder }
-        let set = { (key: CFString, value: CFTypeRef) in VTSessionSetProperty(session, key: key, value: value) }
+        let set = { (key: CFString, value: CFTypeRef) in _ = VTSessionSetProperty(session, key: key, value: value) }
         set(kVTCompressionPropertyKey_RealTime, kCFBooleanTrue)
         set(kVTCompressionPropertyKey_ProfileLevel, kVTProfileLevel_H264_Main_AutoLevel)
         set(kVTCompressionPropertyKey_AllowFrameReordering, kCFBooleanFalse)      // No B-frames: less delay.
@@ -244,6 +266,7 @@ final class BabyCapture: NSObject, AVCaptureVideoDataOutputSampleBufferDelegate,
     // MARK: Stop
 
     func stop() {
+        pressureObservation = nil
         engine.inputNode.removeTap(onBus: 0)
         engine.stop()
         videoQueue.async {

@@ -50,13 +50,19 @@ final class BabyUnit: ObservableObject {
 
         let server = BabyServer(code: settings.unitCode, video: video)
         let capture = BabyCapture(server: server)
-        server.onClients = { [weak self, weak capture] n in
+        server.onClients = { [weak self, weak capture] all, video in
             MainActor.assumeIsolated {
-                self?.parents = n
-                capture?.setEncoding(n > 0)
+                self?.parents = all
+                capture?.setEncoding(video > 0)
             }
         }
         server.onNeedKeyframe = { [weak capture] in capture?.requestKeyframe() }
+        server.onFailure = { [weak self] message in
+            MainActor.assumeIsolated {
+                self?.stop()
+                self?.error = message
+            }
+        }
         server.onFrameRequest = { [weak capture] done in
             guard let capture else { done(nil); return }
             capture.requestFrame(done)
@@ -64,7 +70,7 @@ final class BabyUnit: ObservableObject {
         do {
             try capture.startAudio()
             if video { try capture.startVideo(front: settings.unitFront, flipped: settings.unitFlip) }
-            try server.start(name: settings.unitName.isEmpty ? "Pokojíček" : settings.unitName)
+            try server.start(name: Self.serviceName(settings.unitName), peerToPeer: settings.unitDirect)
         } catch {
             capture.stop()
             server.stop()
@@ -164,6 +170,14 @@ final class BabyUnit: ObservableObject {
                 self?.capture?.requestKeyframe()
             }
         })
+    }
+
+    /// A Bonjour name is at most 63 bytes of UTF-8. A Czech letter with a diacritic takes 2.
+    static func serviceName(_ name: String) -> String {
+        var s = name.trimmingCharacters(in: .whitespacesAndNewlines).precomposedStringWithCanonicalMapping
+        if s.isEmpty { s = "Pokojíček" }
+        while s.utf8.count > 63 { s.removeLast() }
+        return s
     }
 
     // MARK: Demo, for the screenshots

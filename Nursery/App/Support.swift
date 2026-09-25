@@ -121,6 +121,8 @@ final class Settings: ObservableObject {
     @Published var unitVideo: Bool { didSet { d.set(unitVideo, forKey: "unitVideo") } }
     @Published var unitFront: Bool { didSet { d.set(unitFront, forKey: "unitFront") } }
     @Published var unitFlip: Bool { didSet { d.set(unitFlip, forKey: "unitFlip") } }
+    /// Also offer the stream over peer-to-peer Wi-Fi, for a place with no Wi-Fi router.
+    @Published var unitDirect: Bool { didSet { d.set(unitDirect, forKey: "unitDirect") } }
     /// The main screen shows the room only, with no picture. See `MonitorEngine.setSoundView`.
     @Published var soundView: Bool { didSet { if !MonitorEngine.isDemo { d.set(soundView, forKey: "soundView") } } }
 
@@ -143,6 +145,7 @@ final class Settings: ObservableObject {
         unitVideo = d.object(forKey: "unitVideo") as? Bool ?? true
         unitFront = d.bool(forKey: "unitFront")
         unitFlip = d.bool(forKey: "unitFlip")
+        unitDirect = d.bool(forKey: "unitDirect")
         if MonitorEngine.isDemo {
             let screen = d.string(forKey: "demoScreen") ?? ""
             role = screen.hasPrefix("baby") ? .baby : .parent
