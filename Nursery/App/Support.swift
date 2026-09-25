@@ -149,8 +149,9 @@ final class Settings: ObservableObject {
 
     init() {
         // An install from before the guide has settings already: it needs no guide.
+        let defaults = UserDefaults.standard       // Not `d`: a closure may not capture self yet.
         let existing = ["host", "soundMode", "soundView", "source", "loudness", "alertOfferShown", "nightExplained", "role"]
-            .contains { d.object(forKey: $0) != nil }
+            .contains { defaults.object(forKey: $0) != nil }
         onboarded = d.object(forKey: "onboarded") as? Bool ?? existing
         cameraKind = CameraKind(rawValue: d.string(forKey: "cameraKind") ?? "") ?? .go2rtc
         rtspBrand = CameraBrand(rawValue: d.string(forKey: "rtspBrand") ?? "") ?? .tapo
