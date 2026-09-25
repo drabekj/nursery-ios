@@ -631,7 +631,8 @@ private struct RemotePage: View {
         case (.phone, _): return settings.babyAddresses.contains { Reach.split($0).map { Reach.isTailscale($0.host) } ?? false }
         case (.camera, .go2rtc):
             let host = settings.trimmedRemoteHost
-            return !host.isEmpty && (await Reach.canConnect(host: host, port: 8554, timeout: 2))
+            guard !host.isEmpty else { return false }
+            return await Reach.canConnect(host: host, port: 8554, timeout: 2)
         case (.camera, .rtsp): return false
         }
     }
