@@ -50,17 +50,20 @@ jobs:
           print(sorted(c,key=lambda x:x["name"])[-1]["udid"])')
           xcrun simctl boot "$UDID"
           xcrun simctl bootstatus "$UDID" -b
-          xcrun simctl ui "$UDID" appearance dark
+          xcrun simctl ui "$UDID" appearance light
           xcrun simctl status_bar "$UDID" override --time 21:41 --dataNetwork wifi --wifiMode active --wifiBars 3 --batteryState charged --batteryLevel 100 || true
           APP=$(find build/sim -name 'Nursery.app' -path '*iphonesimulator*' | head -1)
           xcrun simctl install "$UDID" "$APP"
           mkdir -p shots
-          for s in main aim activity night settings alerts; do
+          shot() {  # shot <file> <screen> <appearance>
             xcrun simctl terminate "$UDID" cz.drabek.nursery || true
-            xcrun simctl launch "$UDID" cz.drabek.nursery -demo YES -demoScreen $s -AppleLocale en_GB
+            xcrun simctl launch "$UDID" cz.drabek.nursery -demo YES -demoScreen "$2" -appearance "$3" -AppleLocale en_GB
             sleep 9
-            xcrun simctl io "$UDID" screenshot "shots/$s.png"
-          done
+            xcrun simctl io "$UDID" screenshot "shots/$1.png"
+          }
+          for s in main alerts aim activity settings night; do shot "$s" "$s" light; done
+          shot main-dark main dark
+          shot activity-dark activity dark
 
       - name: Upload the screenshots and logs
         if: always()

@@ -32,7 +32,7 @@ extension View {
         self
             .background(.ultraThinMaterial, in: shape)
             .background((tint ?? .clear).opacity(0.35), in: shape)
-            .overlay(shape.stroke(Color.white.opacity(0.12), lineWidth: 0.5))
+            .overlay(shape.stroke(Color.primary.opacity(0.1), lineWidth: 0.5))
     }
 }
 

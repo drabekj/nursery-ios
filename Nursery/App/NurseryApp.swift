@@ -15,14 +15,23 @@ struct NurseryApp: App {
         _camera = StateObject(wrappedValue: CameraControl(settings: s))
     }
 
+    /// Light is the default. Night mode and the picture are always dark.
+    private var scheme: ColorScheme? {
+        switch settings.appearance {
+        case .light: .light
+        case .dark: .dark
+        case .automatic: nil
+        }
+    }
+
     var body: some Scene {
         WindowGroup {
             MonitorView()
                 .environmentObject(settings)
                 .environmentObject(engine)
                 .environmentObject(camera)
-                .preferredColorScheme(.dark)
-                .tint(Theme.moon)
+                .preferredColorScheme(scheme)
+                .tint(Theme.accent)
                 .task {
                     guard !started else { return }
                     started = true

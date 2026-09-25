@@ -39,6 +39,7 @@ struct NightView: View {
                     .padding(.bottom, 20)
             }
         }
+        .environment(\.colorScheme, .dark)
         .contentShape(Rectangle())
         .onTapGesture {
             Haptics.tap()

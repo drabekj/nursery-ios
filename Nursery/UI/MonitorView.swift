@@ -246,7 +246,7 @@ struct AmbientBackground: View {
     private var glow: Color {
         switch status {
         case .lost: Theme.alarm
-        case .muted, .connecting: Color.white.opacity(0.4)
+        case .muted, .connecting: Theme.glowNeutral
         default: Theme.level(level)
         }
     }
@@ -298,7 +298,7 @@ struct AlertOffer: View {
         HStack(spacing: 14) {
             Image(systemName: "bell.badge.fill")
                 .font(.title2)
-                .foregroundStyle(Theme.moon)
+                .foregroundStyle(Theme.accent)
             VStack(alignment: .leading, spacing: 2) {
                 Text("Know when the sound stops").font(.subheadline.weight(.semibold))
                 Text("Nursery can alert you if the connection drops, or when the baby makes a sound.")

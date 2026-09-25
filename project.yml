@@ -46,7 +46,6 @@ targets:
           - UIInterfaceOrientationPortraitUpsideDown
           - UIInterfaceOrientationLandscapeLeft
           - UIInterfaceOrientationLandscapeRight
-        UIUserInterfaceStyle: Dark
         # The sound continues on the lock screen. Picture in picture also needs this mode.
         UIBackgroundModes:
           - audio

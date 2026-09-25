@@ -59,10 +59,15 @@ struct SettingsView: View {
                     Toggle(isOn: $settings.keepAwake) {
                         Label("Keep the Screen On", systemImage: "sun.max")
                     }
+                    Picker(selection: $settings.appearance) {
+                        ForEach(Settings.Appearance.allCases) { Text($0.title).tag($0) }
+                    } label: {
+                        Label("Appearance", systemImage: "circle.lefthalf.filled")
+                    }
                 } header: {
-                    Text("Picture")
+                    Text("Screen")
                 } footer: {
-                    Text("Only while Nursery is open. Night mode makes the screen almost black.")
+                    Text("Keep the Screen On works only while Nursery is open. Night mode is always dark, and makes the screen almost black.")
                 }
 
                 Section {

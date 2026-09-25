@@ -58,6 +58,7 @@ struct VideoHero: View {
         .animation(.easeInOut(duration: 0.25), value: engine.pictureLive)
         .animation(.spring(response: 0.3), value: zoom.scale > 1.05)
         .animation(.easeInOut(duration: 0.2), value: aiming)
+        .environment(\.colorScheme, .dark)      // Video looks best on black, in both modes.
     }
 }
 
@@ -401,7 +402,7 @@ struct FullScreenMonitor: View {
                         GlassGroup(spacing: 10) {
                             HStack(spacing: 10) {
                                 GlassCircleButton(symbol: engine.mode.symbol, size: 50,
-                                                  tint: engine.mode == .off ? .white : Theme.moon, label: "Sound") {
+                                                  tint: engine.mode == .off ? .primary : Theme.moon, label: "Sound") {
                                     Haptics.firm()
                                     if engine.mode == .off { engine.soundOn() } else { engine.mode = .off }
                                     scheduleHide()
@@ -421,6 +422,7 @@ struct FullScreenMonitor: View {
             }
         }
         .persistentSystemOverlays(.hidden)
+        .environment(\.colorScheme, .dark)
         .onAppear(perform: scheduleHide)
         .animation(.easeInOut(duration: 0.25), value: chrome)
     }

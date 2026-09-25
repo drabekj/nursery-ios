@@ -51,6 +51,12 @@ final class Settings: ObservableObject {
         var title: String { switch self { case .high: "2K (sharp zoom)"; case .low: "360p (saves battery)" } }
     }
 
+    enum Appearance: String, CaseIterable, Identifiable {
+        case light, dark, automatic
+        var id: String { rawValue }
+        var title: String { switch self { case .light: "Light"; case .dark: "Dark"; case .automatic: "Automatic" } }
+    }
+
     private let d = UserDefaults.standard
 
     @Published var host: String { didSet { d.set(host, forKey: "host") } }
@@ -61,6 +67,7 @@ final class Settings: ObservableObject {
     @Published var alertOnLoss: Bool { didSet { d.set(alertOnLoss, forKey: "alertOnLoss") } }
     @Published var alertOnSound: Bool { didSet { d.set(alertOnSound, forKey: "alertOnSound") } }
     @Published var sensitivity: Sensitivity { didSet { d.set(sensitivity.rawValue, forKey: "sensitivity") } }
+    @Published var appearance: Appearance { didSet { d.set(appearance.rawValue, forKey: "appearance") } }
 
     init() {
         host = d.string(forKey: "host") ?? "192.168.0.136"
@@ -71,6 +78,7 @@ final class Settings: ObservableObject {
         alertOnLoss = d.object(forKey: "alertOnLoss") as? Bool ?? true
         alertOnSound = d.object(forKey: "alertOnSound") as? Bool ?? false
         sensitivity = Sensitivity(rawValue: d.string(forKey: "sensitivity") ?? "") ?? .medium
+        appearance = Appearance(rawValue: d.string(forKey: "appearance") ?? "") ?? .light
     }
 
     var trimmedHost: String { host.trimmingCharacters(in: .whitespacesAndNewlines) }

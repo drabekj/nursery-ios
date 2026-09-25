@@ -1,18 +1,39 @@
 import SwiftUI
 import UIKit
 
-/// A night palette. The screen is often the only light in a dark bedroom,
-/// so the colours are dim, warm, and calm. Red means a fault, never a normal state.
+extension UIColor {
+    convenience init(hex: UInt32) {
+        self.init(red: CGFloat(hex >> 16 & 0xFF) / 255, green: CGFloat(hex >> 8 & 0xFF) / 255,
+                  blue: CGFloat(hex & 0xFF) / 255, alpha: 1)
+    }
+}
+
+extension Color {
+    /// A colour with one value for light mode and one for dark mode.
+    init(light: UInt32, dark: UInt32) {
+        self.init(uiColor: UIColor { $0.userInterfaceStyle == .dark ? UIColor(hex: dark) : UIColor(hex: light) })
+    }
+}
+
+/// Two palettes. Light ("morning nursery"): a soft dawn blue-grey with a warm amber accent.
+/// Dark ("night"): deep navy with warm moonlight; the screen is often the only light in a bedroom.
+/// The picture area and Night mode are always dark. Red means a fault, never a normal state.
 enum Theme {
-    static let skyTop = Color(red: 0.035, green: 0.055, blue: 0.12)
-    static let skyBottom = Color(red: 0.07, green: 0.09, blue: 0.19)
-    static let card = Color.white.opacity(0.055)
-    static let cardStroke = Color.white.opacity(0.08)
-    static let moon = Color(red: 0.97, green: 0.85, blue: 0.55)       // The accent. Warm moonlight.
-    static let calm = Color(red: 0.45, green: 0.89, blue: 0.72)       // Live, listening.
-    static let warn = Color(red: 1.0, green: 0.72, blue: 0.38)        // Connecting.
-    static let alarm = Color(red: 1.0, green: 0.42, blue: 0.42)       // The sound is lost.
-    static let secondaryText = Color.white.opacity(0.6)
+    static let skyTop = Color(light: 0xF6F8FC, dark: 0x090E1F)
+    static let skyBottom = Color(light: 0xE9EDF6, dark: 0x121831)
+    static let card = Color.primary.opacity(0.05)
+    static let cardStroke = Color.primary.opacity(0.08)
+    /// The fill of an active control. It stays yellow in both modes, with dark text on it.
+    static let moon = Color(light: 0xF5CF6E, dark: 0xF7D98C)
+    /// The tint of text, icons, and system controls. Deeper in light mode, for contrast.
+    static let accent = Color(light: 0xA86B0C, dark: 0xF7D98C)
+    static let calm = Color(light: 0x1C9A6C, dark: 0x73E3B8)          // Live, listening.
+    static let warn = Color(light: 0xD27D12, dark: 0xFFB861)          // Connecting, a sound now.
+    static let alarm = Color(light: 0xD8433D, dark: 0xFF6B6B)         // The sound is lost.
+    static let loud = Color(light: 0xE0613F, dark: 0xFF9973)
+    static let middle = Color(light: 0xE3A020, dark: 0xF7D98C)
+    static let glowNeutral = Color(light: 0x9AA3B8, dark: 0x5A6070)
+    static let secondaryText = Color.secondary
 
     static var background: some View {
         LinearGradient(colors: [skyTop, skyBottom], startPoint: .top, endPoint: .bottom).ignoresSafeArea()
@@ -22,15 +43,15 @@ enum Theme {
     static func level(_ v: Float) -> Color {
         switch v {
         case ..<0.35: return calm
-        case ..<0.7: return moon
-        default: return Color(red: 1.0, green: 0.6, blue: 0.45)
+        case ..<0.7: return middle
+        default: return loud
         }
     }
 
     static func color(for status: NurseryActivityAttributes.Status) -> Color {
         switch status {
         case .listening: calm
-        case .silent: moon
+        case .silent: accent
         case .connecting: warn
         case .lost: alarm
         case .muted: secondaryText
@@ -124,7 +145,7 @@ struct Card<Content: View>: View {
 struct GlassCircleButton: View {
     let symbol: String
     var size: CGFloat = 40
-    var tint: Color = .white
+    var tint: Color = .primary
     let label: String
     let action: () -> Void
 
