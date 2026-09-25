@@ -262,11 +262,9 @@ struct StatusBadge: View {
             PulseDot(color: color, animated: overall == .live || overall == .soundOnly)
             Text(text)
                 .font(.subheadline.weight(.semibold))
-                .contentTransition(.opacity)
         }
         .fixedSize()
         .accessibilityElement(children: .combine)
-        .animation(.easeInOut, value: text)
     }
 
     private var text: String {

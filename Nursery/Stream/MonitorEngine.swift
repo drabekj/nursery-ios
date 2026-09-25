@@ -90,8 +90,8 @@ final class MonitorEngine: ObservableObject {
     private var everHeard = false
     private var lostSince: Date?
     private var alerted = false
-    private var levelCandidate: RoomLevel?
-    private var levelCandidateSince = Date()
+    private var louderSince: Date?
+    private var quieterSince: Date?
     private var lastSoundAlert = Date.distantPast
     private var ticks = 0
     private var timer: Timer?
@@ -459,16 +459,26 @@ final class MonitorEngine: ObservableObject {
         if ticks % 100 == 0 { activity.heartbeat() }
     }
 
+    /// A louder word shows when the room stays louder for 0.4 s, whatever the louder word is.
+    /// A quieter word shows when the room stays quieter for 2.5 s.
     private func holdRoomLevel(_ next: RoomLevel, now: Date) {
-        guard next != roomLevel else { levelCandidate = nil; return }
-        if levelCandidate != next {
-            levelCandidate = next
-            levelCandidateSince = now
-        }
-        let hold: TimeInterval = next > roomLevel ? 0.4 : 2.5
-        if now.timeIntervalSince(levelCandidateSince) >= hold {
-            roomLevel = next
-            levelCandidate = nil
+        if next > roomLevel {
+            quieterSince = nil
+            if louderSince == nil { louderSince = now }
+            if let since = louderSince, now.timeIntervalSince(since) >= 0.4 {
+                roomLevel = next
+                louderSince = nil
+            }
+        } else if next < roomLevel {
+            louderSince = nil
+            if quieterSince == nil { quieterSince = now }
+            if let since = quieterSince, now.timeIntervalSince(since) >= 2.5 {
+                roomLevel = next
+                quieterSince = nil
+            }
+        } else {
+            louderSince = nil
+            quieterSince = nil
         }
     }
 

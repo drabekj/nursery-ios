@@ -96,13 +96,12 @@ enum RoomLevel: Int, Comparable {
 }
 
 /// A dot that stays at full colour, with a soft ring that grows and fades.
-/// A dimming dot looked brown in the dark; a ring keeps the colour true.
+/// The loop runs in its own phase animator, so it never animates the views around it.
 struct PulseDot: View {
     let color: Color
     var size: CGFloat = 8
     var animated = true
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
-    @State private var grow = false
 
     var body: some View {
         Circle()
@@ -112,12 +111,12 @@ struct PulseDot: View {
                 if animated && !reduceMotion {
                     Circle()
                         .stroke(color, lineWidth: 1.5)
-                        .scaleEffect(grow ? 2.4 : 1)
-                        .opacity(grow ? 0 : 0.7)
+                        .phaseAnimator([false, true]) { ring, grown in
+                            ring.scaleEffect(grown ? 2.4 : 1).opacity(grown ? 0 : 0.7)
+                        } animation: { grown in
+                            grown ? .easeOut(duration: 1.4) : nil
+                        }
                 }
-            }
-            .onAppear {
-                withAnimation(.easeOut(duration: 1.4).repeatForever(autoreverses: false)) { grow = true }
             }
             .accessibilityHidden(true)
     }
