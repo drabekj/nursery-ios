@@ -48,8 +48,8 @@ enum BabyLink {
         .service(name: name, type: BabyService.type, domain: "local.", interface: nil)
     }
 
-    static func frame(name: String, code: String) async -> UIImage? {
-        guard let data = await fetch(endpoint: endpoint(name: name), path: "/\(code)/frame.jpeg") else { return nil }
+    static func frame(endpoint: NWEndpoint, code: String) async -> UIImage? {
+        guard let data = await fetch(endpoint: endpoint, path: "/\(code)/frame.jpeg") else { return nil }
         return UIImage(data: data)
     }
 

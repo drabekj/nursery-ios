@@ -56,6 +56,9 @@ final class RTSPClient: @unchecked Sendable {
     private var pending: [Int: (Result<Response, Error>) -> Void] = [:]
     private var keepAlive: DispatchSourceTimer?
     private var closed = false
+    private var reported: [String] = []
+    /// The addresses that the phone at the baby reported in DESCRIBE, for the time away from home.
+    var serverAddresses: [String] { queue.sync { reported } }
 
     init(url: String, endpoint: NWEndpoint? = nil) throws {
         guard let u = URLComponents(string: url), u.scheme == "rtsp", let host = u.host else { throw Failure.badURL }
@@ -75,6 +78,9 @@ final class RTSPClient: @unchecked Sendable {
         let describe = try await request("DESCRIBE", url, ["Accept": "application/sdp"])
         let base = describe.headers["content-base"] ?? describe.headers["content-location"] ?? url
         let sdp = SDP.parse(String(decoding: describe.body, as: UTF8.self))
+        let addresses = (describe.headers["x-chuvicka-addresses"] ?? "")
+            .split(separator: ",").map { $0.trimmingCharacters(in: .whitespaces) }.filter { !$0.isEmpty }
+        queue.sync { self.reported = addresses }
 
         var tracks: [Track] = []
         for t in sdp where Self.isUsable(t) {

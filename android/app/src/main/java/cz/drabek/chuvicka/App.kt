@@ -51,6 +51,12 @@ object Settings {
     val role = MutableStateFlow(Role.PARENT)
     val source = MutableStateFlow(Source.CAMERA)
     val host = MutableStateFlow("192.168.0.136")
+    /** The Pi's Tailscale address, for the time away from home. */
+    val remoteHost = MutableStateFlow("100.104.188.72")
+    /** The Pi now: at home its LAN address, away its Tailscale address. The monitor sets it. */
+    val activeHost = MutableStateFlow("")
+    /** The addresses that the phone at the baby reported ("100.x.y.z:8555" first). */
+    val babyAddresses = MutableStateFlow<List<String>>(emptyList())
     val babyName = MutableStateFlow("")
     val babyCode = MutableStateFlow("")
     val soundView = MutableStateFlow(false)
@@ -67,6 +73,8 @@ object Settings {
         role.value = enumValueOrNull<Role>(p.getString("role", null)) ?: Role.PARENT
         source.value = enumValueOrNull<Source>(p.getString("source", null)) ?: Source.CAMERA
         host.value = p.getString("host", null) ?: "192.168.0.136"
+        remoteHost.value = p.getString("remoteHost", null) ?: "100.104.188.72"
+        babyAddresses.value = p.getString("babyAddresses", "")!!.split(",").filter { it.isNotBlank() }
         babyName.value = p.getString("babyName", "") ?: ""
         babyCode.value = p.getString("babyCode", "") ?: ""
         soundView.value = p.getBoolean("soundView", false)
@@ -90,6 +98,14 @@ object Settings {
         }.apply()
     }
 
+    fun setBabyAddresses(list: List<String>) {
+        babyAddresses.value = list
+        p.edit().putString("babyAddresses", list.joinToString(",")).apply()
+    }
+
+    /** The Pi now. */
+    val serverHost get() = activeHost.value.ifEmpty { host.value.trim() }
+
     fun newCode() = "%06d".format(Random.nextInt(0, 1_000_000))
 
     /** The stream URL. The Tapo camera is read through go2rtc on the Pi, never directly. */
@@ -97,7 +113,7 @@ object Settings {
         // Sound only: the 360p stream with its picture, which the app does not draw. Not "?audio":
         // go2rtc then asks the Tapo camera for the sound track only, and the camera sends nothing.
         val name = if (soundOnly) "nursery_sd" else "nursery"
-        return "rtsp://${host.value.trim()}:8554/$name"
+        return "rtsp://$serverHost:8554/$name"
     }
 
     private inline fun <reified T : Enum<T>> enumValueOrNull(name: String?): T? =

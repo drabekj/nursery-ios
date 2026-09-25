@@ -7,6 +7,7 @@ struct SettingsView: View {
     @EnvironmentObject private var battery: BatteryMonitor
     @Environment(\.dismiss) private var dismiss
     @State private var host = ""
+    @State private var remote = ""
     @State private var confirmBaby = false
 
     var body: some View {
@@ -86,8 +87,17 @@ struct SettingsView: View {
                             .textInputAutocapitalization(.never)
                             .autocorrectionDisabled()
                             .onSubmit(applyHost)
-                        if host.trimmingCharacters(in: .whitespaces) != settings.trimmedHost {
-                            Button("Připojit k této adrese", action: applyHost)
+                        LabeledContent("Mimo domov") {
+                            TextField("Adresa přes Tailscale", text: $remote)
+                                .multilineTextAlignment(.trailing)
+                                .keyboardType(.numbersAndPunctuation)
+                                .textInputAutocapitalization(.never)
+                                .autocorrectionDisabled()
+                                .onSubmit(applyHost)
+                        }
+                        if host.trimmingCharacters(in: .whitespaces) != settings.trimmedHost
+                            || remote.trimmingCharacters(in: .whitespaces) != settings.trimmedRemoteHost {
+                            Button("Použít tyto adresy", action: applyHost)
                         }
                     } else {
                         NavigationLink {
@@ -104,9 +114,9 @@ struct SettingsView: View {
                     Text("Zdroj")
                 } footer: {
                     if settings.source == .camera {
-                        Text("Počítač, na kterém běží go2rtc. Chůvička čte obraz z go2rtc, nikdy přímo z kamery, protože kamera zvládne jen dvě připojení.")
+                        Text("Počítač, na kterém běží go2rtc. Doma se Chůvička připojí na jeho adresu v síti. Mimo domov použije jeho adresu přes Tailscale, když je v telefonu Tailscale zapnutý.")
                     } else {
-                        Text("Druhý iPhone s Chůvičkou u postýlky posílá obraz a zvuk přímo do tohoto telefonu. Nic neodchází na internet.")
+                        Text(babyFooter)
                     }
                 }
                 .onChange(of: settings.source) { _, source in
@@ -135,6 +145,7 @@ struct SettingsView: View {
 
                 Section("Stav") {
                     row("Připojení", connectionText)
+                    row("Cesta", engine.viaTailscale ? "Přes Tailscale" : "Doma")
                     row("Zvuk", engine.soundStatus.title)
                     row("Zpoždění zvuku", "\(engine.delayMilliseconds) ms")
                     row("Obraz", "\(Int(engine.videoSize.width)) × \(Int(engine.videoSize.height))")
@@ -159,7 +170,7 @@ struct SettingsView: View {
                 Section {
                     row("Verze", Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String ?? "–")
                 } footer: {
-                    Text("Chůvička funguje jen doma: v domácí síti, nebo přímo mezi dvěma iPhony. Obraz ani zvuk nikdy neopustí váš domov.")
+                    Text("Doma jde obraz v domácí síti, mimo domov šifrovaně přes váš Tailscale. Obraz ani zvuk nikdy nejdou přes cizí server.")
                 }
             }
             .navigationTitle("Nastavení")
@@ -167,8 +178,15 @@ struct SettingsView: View {
             .toolbar {
                 ToolbarItem(placement: .confirmationAction) { Button("Hotovo") { applyHost(); dismiss() } }
             }
-            .onAppear { host = settings.host }
+            .onAppear { host = settings.host; remote = settings.remoteHost }
         }
+    }
+
+    private var babyFooter: String {
+        let base = "Druhý telefon s Chůvičkou u postýlky, iPhone nebo Android, posílá obraz a zvuk přímo do tohoto telefonu. Nic neodchází na internet."
+        let tailscale = settings.babyAddresses.first { Reach.split($0).map { Reach.isTailscale($0.host) } ?? false }
+        if let tailscale { return base + " Mimo domov přes Tailscale: \(tailscale)." }
+        return base + " Pro hlídání mimo domov nainstalujte Tailscale i na telefon u miminka a jednou se k němu připojte doma."
     }
 
     private var connectionText: String {
@@ -187,8 +205,10 @@ struct SettingsView: View {
 
     private func applyHost() {
         let h = host.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !h.isEmpty, h != settings.trimmedHost else { return }
+        let r = remote.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !h.isEmpty, h != settings.trimmedHost || r != settings.trimmedRemoteHost else { return }
         settings.host = h
+        settings.remoteHost = r
         engine.reconnect(why: "new server address")
         Task { await camera.loadConfig() }
     }

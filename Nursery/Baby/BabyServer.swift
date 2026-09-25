@@ -4,6 +4,7 @@ import Network
 /// The Bonjour type of the iPhone at the baby. It must also be in NSBonjourServices.
 enum BabyService {
     static let type = "_chuvicka._tcp"
+    static let port: NWEndpoint.Port = 8555
 }
 
 /// A small RTSP server on the iPhone at the baby. It speaks the same RTSP as go2rtc,
@@ -55,7 +56,8 @@ final class BabyServer: @unchecked Sendable {
         let params = NWParameters(tls: nil, tcp: tcp)
         params.includePeerToPeer = peerToPeer
         params.serviceClass = .interactiveVideo
-        let listener = try NWListener(using: params)
+        // A fixed port, so the address that a parent keeps for the time away stays valid.
+        let listener = (try? NWListener(using: params, on: BabyService.port)) ?? (try NWListener(using: params))
         listener.service = NWListener.Service(name: name, type: BabyService.type)
         listener.newConnectionHandler = { [weak self] conn in self?.accept(conn) }
         listener.stateUpdateHandler = { [weak self] state in
@@ -163,6 +165,8 @@ final class BabyServer: @unchecked Sendable {
         let first = afterHost.split(separator: "/").first.map { $0.split(separator: "?").first ?? "" } ?? ""
         return first == code
     }
+
+    fileprivate var port: UInt16 { listener?.port?.rawValue ?? BabyService.port.rawValue }
 
     fileprivate func sdp(audioOnly: Bool) -> String {
         var s = "v=0\r\no=- 0 0 IN IP4 0.0.0.0\r\ns=Chuvicka\r\nt=0 0\r\n"
@@ -326,7 +330,10 @@ private final class Session: @unchecked Sendable {
             reply(200, "OK", cseq: cseq, ["Session": sessionID])
         case "DESCRIBE":
             let sdp = server.sdp(audioOnly: uri.contains("?audio"))
-            reply(200, "OK", cseq: cseq, ["Content-Type": "application/sdp"], body: sdp)
+            // The addresses of this phone, the Tailscale one first: a parent keeps them for the time away.
+            let port = server.port
+            let addresses = Reach.localAddresses().map { "\($0):\(port)" }.joined(separator: ", ")
+            reply(200, "OK", cseq: cseq, ["Content-Type": "application/sdp", "X-Chuvicka-Addresses": addresses], body: sdp)
         case "SETUP":
             let transport = headers["transport"] ?? ""
             var channel: UInt8 = uri.contains("trackID=0") ? 0 : 2

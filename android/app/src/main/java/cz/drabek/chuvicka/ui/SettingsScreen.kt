@@ -40,28 +40,46 @@ fun SettingsScreen(back: () -> Unit, openPairing: () -> Unit, openLog: () -> Uni
     val loudness by Settings.loudness.collectAsState()
     val appearance by Settings.appearance.collectAsState()
     val alertOnLoss by Settings.alertOnLoss.collectAsState()
+    val remoteHost by Settings.remoteHost.collectAsState()
+    val babyAddresses by Settings.babyAddresses.collectAsState()
+    val viaTailscale by Monitor.viaTailscale.collectAsState()
     var hostField by remember { mutableStateOf(host) }
+    var remoteField by remember { mutableStateOf(remoteHost) }
     var confirmBaby by remember { mutableStateOf(false) }
 
     Page("Nastavení", back) {
+        val babyTailscale = babyAddresses.firstOrNull { cz.drabek.chuvicka.proto.RtspClient.isTailscale(it.substringBeforeLast(":")) }
         Section("Zdroj", footer = if (source == Settings.Source.CAMERA)
-            "Počítač, na kterém běží go2rtc. Chůvička čte obraz z go2rtc, nikdy přímo z kamery."
-        else "Druhý telefon s Chůvičkou u postýlky posílá obraz a zvuk přímo do tohoto telefonu. Může to být iPhone i Android. Nic neodchází na internet.") {
+            "Počítač, na kterém běží go2rtc. Doma se Chůvička připojí na jeho adresu v síti. Mimo domov použije adresu přes Tailscale, když je v telefonu Tailscale zapnutý."
+        else "Druhý telefon s Chůvičkou u postýlky, iPhone nebo Android, posílá obraz a zvuk přímo do tohoto telefonu. " +
+            (if (babyTailscale != null) "Mimo domov přes Tailscale: $babyTailscale."
+             else "Pro hlídání mimo domov nainstalujte Tailscale i na telefon u miminka a jednou se k němu připojte doma.")) {
             Choice("Obraz a zvuk z", listOf(Settings.Source.CAMERA to "Kamera v pokojíčku", Settings.Source.PHONE to "Telefon u miminka"), source) {
                 Settings.set(Settings.source, "source", it); Monitor.reconnect("source changed")
             }
             if (source == Settings.Source.CAMERA) {
                 OutlinedTextField(hostField, { hostField = it }, Modifier.fillMaxWidth().padding(16.dp), label = { Text("Adresa serveru") },
                     singleLine = true, keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Uri))
-                if (hostField.trim() != host) {
-                    TextButton(onClick = { Settings.set(Settings.host, "host", hostField.trim()); Monitor.reconnect("new server address") },
-                        Modifier.padding(horizontal = 8.dp)) { Text("Připojit k této adrese") }
+                OutlinedTextField(remoteField, { remoteField = it }, Modifier.fillMaxWidth().padding(horizontal = 16.dp).padding(bottom = 16.dp),
+                    label = { Text("Mimo domov (Tailscale)") }, singleLine = true, keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Uri))
+                if (hostField.trim() != host || remoteField.trim() != remoteHost) {
+                    TextButton(onClick = {
+                        Settings.set(Settings.host, "host", hostField.trim())
+                        Settings.set(Settings.remoteHost, "remoteHost", remoteField.trim())
+                        Monitor.reconnect("new server address")
+                    }, Modifier.padding(horizontal = 8.dp)) { Text("Použít tyto adresy") }
                 }
             } else {
                 Row(Modifier.fillMaxWidth().clickable(onClick = openPairing).padding(16.dp), verticalAlignment = Alignment.CenterVertically) {
                     Text("Telefon u miminka", Modifier.weight(1f), color = colors.ink)
                     Text(babyName.ifEmpty { "Nespárováno" }, color = colors.accent)
                 }
+            }
+        }
+        Section("Stav") {
+            Row(Modifier.fillMaxWidth().padding(16.dp)) {
+                Text("Cesta", Modifier.weight(1f), color = colors.ink)
+                Text(if (viaTailscale) "Přes Tailscale" else "Doma", color = colors.muted)
             }
         }
         Section("Zvuk", footer = "Zesílená hlasitost přidá 12 dB, maximální 20 dB. Podržením tlačítka Zvuk zvolíte tichý režim: Chůvička nic nehraje, ale při zvuku upozorní.") {
@@ -81,7 +99,7 @@ fun SettingsScreen(back: () -> Unit, openPairing: () -> Unit, openLog: () -> Uni
         Section("Diagnostika") {
             Row(Modifier.fillMaxWidth().clickable(onClick = openLog).padding(16.dp)) { Text("Technický záznam", color = colors.ink) }
         }
-        Text("Chůvička funguje jen doma: v domácí síti, nebo přímo mezi dvěma telefony. Obraz ani zvuk nikdy neopustí váš domov.",
+        Text("Doma jde obraz v domácí síti, mimo domov šifrovaně přes váš Tailscale. Obraz ani zvuk nikdy nejdou přes cizí server.",
             Modifier.padding(horizontal = 20.dp, vertical = 8.dp), fontSize = 13.sp, color = colors.muted)
     }
     if (confirmBaby) AlertDialog(

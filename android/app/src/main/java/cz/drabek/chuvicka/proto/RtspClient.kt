@@ -26,6 +26,8 @@ class RtspClient(private val url: String, private val host: String, private val 
     private var cseq = 0
     private var session: String? = null
     @Volatile private var closed = false
+    /** The addresses that the phone at the baby reported in DESCRIBE, for the time away from home. */
+    var serverAddresses: List<String> = emptyList(); private set
 
     /** It connects, reads the SDP, and sets up the usable tracks. Then call [play]. */
     fun start(): List<Track> {
@@ -42,6 +44,7 @@ class RtspClient(private val url: String, private val host: String, private val 
         val describe = request("DESCRIBE", url, mapOf("Accept" to "application/sdp"))
         val base = describe.headers["content-base"] ?: describe.headers["content-location"] ?: url
         val sdp = Sdp.parse(String(describe.body, Charsets.UTF_8))
+        serverAddresses = describe.headers["x-chuvicka-addresses"]?.split(",")?.map { it.trim() }?.filter { it.isNotEmpty() } ?: emptyList()
         val tracks = ArrayList<Track>()
         for (t in sdp) {
             if (!isUsable(t) || tracks.any { it.sdp.kind == t.kind }) continue
@@ -161,6 +164,20 @@ class RtspClient(private val url: String, private val host: String, private val 
     }
 
     companion object {
+        /** A quick TCP test: is this address here? Away from home the LAN address does not answer. */
+        fun canConnect(host: String, port: Int, timeoutMs: Int = 1200): Boolean = try {
+            Socket().use { it.connect(InetSocketAddress(host, port), timeoutMs) }
+            true
+        } catch (_: IOException) {
+            false
+        }
+
+        /** Tailscale gives each device an address in 100.64.0.0/10. */
+        fun isTailscale(host: String): Boolean {
+            val p = host.split(".").mapNotNull { it.toIntOrNull() }
+            return p.size == 4 && p[0] == 100 && p[1] in 64..127
+        }
+
         fun isUsable(t: SdpTrack) =
             (t.kind == "video" && t.codec == "H264") || (t.kind == "audio" && (t.codec == "PCMA" || t.codec == "PCMU"))
 

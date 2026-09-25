@@ -37,7 +37,8 @@ class BabyServer(
 
     /** It opens a port that the system chooses, and returns it for the mDNS registration. */
     fun start(): Int {
-        val s = ServerSocket(0)
+        // A fixed port, so the address that a parent keeps for the time away stays valid.
+        val s = try { ServerSocket(PORT) } catch (e: IOException) { ServerSocket(0) }
         server = s
         running = true
         Thread({
@@ -52,6 +53,19 @@ class BabyServer(
         Log.add("baby server on port ${s.localPort}")
         return s.localPort
     }
+
+    private val port get() = server?.localPort ?: PORT
+
+    /** This phone's IPv4 addresses, the Tailscale one first. A parent keeps them for the time away. */
+    private fun addresses(): String = java.net.NetworkInterface.getNetworkInterfaces().toList()
+        .filter { it.isUp && !it.isLoopback }
+        .flatMap { it.inetAddresses.toList() }
+        .filterIsInstance<java.net.Inet4Address>()
+        .map { it.hostAddress ?: "" }
+        .filter { it.isNotEmpty() && !it.startsWith("169.254.") }
+        .distinct()
+        .sortedByDescending { cz.drabek.chuvicka.proto.RtspClient.isTailscale(it) }
+        .joinToString(", ") { "$it:$port" }
 
     fun stop() {
         running = false
@@ -254,7 +268,8 @@ class BabyServer(
             when (method) {
                 "OPTIONS" -> reply(200, "OK", cseq, mapOf("Public" to "OPTIONS, DESCRIBE, SETUP, PLAY, TEARDOWN, GET_PARAMETER"))
                 "GET_PARAMETER" -> reply(200, "OK", cseq, mapOf("Session" to sessionId))
-                "DESCRIBE" -> reply(200, "OK", cseq, mapOf("Content-Type" to "application/sdp"), sdp("?audio" in uri))
+                "DESCRIBE" -> reply(200, "OK", cseq,
+                    mapOf("Content-Type" to "application/sdp", "X-Chuvicka-Addresses" to addresses()), sdp("?audio" in uri))
                 "SETUP" -> {
                     val isVideo = "trackID=0" in uri
                     val transport = headers["transport"] ?: ""
@@ -297,3 +312,5 @@ class BabyServer(
         }
     }
 }
+
+private const val PORT = 8555

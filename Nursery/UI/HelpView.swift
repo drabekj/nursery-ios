@@ -32,8 +32,11 @@ struct HelpView: View {
                 topic("iphone.gen3.radiowaves.left.and.right", "Dva telefony místo kamery",
                       "Starší iPhone nebo telefon s Androidem může být kamerou u postýlky. Nainstalujte na něj Chůvičku a zvolte Nastavení → Použít jako telefon u miminka. Na svém telefonu pak v Nastavení → Zdroj zvolte Telefon u miminka a zadejte jeho kód. Spolu fungují všechny kombinace iPhonu a Androidu.",
                       footnote: "iPhone u miminka musí mít Chůvičku otevřenou a nezamčenou, jinak iOS zastaví kameru. Zvuk poběží i se zamčeným telefonem. Android u miminka vysílá obraz i zvuk i se zhasnutým displejem. Oba nechte na nabíječce.")
+                topic("globe", "Mimo domov",
+                      "Doma se Chůvička připojuje přímo. Mimo domov jde přes Tailscale, vaši soukromou síť: v telefonu musí být Tailscale zapnutý. Kamera funguje hned. Telefon u miminka musí mít Tailscale také a jednou se k němu musíte připojit doma, aby si Chůvička zapamatovala jeho adresu.",
+                      footnote: "Obraz jde šifrovaně přes Tailscale, ne přes cizí server. V Nastavení → Stav vidíte, jestli jde spojení doma, nebo přes Tailscale.")
                 topic("hand.raised", "Soukromí",
-                      "Obraz i zvuk zůstávají ve vaší domácí síti. Nic se neposílá na internet a kamera sama přístup k internetu nemá.")
+                      "Obraz i zvuk zůstávají ve vaší domácí síti, mimo domov jdou jen šifrovaně přes váš Tailscale. Nic se neposílá na cizí server a kamera sama přístup k internetu nemá.")
                 topic("calendar.badge.exclamationmark", "Platnost instalace",
                       "Aplikace nainstalovaná z Macu s bezplatným účtem Apple funguje 7 dní. Potom ji v Xcode znovu nainstalujte, nastavení a přehled zůstanou.")
             }

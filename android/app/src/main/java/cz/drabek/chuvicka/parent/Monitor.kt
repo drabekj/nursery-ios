@@ -55,6 +55,10 @@ object Monitor {
     val volume = MutableStateFlow(1f)                 // The phone's media volume, 0...1.
     val soundNow = MutableStateFlow(false)
     val lastSound = MutableStateFlow<Long?>(null)
+    /** True when the stream goes over Tailscale: the phone is away from home. */
+    val viaTailscale = MutableStateFlow(false)
+    /** The address of the phone at the baby now, when Bonjour does not find it (away from home). */
+    @Volatile private var babyDirect: Pair<String, Int>? = null
     /** Night mode: the picture is not needed. */
     val night = MutableStateFlow(false)
 
@@ -127,6 +131,12 @@ object Monitor {
                 val c = open()
                 client = c
                 val tracks = c.start()
+                // The phone at the baby tells its addresses. Keep them for the time away from home.
+                if (Settings.source.value == Settings.Source.PHONE && c.serverAddresses.isNotEmpty() &&
+                    c.serverAddresses != Settings.babyAddresses.value) {
+                    Settings.setBabyAddresses(c.serverAddresses)
+                    Log.add("baby phone addresses: ${c.serverAddresses.joinToString()}")
+                }
                 val video = tracks.firstOrNull { it.sdp.kind == "video" }
                 val audio = tracks.firstOrNull { it.sdp.kind == "audio" }
                 val depacketizer = H264Depacketizer()
@@ -152,7 +162,10 @@ object Monitor {
                 if (!running) break
                 if (intentional) { intentional = false; continue }
                 failures++
-                val why = e.message ?: "Spojení se ukončilo."
+                val why = (e.message ?: "Spojení se ukončilo.").let {
+                    if (failures >= 2 && Settings.source.value == Settings.Source.CAMERA && "Tailscale" !in it)
+                        "$it Mimo domov zapněte v telefonu Tailscale." else it
+                }
                 Log.add("connection ended: $why")
                 connection.value = Connection.Retrying(why, failures)
                 try { Thread.sleep(pause) } catch (_: InterruptedException) {}
@@ -164,15 +177,40 @@ object Monitor {
         }
     }
 
+    /**
+     * The way to the stream. At home: the Pi's LAN address, or the phone at the baby by mDNS.
+     * Away from home neither works, so: the Pi's Tailscale address, or the addresses that the
+     * phone at the baby reported at home. The phone that watches must have Tailscale on.
+     */
     private fun open(): RtspClient {
-        if (Settings.source.value == Settings.Source.CAMERA) return RtspClient.forUrl(Settings.cameraUrl(soundOnly))
+        if (Settings.source.value == Settings.Source.CAMERA) {
+            val home = Settings.host.value.trim()
+            val remote = Settings.remoteHost.value.trim()
+            val host = if (remote.isNotEmpty() && remote != home && !RtspClient.canConnect(home, 8554)) remote else home
+            if (Settings.activeHost.value != host) Log.add("server: ${if (host == home) "home" else "Tailscale"} $host")
+            Settings.activeHost.value = host
+            viaTailscale.value = host != home
+            return RtspClient.forUrl(Settings.cameraUrl(soundOnly))
+        }
         val name = Settings.babyName.value
         val code = Settings.babyCode.value
         if (name.isEmpty() || code.isEmpty()) throw IOException("Není spárovaný telefon u miminka. Spárujte ho v Nastavení.")
-        val (host, port) = BabyFinder.resolve(context, name)
-            ?: throw IOException("Telefon u miminka „$name“ není v síti. Běží na něm vysílání?")
-        // The host in the URL is not used: the socket goes to the resolved address. The code is the path.
-        return RtspClient("rtsp://chuvicka/$code" + if (soundOnly) "?audio" else "", host, port)
+        val target = BabyFinder.resolve(context, name)?.also { viaTailscale.value = false }
+            ?: Settings.babyAddresses.value.firstNotNullOfOrNull { a ->
+                val host = a.substringBeforeLast(":")
+                val port = a.substringAfterLast(":").toIntOrNull() ?: return@firstNotNullOfOrNull null
+                if (RtspClient.canConnect(host, port)) (host to port).also { viaTailscale.value = RtspClient.isTailscale(host) } else null
+            }
+            ?: throw IOException(awayHint("Telefon u miminka „$name“ není v síti. Běží na něm vysílání?"))
+        babyDirect = target
+        // The host in the URL is not used: the socket goes to the found address. The code is the path.
+        return RtspClient("rtsp://chuvicka/$code" + if (soundOnly) "?audio" else "", target.first, target.second)
+    }
+
+    private fun awayHint(message: String): String {
+        val tailscale = Settings.babyAddresses.value.any { RtspClient.isTailscale(it.substringBeforeLast(":")) }
+        return if (tailscale) "$message Mimo domov zapněte Tailscale na obou telefonech."
+        else "$message Mimo domov: nainstalujte Tailscale i na telefon u miminka a jednou se k němu připojte doma."
     }
 
     private fun measure(p: RtpPacket, uLaw: Boolean) {
@@ -278,9 +316,9 @@ object Monitor {
     fun snapshot(): ByteArray? {
         if (App.demo) return null
         val url = if (Settings.source.value == Settings.Source.CAMERA) {
-            "http://${Settings.host.value.trim()}:1984/api/frame.jpeg?src=nursery_sd"
+            "http://${Settings.serverHost}:1984/api/frame.jpeg?src=nursery_sd"
         } else {
-            val (host, port) = BabyFinder.resolve(context, Settings.babyName.value) ?: return null
+            val (host, port) = babyDirect ?: BabyFinder.resolve(context, Settings.babyName.value) ?: return null
             "http://$host:$port/${Settings.babyCode.value}/frame.jpeg"
         }
         return try {

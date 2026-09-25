@@ -54,6 +54,10 @@ struct NurseryApp: App {
                     UIApplication.shared.isIdleTimerDisabled = settings.keepAwake
                     if settings.source == .camera { await camera.loadConfig() }
                 }
+                // Away from home the Pi has another address: load the camera controls from there.
+                .onChange(of: settings.activeHost) { _, _ in
+                    if settings.source == .camera { Task { await camera.loadConfig() } }
+                }
                 .onChange(of: settings.keepAwake) { _, on in
                     if settings.role == .parent { UIApplication.shared.isIdleTimerDisabled = on }
                 }

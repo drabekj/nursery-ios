@@ -102,6 +102,15 @@ final class Settings: ObservableObject {
     private let d = UserDefaults.standard
 
     @Published var host: String { didSet { d.set(host, forKey: "host") } }
+    /// The Pi's Tailscale address. Away from home the app uses it when the LAN address does not answer.
+    @Published var remoteHost: String { didSet { d.set(remoteHost, forKey: "remoteHost") } }
+    /// The address that the app uses now: `host` at home, `remoteHost` away. The engine sets it.
+    @Published var activeHost: String = ""
+    /// The addresses that the phone at the baby reported ("100.101.102.103:8555" first).
+    /// Away from home Bonjour does not work, so the parent uses them.
+    @Published var babyAddresses: [String] { didSet { d.set(babyAddresses, forKey: "babyAddresses") } }
+    /// The address of the phone at the baby now, when the app does not use Bonjour. The engine sets it.
+    @Published var babyDirect: String?
     @Published var quality: Quality { didSet { d.set(quality.rawValue, forKey: "quality") } }
     @Published var loudness: Loudness { didSet { d.set(loudness.rawValue, forKey: "loudness") } }
     @Published var keepAwake: Bool { didSet { d.set(keepAwake, forKey: "keepAwake") } }
@@ -128,6 +137,8 @@ final class Settings: ObservableObject {
 
     init() {
         host = d.string(forKey: "host") ?? "192.168.0.136"
+        remoteHost = d.string(forKey: "remoteHost") ?? "100.104.188.72"        // rpi-host on the tailnet.
+        babyAddresses = d.stringArray(forKey: "babyAddresses") ?? []
         quality = Quality(rawValue: d.string(forKey: "quality") ?? "") ?? .high
         loudness = Loudness(rawValue: d.string(forKey: "loudness") ?? "") ?? .normal
         keepAwake = d.object(forKey: "keepAwake") as? Bool ?? true
@@ -158,12 +169,19 @@ final class Settings: ObservableObject {
     }
 
     var trimmedHost: String { host.trimmingCharacters(in: .whitespacesAndNewlines) }
+    var trimmedRemoteHost: String { remoteHost.trimmingCharacters(in: .whitespacesAndNewlines) }
+    /// The Pi now: at home its LAN address, away its Tailscale address.
+    var serverHost: String { activeHost.isEmpty ? trimmedHost : activeHost }
 
     static func newCode() -> String { String(format: "%06d", Int.random(in: 0...999_999)) }
 
     /// The iPhone at the baby, as a Bonjour service. Nil when the source is the camera.
     var babyEndpoint: NWEndpoint? {
-        source == .phone && !babyName.isEmpty ? BabyLink.endpoint(name: babyName) : nil
+        guard source == .phone, !babyName.isEmpty else { return nil }
+        if let babyDirect, let a = Reach.split(babyDirect), let port = NWEndpoint.Port(rawValue: a.port) {
+            return .hostPort(host: NWEndpoint.Host(a.host), port: port)
+        }
+        return BabyLink.endpoint(name: babyName)
     }
 
     /// The RTSP stream: the go2rtc restream, or the iPhone at the baby. The query "?audio" asks go2rtc for the sound only.
@@ -177,9 +195,9 @@ final class Settings: ObservableObject {
         // and the Tapo camera sends no packets at all. It worked only while another phone watched
         // the same stream, so the sound view, Night mode and the background failed at random.
         // Tested on 25 Sep 2026 with Tools/rtsp_check.py. The 360p picture costs about 0.3 Mbit/s.
-        if audioOnly { return "rtsp://\(trimmedHost):8554/nursery_sd" }
+        if audioOnly { return "rtsp://\(serverHost):8554/nursery_sd" }
         let name = quality == .high ? "nursery" : "nursery_sd"
-        return "rtsp://\(trimmedHost):8554/\(name)"
+        return "rtsp://\(serverHost):8554/\(name)"
     }
 }
 
@@ -218,7 +236,7 @@ final class CameraControl: ObservableObject {
 
     /// It reads `window.NURSERY_CONFIG = { ptzWebhook: '…', powerWebhook: '…' }`.
     func loadConfig() async {
-        guard let url = URL(string: "http://\(settings.trimmedHost):1984/nursery/config.js") else { return }
+        guard let url = URL(string: "http://\(settings.serverHost):1984/nursery/config.js") else { return }
         do {
             let (data, _) = try await session.data(from: url)
             let text = String(decoding: data, as: UTF8.self)
@@ -248,10 +266,11 @@ final class CameraControl: ObservableObject {
         if MonitorEngine.isDemo { return UIImage(named: "DemoFrame") }
         if settings.source == .phone {
             guard !settings.babyName.isEmpty else { return nil }
-            return await BabyLink.frame(name: settings.babyName, code: settings.babyCode)
+            guard let endpoint = settings.babyEndpoint else { return nil }
+            return await BabyLink.frame(endpoint: endpoint, code: settings.babyCode)
         }
         let src = settings.quality == .high ? "nursery" : "nursery_sd"
-        guard let url = URL(string: "http://\(settings.trimmedHost):1984/api/frame.jpeg?src=\(src)") else { return nil }
+        guard let url = URL(string: "http://\(settings.serverHost):1984/api/frame.jpeg?src=\(src)") else { return nil }
         var req = URLRequest(url: url)
         req.timeoutInterval = 8          // go2rtc waits for a keyframe.
         do {
@@ -275,7 +294,7 @@ final class CameraControl: ObservableObject {
     }
 
     private func post(_ id: String, body: String) async -> Bool {
-        guard let url = URL(string: "http://\(settings.trimmedHost):8123/api/webhook/\(id)") else { return false }
+        guard let url = URL(string: "http://\(settings.serverHost):8123/api/webhook/\(id)") else { return false }
         var req = URLRequest(url: url)
         req.httpMethod = "POST"
         req.setValue("application/x-www-form-urlencoded", forHTTPHeaderField: "Content-Type")

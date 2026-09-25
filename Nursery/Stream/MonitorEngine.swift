@@ -337,25 +337,59 @@ final class MonitorEngine: ObservableObject {
         let onlyAudio = wantsAudioOnly
         audioOnly = onlyAudio
         if connection != .live { connection = .connecting }
-        let url = settings.streamURL(audioOnly: onlyAudio)
-
-        let client: RTSPClient
-        do { client = try RTSPClient(url: url, endpoint: settings.babyEndpoint) } catch {
-            connection = .retrying("Adresa serveru není platná.")
-            return
-        }
-        self.client = client
-        Log.shared.add("connect \(url)")
-
-        client.onClose = Self.closeSink(engine: self, generation: gen)
-        let prepare = Self.router(client: client, renderer: renderer, audio: audio, shared: shared)
 
         Task { [weak self] in
+            guard let self else { return }
+            await self.chooseRoute()
+            // A newer attempt started while this one looked for the way.
+            guard gen == self.generation, !self.suspended else { return }
+            let url = self.settings.streamURL(audioOnly: onlyAudio)
+            let client: RTSPClient
+            do { client = try RTSPClient(url: url, endpoint: self.settings.babyEndpoint) } catch {
+                self.connection = .retrying("Adresa serveru není platná.")
+                return
+            }
+            self.client = client
+            Log.shared.add("connect \(url)\(self.viaTailscale ? " over Tailscale" : "")")
+            client.onClose = Self.closeSink(engine: self, generation: gen)
+            let prepare = Self.router(client: client, renderer: self.renderer, audio: self.audio, shared: self.shared)
             do {
                 let tracks = try await client.start(prepare: prepare)
-                self?.connected(gen, tracks)
+                self.connected(gen, tracks, reported: client.serverAddresses)
             } catch {
-                self?.connectionEnded(gen, error)
+                self.connectionEnded(gen, error)
+            }
+        }
+    }
+
+    // MARK: The way: at home directly, away from home over Tailscale
+
+    /// True when the stream goes over Tailscale (the phone is away from home).
+    @Published private(set) var viaTailscale = false
+    /// The phone at the baby: try its reported addresses before Bonjour. It turns on after
+    /// Bonjour failed (away from home), and it stays while it works.
+    private var babyDirectFirst = false
+
+    private func chooseRoute() async {
+        switch settings.source {
+        case .camera:
+            // The LAN address first: at home it answers at once. Away, it does not, in 1.2 s.
+            let home = settings.trimmedHost
+            let remote = settings.trimmedRemoteHost
+            var host = home
+            if !remote.isEmpty, remote != home, !(await Reach.canConnect(host: home, port: 8554)) { host = remote }
+            if settings.activeHost != host { Log.shared.add("server: \(host == home ? "home" : "Tailscale") \(host)") }
+            settings.activeHost = host
+            viaTailscale = host != home
+        case .phone:
+            settings.babyDirect = nil
+            viaTailscale = false
+            guard babyDirectFirst else { return }
+            for address in settings.babyAddresses {
+                guard let a = Reach.split(address), await Reach.canConnect(host: a.host, port: a.port) else { continue }
+                settings.babyDirect = address
+                viaTailscale = Reach.isTailscale(a.host)
+                return
             }
         }
     }
@@ -406,8 +440,13 @@ final class MonitorEngine: ObservableObject {
         }
     }
 
-    private func connected(_ gen: Int, _ tracks: [RTSPClient.Track]) {
+    private func connected(_ gen: Int, _ tracks: [RTSPClient.Track], reported: [String]) {
         guard gen == generation else { return }
+        // The phone at the baby tells its addresses. Keep them for the time away from home.
+        if settings.source == .phone, !reported.isEmpty, reported != settings.babyAddresses {
+            settings.babyAddresses = reported
+            Log.shared.add("baby phone addresses: \(reported.joined(separator: ", "))")
+        }
         let names = tracks.map { "\($0.sdp.kind.rawValue) \($0.sdp.codec)" }.joined(separator: ", ")
         Log.shared.add("playing: \(names)")
         connection = .live
@@ -421,7 +460,9 @@ final class MonitorEngine: ObservableObject {
         client = nil
         let message = (error as? LocalizedError)?.errorDescription ?? error?.localizedDescription ?? "Spojení se ukončilo."
         Log.shared.add("connection ended: \(message)")
-        connection = .retrying(message)
+        // The phone at the baby: after a failure, try the other way (Bonjour or its addresses).
+        if settings.source == .phone, !settings.babyAddresses.isEmpty { babyDirectFirst.toggle() }
+        connection = .retrying(awayHint(message))
         failures += 1
         pictureLive = false
         let delay = retryDelay
@@ -431,6 +472,21 @@ final class MonitorEngine: ObservableObject {
             try? await Task.sleep(for: .seconds(delay))
             guard let self, !Task.isCancelled, gen == self.generation else { return }
             self.connect()
+        }
+    }
+
+    /// Away from home with no way in: say what helps.
+    private func awayHint(_ message: String) -> String {
+        guard failures >= 1 else { return message }
+        switch settings.source {
+        case .camera where settings.trimmedRemoteHost.isEmpty:
+            return message + " Mimo domov zadejte v Nastavení adresu přes Tailscale."
+        case .camera:
+            return message + " Mimo domov zapněte v telefonu Tailscale."
+        case .phone where !settings.babyAddresses.contains(where: { Reach.split($0).map { Reach.isTailscale($0.host) } ?? false }):
+            return message + " Mimo domov: nainstalujte Tailscale i na telefon u miminka a jednou se k němu připojte doma."
+        case .phone:
+            return message + " Mimo domov zapněte Tailscale na obou telefonech."
         }
     }
 
