@@ -1,0 +1,130 @@
+import AVFoundation
+import CoreMedia
+import UIKit
+
+/// The view that shows the picture. Its layer is an AVSampleBufferDisplayLayer.
+/// The same layer feeds picture in picture, so the app never creates a second one.
+final class VideoLayerView: UIView {
+    override class var layerClass: AnyClass { AVSampleBufferDisplayLayer.self }
+    var displayLayer: AVSampleBufferDisplayLayer { layer as! AVSampleBufferDisplayLayer }
+
+    override init(frame: CGRect) {
+        super.init(frame: frame)
+        displayLayer.videoGravity = .resizeAspect
+        backgroundColor = .black
+        isUserInteractionEnabled = false
+    }
+
+    required init?(coder: NSCoder) { fatalError("init(coder:) is not used") }
+}
+
+/// It turns H.264 access units into sample buffers, and it sends them to the layer.
+/// The caller is on the RTSP queue. The renderer of the layer accepts calls from any thread.
+final class VideoRenderer {
+    private let renderer: AVSampleBufferVideoRenderer
+    private var format: CMVideoFormatDescription?
+    private var formatVersion = -1
+    private var waitingForKeyframe = true
+
+    /// The size of the picture, from the SPS. It runs on the main thread when the size changes.
+    var onSize: ((CGSize) -> Void)?
+    private var lastSize: CGSize = .zero
+
+    init(layer: AVSampleBufferDisplayLayer) {
+        renderer = layer.sampleBufferRenderer
+    }
+
+    /// It drops the decoder state. The next frame that shows is a keyframe.
+    func reset() {
+        waitingForKeyframe = true
+        renderer.flush()
+    }
+
+    func render(_ unit: H264AccessUnit, depacketizer: H264Depacketizer) {
+        if depacketizer.parameterSetVersion != formatVersion {
+            guard let sps = depacketizer.sps, let pps = depacketizer.pps else { return }
+            format = Self.makeFormat(sps: sps, pps: pps)
+            formatVersion = depacketizer.parameterSetVersion
+            waitingForKeyframe = true
+            if let format {
+                let d = CMVideoFormatDescriptionGetDimensions(format)
+                let size = CGSize(width: Int(d.width), height: Int(d.height))
+                if size != lastSize {
+                    lastSize = size
+                    DispatchQueue.main.async { self.onSize?(size) }
+                }
+            }
+        }
+        guard let format else { return }
+
+        // After the app returns from the background, the decoder needs a flush.
+        if renderer.status == .failed || renderer.requiresFlushToResumeDecoding {
+            reset()
+        }
+        if waitingForKeyframe {
+            guard unit.isKeyframe else { return }
+            waitingForKeyframe = false
+        }
+        guard let sample = Self.makeSample(unit, format: format) else { return }
+        renderer.enqueue(sample)
+    }
+
+    private static func makeFormat(sps: [UInt8], pps: [UInt8]) -> CMVideoFormatDescription? {
+        var format: CMFormatDescription?
+        let status = sps.withUnsafeBufferPointer { s in
+            pps.withUnsafeBufferPointer { p -> OSStatus in
+                let pointers: [UnsafePointer<UInt8>] = [s.baseAddress!, p.baseAddress!]
+                let sizes: [Int] = [s.count, p.count]
+                return CMVideoFormatDescriptionCreateFromH264ParameterSets(
+                    allocator: kCFAllocatorDefault, parameterSetCount: 2,
+                    parameterSetPointers: pointers, parameterSetSizes: sizes,
+                    nalUnitHeaderLength: 4, formatDescriptionOut: &format)
+            }
+        }
+        return status == noErr ? format : nil
+    }
+
+    private static func makeSample(_ unit: H264AccessUnit, format: CMVideoFormatDescription) -> CMSampleBuffer? {
+        // AVCC: each NAL unit has a 4-byte length in front, and no start code.
+        var avcc = [UInt8]()
+        avcc.reserveCapacity(unit.nalUnits.reduce(0) { $0 + $1.count + 4 })
+        for nal in unit.nalUnits {
+            let n = UInt32(nal.count)
+            avcc += [UInt8(n >> 24), UInt8(n >> 16 & 0xFF), UInt8(n >> 8 & 0xFF), UInt8(n & 0xFF)]
+            avcc += nal
+        }
+
+        var block: CMBlockBuffer?
+        guard CMBlockBufferCreateWithMemoryBlock(
+            allocator: kCFAllocatorDefault, memoryBlock: nil, blockLength: avcc.count,
+            blockAllocator: kCFAllocatorDefault, customBlockSource: nil, offsetToData: 0,
+            dataLength: avcc.count, flags: kCMBlockBufferAssureMemoryNowFlag, blockBufferOut: &block) == kCMBlockBufferNoErr,
+              let block else { return nil }
+        let copied = avcc.withUnsafeBytes {
+            CMBlockBufferReplaceDataBytes(with: $0.baseAddress!, blockBuffer: block,
+                                          offsetIntoDestination: 0, dataLength: avcc.count)
+        }
+        guard copied == kCMBlockBufferNoErr else { return nil }
+
+        var sample: CMSampleBuffer?
+        var size = avcc.count
+        guard CMSampleBufferCreateReady(
+            allocator: kCFAllocatorDefault, dataBuffer: block, formatDescription: format,
+            sampleCount: 1, sampleTimingEntryCount: 0, sampleTimingArray: nil,
+            sampleSizeEntryCount: 1, sampleSizeArray: &size, sampleBufferOut: &sample) == noErr,
+              let sample else { return nil }
+
+        // Show each frame at once. This gives the lowest delay for a live picture.
+        if let attachments = CMSampleBufferGetSampleAttachmentsArray(sample, createIfNecessary: true),
+           CFArrayGetCount(attachments) > 0 {
+            let dict = unsafeBitCast(CFArrayGetValueAtIndex(attachments, 0), to: CFMutableDictionary.self)
+            CFDictionarySetValue(dict, Unmanaged.passUnretained(kCMSampleAttachmentKey_DisplayImmediately).toOpaque(),
+                                 Unmanaged.passUnretained(kCFBooleanTrue).toOpaque())
+            if !unit.isKeyframe {
+                CFDictionarySetValue(dict, Unmanaged.passUnretained(kCMSampleAttachmentKey_NotSync).toOpaque(),
+                                     Unmanaged.passUnretained(kCFBooleanTrue).toOpaque())
+            }
+        }
+        return sample
+    }
+}
