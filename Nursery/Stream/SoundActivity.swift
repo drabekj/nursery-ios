@@ -120,9 +120,12 @@ final class SoundActivity: ObservableObject {
         if level >= threshold {
             belowSince = nil
             if var event = current {
-                event.end = now
-                event.peak = max(event.peak, level)
-                current = event
+                // At most once a second, or for a louder peak: each change redraws the views that show it.
+                if level > event.peak || now.timeIntervalSince(event.end) >= 1 {
+                    event.end = now
+                    event.peak = max(event.peak, level)
+                    current = event
+                }
             } else {
                 if aboveSince == nil { aboveSince = now }
                 if let since = aboveSince, now.timeIntervalSince(since) >= 1 {
@@ -161,6 +164,9 @@ final class SoundActivity: ObservableObject {
 
     private func extendCoverage(_ now: Date) {
         if var last = coverage.last, now.timeIntervalSince(last.end) < 90 {
+            // Move the end each 10 s, not 10 times a second. Each change redraws every chart
+            // of the activity, also in the background, where that got the app killed.
+            guard now.timeIntervalSince(last.end) >= 10 else { return }
             last.end = now
             coverage[coverage.count - 1] = last
         } else {

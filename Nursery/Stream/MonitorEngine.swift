@@ -38,6 +38,8 @@ final class MonitorEngine: ObservableObject {
     @Published private(set) var soundStatus: SoundStatus = .connecting
     /// The loudness of the room now, 0...1.
     @Published private(set) var level: Float = 0
+    /// The smoothed level. It runs also in the background, where `level` does not change.
+    private var meter: Float = 0
     /// The loudness in the last 6 seconds, oldest first. One value each 0.1 s.
     @Published private(set) var history: [Float] = Array(repeating: 0, count: 60)
     @Published private(set) var videoSize = CGSize(width: 16, height: 9)
@@ -101,6 +103,14 @@ final class MonitorEngine: ObservableObject {
     private var lastSoundAlert = Date.distantPast
     private var lastWatchdog = Date.distantPast
     private var lastAlive = Date()
+    private var lastAliveCPU = MonitorEngine.processCPUSeconds()
+
+    /// The processor time of the whole app, in seconds.
+    nonisolated private static func processCPUSeconds() -> Double {
+        var t = timespec()
+        clock_gettime(CLOCK_PROCESS_CPUTIME_ID, &t)
+        return Double(t.tv_sec) + Double(t.tv_nsec) / 1e9
+    }
     private var ticks = 0
     private var timer: Timer?
     private let pathMonitor = NWPathMonitor()
@@ -673,13 +683,16 @@ final class MonitorEngine: ObservableObject {
         // Fast attack, slow release. This is how a VU meter moves.
         let raw = Self.isDemo ? demoLevel() : s.peak
         let target = mode != .off ? raw : 0
-        let smoothed = target > level ? target : level * 0.82 + target * 0.18
-        if isForeground || pip.isActive {
+        let smoothed = target > meter ? target : meter * 0.82 + target * 0.18
+        meter = smoothed
+        // Change the published values only while a screen shows them. Each change makes SwiftUI
+        // redraw the monitor. In the background that cost 100 % of a core, and iOS killed the app
+        // after 48 s ("cpu usage, 80 % over 60 s", 25 Sep 2026).
+        let visible = isForeground || pip.isActive
+        if visible {
             level = smoothed
             history.removeFirst()
             history.append(smoothed)
-        } else {
-            level = smoothed        // The Live Activity still needs it.
         }
 
         if mode != .off, soundStatus == .listening || soundStatus == .silent {
@@ -688,8 +701,10 @@ final class MonitorEngine: ObservableObject {
         holdRoomLevel(RoomLevel(smoothed), now: now)
 
         guard ticks % 5 == 0 else { return }       // The rest runs at 2 Hz.
-        pictureLive = now.timeIntervalSince(s.lastVideo) < 3
-        delayMilliseconds = Int(audio.bufferedSeconds * 1000)
+        let live = now.timeIntervalSince(s.lastVideo) < 3
+        if live != pictureLive { pictureLive = live }
+        let delay = Int(audio.bufferedSeconds * 1000)
+        if visible, delay != delayMilliseconds { delayMilliseconds = delay }
         if now.timeIntervalSince(s.lastAudio) < 3 { everHeard = true }
 
         // A half-open TCP connection gives no error. Detect it by the silence of the data.
@@ -706,8 +721,13 @@ final class MonitorEngine: ObservableObject {
         }
         // A sign of life each 5 minutes in the background. A gap in the log shows a stop by iOS.
         if !isForeground, now.timeIntervalSince(lastAlive) >= 300 {
+            // The processor share since the last line. iOS kills a background app above 80 %.
+            let cpu = Self.processCPUSeconds()
+            let share = (cpu - lastAliveCPU) / now.timeIntervalSince(lastAlive) * 100
             lastAlive = now
-            Log.shared.add("alive in the background, audio engine \(audio.isRunning ? "on" : "OFF"), \(soundStatus.rawValue)")
+            lastAliveCPU = cpu
+            Log.shared.add(String(format: "alive in the background, audio engine %@, %@, CPU %.0f %%",
+                                  audio.isRunning ? "on" : "OFF", soundStatus.rawValue, share))
         }
     }
 
