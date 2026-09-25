@@ -57,7 +57,7 @@ final class BabyServer: @unchecked Sendable {
         params.includePeerToPeer = peerToPeer
         params.serviceClass = .interactiveVideo
         // A fixed port, so the address that a parent keeps for the time away stays valid.
-        let listener = (try? NWListener(using: params, on: BabyService.port)) ?? (try NWListener(using: params))
+        let listener = try (try? NWListener(using: params, on: BabyService.port)) ?? NWListener(using: params)
         listener.service = NWListener.Service(name: name, type: BabyService.type)
         listener.newConnectionHandler = { [weak self] conn in self?.accept(conn) }
         listener.stateUpdateHandler = { [weak self] state in
