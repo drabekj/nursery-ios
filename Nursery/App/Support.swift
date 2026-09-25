@@ -172,8 +172,14 @@ final class Settings: ObservableObject {
             // The host is not used: the connection goes to the Bonjour service. The code is the path.
             return "rtsp://chuvicka/\(babyCode)" + (audioOnly ? "?audio" : "")
         }
+        // Sound only from the Tapo camera: the small 360p stream, with its picture, and the app
+        // does not draw it. Not "?audio": go2rtc then sets up only the sound track with the camera,
+        // and the Tapo camera sends no packets at all. It worked only while another phone watched
+        // the same stream, so the sound view, Night mode and the background failed at random.
+        // Tested on 25 Sep 2026 with Tools/rtsp_check.py. The 360p picture costs about 0.3 Mbit/s.
+        if audioOnly { return "rtsp://\(trimmedHost):8554/nursery_sd" }
         let name = quality == .high ? "nursery" : "nursery_sd"
-        return "rtsp://\(trimmedHost):8554/\(name)" + (audioOnly ? "?audio" : "")
+        return "rtsp://\(trimmedHost):8554/\(name)"
     }
 }
 

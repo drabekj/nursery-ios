@@ -102,8 +102,8 @@ struct RoomOrb: View {
 
     private func color(_ v: Float) -> Color {
         switch status {
-        case .lost: Theme.alarm
-        case .muted, .connecting: Theme.glowNeutral
+        case .lost, .muted: Theme.alarm
+        case .connecting: Theme.glowNeutral
         default: Theme.level(v)
         }
     }
@@ -115,7 +115,7 @@ struct RoomOrb: View {
         case .lost:
             Image(systemName: "wifi.exclamationmark").foregroundStyle(Theme.alarm)
         case .muted:
-            Image(systemName: "speaker.slash.fill").foregroundStyle(.secondary)
+            Image(systemName: "speaker.slash.fill").foregroundStyle(Theme.alarm)
         case .listening, .silent:
             Image(systemName: soundNow ? "waveform" : (status == .silent ? "bell.fill" : "moon.zzz.fill"))
                 .foregroundStyle(soundNow ? Theme.level(value(ago: 0)) : Color.primary.opacity(0.55))
@@ -136,8 +136,18 @@ struct SoundStage: View {
 
     var body: some View {
         VStack(spacing: 14) {
-            RoomOrb(history: engine.history, status: engine.soundStatus, soundNow: activity.current != nil)
-                .frame(maxWidth: 280, maxHeight: 280)
+            Button {
+                // The orb looks like a button, so it is one: a tap turns the sound on.
+                guard engine.mode == .off else { return }
+                Haptics.firm()
+                engine.soundOn()
+            } label: {
+                RoomOrb(history: engine.history, status: engine.soundStatus, soundNow: activity.current != nil)
+            }
+            .buttonStyle(PressScale())
+            .disabled(engine.mode != .off)
+            .accessibilityLabel(engine.mode == .off ? "Zapnout zvuk" : RoomWords.headline(engine))
+            .frame(maxWidth: 280, maxHeight: 280)
                 .frame(maxHeight: .infinity)
                 .layoutPriority(-1)          // The orb gives way on a small screen. The words do not.
             VStack(spacing: 4) {
@@ -146,7 +156,7 @@ struct SoundStage: View {
                     .foregroundStyle(RoomWords.color(engine))
                     .contentTransition(.opacity)
                     .animation(.easeInOut(duration: 0.35), value: RoomWords.headline(engine))
-                Text(RoomWords.subline(engine, settings))
+                Text(engine.mode == .off ? "Zapnete ho klepnutím na kruh" : RoomWords.subline(engine, settings))
                     .font(.subheadline)
                     .foregroundStyle(.secondary)
             }
