@@ -346,8 +346,10 @@ struct AlertOffer: View {
                 .foregroundStyle(Theme.accent)
             VStack(alignment: .leading, spacing: 2) {
                 Text("Upozornění na výpadek i na pláč").font(.subheadline.weight(.semibold))
+                    .fixedSize(horizontal: false, vertical: true)
                 Text("Chůvička vás upozorní, když se přeruší spojení nebo když se miminko ozve.")
                     .font(.caption).foregroundStyle(.secondary)
+                    .fixedSize(horizontal: false, vertical: true)
             }
             Spacer(minLength: 0)
             VStack(spacing: 6) {

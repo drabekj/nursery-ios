@@ -150,7 +150,7 @@ struct Timeline: View {
         .chartYScale(domain: 0.0...1.0)
         .chartYAxis(.hidden)
         .chartXAxis {
-            AxisMarks(values: .stride(by: .hour, count: 3)) { _ in
+            AxisMarks(preset: .aligned, values: .stride(by: .hour, count: 3)) { _ in
                 AxisValueLabel(format: .dateTime.hour().minute())
             }
         }
@@ -165,11 +165,15 @@ struct Timeline: View {
 
 private struct Legend: View {
     var body: some View {
-        HStack(spacing: 14) {
-            item(Theme.calm.opacity(0.5), "Poslouchala")
-            item(Theme.middle, "Zafňukání")
-            item(Theme.loud, "Pláč")
-            item(Color.secondary.opacity(0.25), "Neposlouchala")
+        Grid(alignment: .leading, horizontalSpacing: 18, verticalSpacing: 8) {
+            GridRow {
+                item(Theme.middle, "Zafňukání")
+                item(Theme.loud, "Pláč")
+            }
+            GridRow {
+                item(Theme.calm.opacity(0.5), "Poslouchala")
+                item(Color.secondary.opacity(0.25), "Neposlouchala")
+            }
         }
         .font(.caption)
         .foregroundStyle(.secondary)

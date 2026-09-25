@@ -46,6 +46,7 @@ struct NightView: View {
                     .foregroundStyle(.white.opacity(0.16))
                     .padding(.bottom, 20)
             }
+            .opacity(explain ? 0 : 1)        // The explainer reads alone, with nothing behind it.
             if explain {
                 NightExplainer {
                     UserDefaults.standard.set(true, forKey: "nightExplained")
@@ -136,7 +137,7 @@ private struct NightExplainer: View {
             .padding(.top, 4)
         }
         .padding(22)
-        .background(Color.white.opacity(0.08), in: RoundedRectangle(cornerRadius: 26, style: .continuous))
+        .background(Color(white: 0.11), in: RoundedRectangle(cornerRadius: 26, style: .continuous))
         .padding(24)
     }
 
