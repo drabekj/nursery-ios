@@ -129,7 +129,7 @@ final class MonitorEngine: ObservableObject {
             MainActor.assumeIsolated {
                 Log.shared.add("media services reset")
                 self?.audio.stop()
-                self?.applyListening()
+                self?.applyMode()
             }
         }
 

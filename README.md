@@ -26,28 +26,46 @@ The web page could not do three things at once on iOS:
 
 ## Features
 
-- **The live picture** in 2K, with hardware decoding. The delay is below 0.5 s on the LAN.
-- **Pinch to zoom** (1–4×) with native momentum. Double tap zooms to the finger, and a second double tap resets.
-  The zoom changes only your screen. It does not move the camera.
-- **The live sound**, with a bounded delay. A network stall never adds a permanent delay, because the
-  queue drops late audio.
-- **A waveform of the last 6 seconds**, so you *see* a cry, also with the phone muted.
-- **Loudness boost**: Normal, Loud (+12 dB), Max (+20 dB), with a soft limiter. It is for a quiet room.
-- **The lock screen and the Dynamic Island** (a Live Activity): "Listening", the loudness bars, or "No sound".
+**The screen.** The picture is the hero, with concentric corners. Below it you see the room: its state in
+large words ("Quiet", "Some sound", "Loud"), the time of the last sound, and a waveform of the last
+6 seconds. You can *see* a cry, also with the phone muted. The four actions sit in a Liquid Glass bar at
+the thumb: **Sound · Move · Photo · Night**. One status badge (Live / Reconnecting / Offline) sits in the
+navigation bar. The background glows softly with the loudness of the room.
+
+- **Three sound modes.** Tap Sound to turn it on or off. Touch and hold it for the other options.
+  - **Live:** you hear the room with a delay of about 0.1–0.4 s, in sync with the picture.
+  - **Silent:** you hear nothing, but Nursery keeps listening and sends a notification when the baby makes a sound.
+  - **Off.**
+  - **Loudness:** Normal, Loud (+12 dB), or Max (+20 dB), with a soft limiter.
+- **Activity.** Sound events (a sound for 1 s above the sensitivity), a Swift Charts chart of the last hour,
+  and the list of today. It answers "did she cry while I was in the shower?" Sensitivity: only crying,
+  crying and fussing, or every sound.
+- **Move** puts arrows on the picture itself, so you watch while you aim. Tap for one step, or hold to keep turning.
+  The pinch zoom (1–4×, double tap) changes only your screen.
+- **Photo** takes a full 2K frame from go2rtc and opens the share sheet.
+- **Night** makes the screen black at minimum brightness, with a dim clock and waveform. The waveform
+  brightens while a sound lasts.
+- **Picture in picture** opens by itself when you swipe home. **Full screen** comes with a button, or when you turn the phone.
+- **Lock Screen and Dynamic Island** (a Live Activity): Listening or Silent, with the loudness bars, or "No sound".
   If the app stops, the activity turns stale after 30 s, so a dead monitor never looks alive.
-- **An alert** when the app hears nothing for 20 s. It reconnects by itself (1, 2, 4, then each 8 s),
-  and at once when the Wi-Fi returns.
-- **Night mode** (the moon): the screen goes black at minimum brightness, and only a dim waveform stays.
-- **Pan and tilt** with a direction pad. A tap moves one step, and a hold repeats. It works through the existing Home Assistant webhook.
-- **Camera power** buttons. They appear only when the power webhook exists (the smart plug).
-- **Battery care**: in the background with no small window, the app asks go2rtc for the sound only (`?audio`).
-  Thus the 2 Mbit/s video stops, and the battery lasts the night.
-- **Landscape**: the picture fills the screen, and the controls fade after 5 s.
-- **An event log** (Settings → Event log). You can share it, and it helps to find a fault at 3 a.m.
+- **Alerts:** when the sound stops for 20 s, and on sound (in Silent mode, or when you turn it on in Live mode).
+  Nursery offers alerts after the first good connection, not at launch.
+- **It recovers by itself:** a reconnect after 1, 2, 4, then each 8 s, and at once when the Wi-Fi returns.
+  "Offline" shows Try Again and a link to the Settings app (for the local network permission).
+- **Battery:** in the background with no picture in picture, Nursery asks go2rtc for the sound only.
+- **Siri and Shortcuts:** "Listen to the nursery with Nursery". It also works on the Action button.
+- **iPad:** the picture on the left, and the room and the controls on the right.
+- **Accessibility:** VoiceOver labels and hints, Reduce Motion, and the system text styles.
+
+## Demo mode and screenshots
+
+`-demo YES` shows a synthetic night-vision frame and a fake sound (a short "cry" each 12 s), with no server.
+`-demoScreen aim|activity|night|settings|alerts` opens that screen at launch. CI runs the demo in the iOS
+Simulator, and it uploads the screenshots as the `build-output` artifact.
 
 ## Build it (on the Mac)
 
-1. Install Xcode 16 or later from the App Store, and XcodeGen: `brew install xcodegen`.
+1. Install Xcode 26 (Liquid Glass; Xcode 16 also builds, with a material fallback) from the App Store, and XcodeGen: `brew install xcodegen`.
 2. `cd` to this folder and run `xcodegen generate`. It makes `Nursery.xcodeproj`.
 3. `open Nursery.xcodeproj`. Select the **Nursery** target → Signing & Capabilities → choose your Team.
    Do the same for the **NurseryWidget** target.
