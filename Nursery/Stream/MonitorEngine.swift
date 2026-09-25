@@ -96,8 +96,9 @@ final class MonitorEngine: ObservableObject {
 
     init(settings: Settings) {
         self.settings = settings
-        mode = SoundMode(rawValue: UserDefaults.standard.string(forKey: "soundMode") ?? "") ?? .live
-        lastOnMode = mode == .off ? .live : mode
+        let savedMode = SoundMode(rawValue: UserDefaults.standard.string(forKey: "soundMode") ?? "") ?? .live
+        mode = savedMode
+        lastOnMode = savedMode == .off ? .live : savedMode
         let view = VideoLayerView()
         videoView = view
         renderer = VideoRenderer(layer: view.displayLayer)
