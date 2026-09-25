@@ -69,6 +69,8 @@ jobs:
           shot sound-dark sound dark
           shot muted muted light
           shot volume volume light
+          shot baby baby light
+          shot baby-live baby-live light
           shot activity-dark activity dark
 
       - name: Upload the screenshots and logs

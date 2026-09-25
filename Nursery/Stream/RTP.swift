@@ -257,3 +257,76 @@ enum G711 {
         return Int16(u & 0x80 != 0 ? 0x84 - t : t - 0x84)
     }
 }
+
+// MARK: - The sending side, for the iPhone at the baby
+
+extension G711 {
+    /// Linear 16-bit PCM to A-law, as in the ITU reference (g711.c, linear2alaw).
+    static func encodeALaw(_ pcm: Int16) -> UInt8 {
+        var p = Int(pcm) >> 3
+        let mask: Int
+        if p >= 0 { mask = 0xD5 } else { mask = 0x55; p = -p - 1 }
+        let segmentEnds = [0x1F, 0x3F, 0x7F, 0xFF, 0x1FF, 0x3FF, 0x7FF, 0xFFF]
+        var segment = 0
+        while segment < 8 && p > segmentEnds[segment] { segment += 1 }
+        if segment >= 8 { return UInt8(0x7F ^ mask) }
+        var a = segment << 4
+        a |= segment < 2 ? (p >> 1) & 0x0F : (p >> segment) & 0x0F
+        return UInt8(a ^ mask)
+    }
+}
+
+/// It makes RTP packets (RFC 3550) for one track of one receiver.
+struct RTPPacketizer {
+    let payloadType: UInt8
+    let ssrc: UInt32
+    private(set) var sequence = UInt16.random(in: 0...UInt16.max)
+
+    init(payloadType: UInt8) {
+        self.payloadType = payloadType
+        ssrc = UInt32.random(in: 1...UInt32.max)
+    }
+
+    mutating func packet(_ payload: ArraySlice<UInt8>, timestamp: UInt32, marker: Bool) -> [UInt8] {
+        var b = [UInt8]()
+        b.reserveCapacity(12 + payload.count)
+        b.append(0x80)
+        b.append((marker ? 0x80 : 0) | payloadType)
+        b.append(UInt8(sequence >> 8)); b.append(UInt8(sequence & 0xFF))
+        for shift in stride(from: 24, through: 0, by: -8) { b.append(UInt8((timestamp >> UInt32(shift)) & 0xFF)) }
+        for shift in stride(from: 24, through: 0, by: -8) { b.append(UInt8((ssrc >> UInt32(shift)) & 0xFF)) }
+        b.append(contentsOf: payload)
+        sequence &+= 1
+        return b
+    }
+
+    /// The RTP packets of one H.264 access unit: a single NAL unit, or FU-A fragments (RFC 6184).
+    mutating func h264(_ nals: [[UInt8]], timestamp: UInt32, maxPayload: Int = 1400) -> [[UInt8]] {
+        var out: [[UInt8]] = []
+        for (n, nal) in nals.enumerated() {
+            guard let header = nal.first else { continue }
+            let last = n == nals.count - 1
+            if nal.count <= maxPayload {
+                out.append(packet(nal[...], timestamp: timestamp, marker: last))
+                continue
+            }
+            let indicator = (header & 0xE0) | 28
+            var offset = 1
+            while offset < nal.count {
+                let end = min(offset + maxPayload - 2, nal.count)
+                var fu: [UInt8] = [indicator, header & 0x1F]
+                if offset == 1 { fu[1] |= 0x80 }               // The start bit.
+                if end == nal.count { fu[1] |= 0x40 }          // The end bit.
+                fu.append(contentsOf: nal[offset..<end])
+                out.append(packet(fu[...], timestamp: timestamp, marker: last && end == nal.count))
+                offset = end
+            }
+        }
+        return out
+    }
+}
+
+/// One RTP packet in the RTSP interleaved frame ("$", channel, length).
+func interleaved(_ packet: [UInt8], channel: UInt8) -> [UInt8] {
+    [0x24, channel, UInt8(packet.count >> 8), UInt8(packet.count & 0xFF)] + packet
+}

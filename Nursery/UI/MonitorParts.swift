@@ -295,7 +295,7 @@ struct ControlBar: View {
         GlassGroup(spacing: 10) {
             HStack(spacing: 10) {
                 soundButton
-                if pictureTools, camera.ptzReady || MonitorEngine.isDemo {
+                if pictureTools, camera.canAim || MonitorEngine.isDemo {
                     Button {
                         Haptics.tap()
                         withAnimation(.spring(response: 0.35)) { aiming.toggle() }
@@ -435,7 +435,7 @@ struct FullScreenMonitor: View {
                                     if engine.mode == .off { engine.soundOn() } else { engine.mode = .off }
                                     scheduleHide()
                                 }
-                                if camera.ptzReady || MonitorEngine.isDemo {
+                                if camera.canAim || MonitorEngine.isDemo {
                                     GlassCircleButton(symbol: "arrow.up.and.down.and.arrow.left.and.right", size: 50, label: "Otočit kameru") {
                                         aiming = true
                                     }

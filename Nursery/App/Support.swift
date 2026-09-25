@@ -1,5 +1,6 @@
 import Combine
 import Foundation
+import Network
 import os
 import UIKit
 
@@ -82,6 +83,16 @@ final class Settings: ObservableObject {
         var title: String { switch self { case .high: "2K (ostré přiblížení)"; case .low: "360p (úspora baterie)" } }
     }
 
+    /// What this iPhone does: it watches (the parent) or it is the camera at the baby.
+    enum Role: String { case parent, baby }
+
+    /// Where the parent gets the picture and the sound.
+    enum Source: String, CaseIterable, Identifiable {
+        case camera, phone
+        var id: String { rawValue }
+        var title: String { switch self { case .camera: "Kamera v pokojíčku"; case .phone: "iPhone u miminka" } }
+    }
+
     enum Appearance: String, CaseIterable, Identifiable {
         case light, dark, automatic
         var id: String { rawValue }
@@ -99,6 +110,17 @@ final class Settings: ObservableObject {
     @Published var alertOnSound: Bool { didSet { d.set(alertOnSound, forKey: "alertOnSound") } }
     @Published var sensitivity: Sensitivity { didSet { d.set(sensitivity.rawValue, forKey: "sensitivity") } }
     @Published var appearance: Appearance { didSet { d.set(appearance.rawValue, forKey: "appearance") } }
+    @Published var role: Role { didSet { d.set(role.rawValue, forKey: "role") } }
+    @Published var source: Source { didSet { d.set(source.rawValue, forKey: "source") } }
+    /// On the parent: the Bonjour name of the iPhone at the baby, and its pairing code.
+    @Published var babyName: String { didSet { d.set(babyName, forKey: "babyName") } }
+    @Published var babyCode: String { didSet { d.set(babyCode, forKey: "babyCode") } }
+    /// On the iPhone at the baby: its name for the parents, its code, and its camera.
+    @Published var unitName: String { didSet { d.set(unitName, forKey: "unitName") } }
+    @Published var unitCode: String { didSet { d.set(unitCode, forKey: "unitCode") } }
+    @Published var unitVideo: Bool { didSet { d.set(unitVideo, forKey: "unitVideo") } }
+    @Published var unitFront: Bool { didSet { d.set(unitFront, forKey: "unitFront") } }
+    @Published var unitFlip: Bool { didSet { d.set(unitFlip, forKey: "unitFlip") } }
     /// The main screen shows the room only, with no picture. See `MonitorEngine.setSoundView`.
     @Published var soundView: Bool { didSet { if !MonitorEngine.isDemo { d.set(soundView, forKey: "soundView") } } }
 
@@ -112,14 +134,41 @@ final class Settings: ObservableObject {
         alertOnSound = d.object(forKey: "alertOnSound") as? Bool ?? false
         sensitivity = Sensitivity(rawValue: d.string(forKey: "sensitivity") ?? "") ?? .medium
         appearance = Appearance(rawValue: d.string(forKey: "appearance") ?? "") ?? .light
+        role = Role(rawValue: d.string(forKey: "role") ?? "") ?? .parent
+        source = Source(rawValue: d.string(forKey: "source") ?? "") ?? .camera
+        babyName = d.string(forKey: "babyName") ?? ""
+        babyCode = d.string(forKey: "babyCode") ?? ""
+        unitName = d.string(forKey: "unitName") ?? "Pokojíček"
+        unitCode = d.string(forKey: "unitCode") ?? Settings.newCode()
+        unitVideo = d.object(forKey: "unitVideo") as? Bool ?? true
+        unitFront = d.bool(forKey: "unitFront")
+        unitFlip = d.bool(forKey: "unitFlip")
+        if MonitorEngine.isDemo {
+            let screen = d.string(forKey: "demoScreen") ?? ""
+            role = screen.hasPrefix("baby") ? .baby : .parent
+            unitCode = "482913"
+        }
         // The screenshots of the sound view use `-demoScreen sound…`.
         soundView = MonitorEngine.isDemo ? d.string(forKey: "demoScreen")?.hasPrefix("sound") == true : d.bool(forKey: "soundView")
+        // The code stays the same after a restart, so the parents stay paired.
+        if !MonitorEngine.isDemo, d.string(forKey: "unitCode") == nil { d.set(unitCode, forKey: "unitCode") }
     }
 
     var trimmedHost: String { host.trimmingCharacters(in: .whitespacesAndNewlines) }
 
-    /// The go2rtc RTSP restream. The query "?audio" asks go2rtc for the sound only.
+    static func newCode() -> String { String(format: "%06d", Int.random(in: 0...999_999)) }
+
+    /// The iPhone at the baby, as a Bonjour service. Nil when the source is the camera.
+    var babyEndpoint: NWEndpoint? {
+        source == .phone && !babyName.isEmpty ? BabyLink.endpoint(name: babyName) : nil
+    }
+
+    /// The RTSP stream: the go2rtc restream, or the iPhone at the baby. The query "?audio" asks go2rtc for the sound only.
     func streamURL(audioOnly: Bool) -> String {
+        if source == .phone {
+            // The host is not used: the connection goes to the Bonjour service. The code is the path.
+            return "rtsp://chuvicka/\(babyCode)" + (audioOnly ? "?audio" : "")
+        }
         let name = quality == .high ? "nursery" : "nursery_sd"
         return "rtsp://\(trimmedHost):8554/\(name)" + (audioOnly ? "?audio" : "")
     }
@@ -183,8 +232,15 @@ final class CameraControl: ObservableObject {
     }
 
     /// One full-size frame from go2rtc, to save or to share.
+    /// Aim needs the Tapo camera. The iPhone at the baby cannot turn.
+    var canAim: Bool { ptzReady && settings.source == .camera }
+
     func snapshot() async -> UIImage? {
         if MonitorEngine.isDemo { return UIImage(named: "DemoFrame") }
+        if settings.source == .phone {
+            guard !settings.babyName.isEmpty else { return nil }
+            return await BabyLink.frame(name: settings.babyName, code: settings.babyCode)
+        }
         let src = settings.quality == .high ? "nursery" : "nursery_sd"
         guard let url = URL(string: "http://\(settings.trimmedHost):1984/api/frame.jpeg?src=\(src)") else { return nil }
         var req = URLRequest(url: url)

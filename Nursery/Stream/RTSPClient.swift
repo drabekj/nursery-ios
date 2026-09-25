@@ -17,6 +17,7 @@ final class RTSPClient: @unchecked Sendable {
             case .unreachable(let why): return "Server neodpovídá (\(why))."
             case .closed: return "Server ukončil spojení."
             case .timeout(let what): return "Žádná odpověď na \(what)."
+            case .status(401, _): return "Nesprávný párovací kód. Zadejte kód z iPhonu u miminka."
             case .status(let code, let reason): return "Server odpověděl \(code) \(reason)."
             case .noUsableTrack: return "Stream nemá video H.264 ani zvuk G.711."
             case .badURL: return "Adresa streamu není platná."
@@ -45,6 +46,8 @@ final class RTSPClient: @unchecked Sendable {
     private let url: String
     private let host: String
     private let port: UInt16
+    /// The iPhone at the baby, as a Bonjour service. Then `host` and `port` are not used.
+    private let endpoint: NWEndpoint?
     private var connection: NWConnection?
     private var buffer: [UInt8] = []
     private var readIndex = 0
@@ -54,11 +57,12 @@ final class RTSPClient: @unchecked Sendable {
     private var keepAlive: DispatchSourceTimer?
     private var closed = false
 
-    init(url: String) throws {
+    init(url: String, endpoint: NWEndpoint? = nil) throws {
         guard let u = URLComponents(string: url), u.scheme == "rtsp", let host = u.host else { throw Failure.badURL }
         self.url = url
         self.host = host
         self.port = UInt16(u.port ?? 554)
+        self.endpoint = endpoint
     }
 
     // MARK: The public steps
@@ -122,8 +126,14 @@ final class RTSPClient: @unchecked Sendable {
                 tcp.keepaliveIdle = 5
                 let params = NWParameters(tls: nil, tcp: tcp)
                 params.serviceClass = .interactiveVideo
-                let conn = NWConnection(host: NWEndpoint.Host(self.host),
+                let conn: NWConnection
+                if let endpoint = self.endpoint {
+                    params.includePeerToPeer = true      // Also with no router between the phones.
+                    conn = NWConnection(to: endpoint, using: params)
+                } else {
+                    conn = NWConnection(host: NWEndpoint.Host(self.host),
                                         port: NWEndpoint.Port(rawValue: self.port) ?? 554, using: params)
+                }
                 self.connection = conn
                 let once = ResumeOnce()
                 conn.stateUpdateHandler = { [weak self] state in

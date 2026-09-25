@@ -6,6 +6,7 @@ struct NurseryApp: App {
     @StateObject private var engine: MonitorEngine
     @StateObject private var camera: CameraControl
     @StateObject private var battery = BatteryMonitor()
+    @StateObject private var babyUnit: BabyUnit
     @Environment(\.scenePhase) private var phase
     @State private var started = false
 
@@ -14,6 +15,7 @@ struct NurseryApp: App {
         _settings = StateObject(wrappedValue: s)
         _engine = StateObject(wrappedValue: MonitorEngine(settings: s))
         _camera = StateObject(wrappedValue: CameraControl(settings: s))
+        _babyUnit = StateObject(wrappedValue: BabyUnit(settings: s))
     }
 
     /// Light is the default. Night mode and the picture are always dark.
@@ -27,8 +29,12 @@ struct NurseryApp: App {
 
     var body: some Scene {
         WindowGroup {
-            MonitorView()
+            Group {
+                // The same app on both phones: the parent watches, the iPhone at the baby sends.
+                if settings.role == .baby { BabyUnitView() } else { MonitorView() }
+            }
                 .environmentObject(settings)
+                .environmentObject(babyUnit)
                 .environmentObject(engine)
                 .environmentObject(camera)
                 .environmentObject(battery)
@@ -40,11 +46,27 @@ struct NurseryApp: App {
                     started = true
                     battery.start()
                     engine.snapshotProvider = { [camera] in await camera.snapshot() }
+                    if settings.role == .baby {
+                        engine.suspend()
+                        return
+                    }
                     engine.start()
                     UIApplication.shared.isIdleTimerDisabled = settings.keepAwake
-                    await camera.loadConfig()
+                    if settings.source == .camera { await camera.loadConfig() }
                 }
-                .onChange(of: settings.keepAwake) { _, on in UIApplication.shared.isIdleTimerDisabled = on }
+                .onChange(of: settings.keepAwake) { _, on in
+                    if settings.role == .parent { UIApplication.shared.isIdleTimerDisabled = on }
+                }
+                .onChange(of: settings.role) { _, role in
+                    switch role {
+                    case .baby:
+                        engine.suspend()
+                    case .parent:
+                        babyUnit.stop()
+                        engine.resume()
+                        UIApplication.shared.isIdleTimerDisabled = settings.keepAwake
+                    }
+                }
         }
         .onChange(of: phase) { _, p in
             guard started else { return }

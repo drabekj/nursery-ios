@@ -7,6 +7,7 @@ struct SettingsView: View {
     @EnvironmentObject private var battery: BatteryMonitor
     @Environment(\.dismiss) private var dismiss
     @State private var host = ""
+    @State private var confirmBaby = false
 
     var body: some View {
         NavigationStack {
@@ -52,10 +53,12 @@ struct SettingsView: View {
                 .onChange(of: settings.alertOnLoss) { _, on in if on { NurseryAlerts.requestPermission() } }
 
                 Section {
-                    Picker(selection: $settings.quality) {
-                        ForEach(Settings.Quality.allCases) { Text($0.title).tag($0) }
-                    } label: {
-                        Label("Kvalita obrazu", systemImage: "sparkles.tv")
+                    if settings.source == .camera {
+                        Picker(selection: $settings.quality) {
+                            ForEach(Settings.Quality.allCases) { Text($0.title).tag($0) }
+                        } label: {
+                            Label("Kvalita obrazu", systemImage: "sparkles.tv")
+                        }
                     }
                     Toggle(isOn: $settings.keepAwake) {
                         Label("Nevypínat displej", systemImage: "sun.max")
@@ -72,18 +75,59 @@ struct SettingsView: View {
                 }
 
                 Section {
-                    TextField("192.168.0.136", text: $host)
-                        .keyboardType(.numbersAndPunctuation)
-                        .textInputAutocapitalization(.never)
-                        .autocorrectionDisabled()
-                        .onSubmit(applyHost)
-                    if host.trimmingCharacters(in: .whitespaces) != settings.trimmedHost {
-                        Button("Připojit k této adrese", action: applyHost)
+                    Picker(selection: $settings.source) {
+                        ForEach(Settings.Source.allCases) { Text($0.title).tag($0) }
+                    } label: {
+                        Label("Obraz a zvuk z", systemImage: "dot.radiowaves.left.and.right")
+                    }
+                    if settings.source == .camera {
+                        TextField("192.168.0.136", text: $host)
+                            .keyboardType(.numbersAndPunctuation)
+                            .textInputAutocapitalization(.never)
+                            .autocorrectionDisabled()
+                            .onSubmit(applyHost)
+                        if host.trimmingCharacters(in: .whitespaces) != settings.trimmedHost {
+                            Button("Připojit k této adrese", action: applyHost)
+                        }
+                    } else {
+                        NavigationLink {
+                            PairingView()
+                        } label: {
+                            LabeledContent {
+                                Text(settings.babyName.isEmpty ? "Nespárováno" : settings.babyName)
+                            } label: {
+                                Label("iPhone u miminka", systemImage: "iphone.gen3")
+                            }
+                        }
                     }
                 } header: {
-                    Text("Server")
+                    Text("Zdroj")
                 } footer: {
-                    Text("Počítač, na kterém běží go2rtc. Chůvička čte obraz z go2rtc, nikdy přímo z kamery, protože kamera zvládne jen dvě připojení.")
+                    if settings.source == .camera {
+                        Text("Počítač, na kterém běží go2rtc. Chůvička čte obraz z go2rtc, nikdy přímo z kamery, protože kamera zvládne jen dvě připojení.")
+                    } else {
+                        Text("Druhý iPhone s Chůvičkou u postýlky posílá obraz a zvuk přímo do tohoto telefonu. Nic neodchází na internet.")
+                    }
+                }
+
+                Section {
+                    Button {
+                        confirmBaby = true
+                    } label: {
+                        Label("Použít jako iPhone u miminka", systemImage: "iphone.gen3.radiowaves.left.and.right")
+                    }
+                } header: {
+                    Text("Tento iPhone")
+                } footer: {
+                    Text("Tento iPhone pak nehlídá, ale vysílá: jeho kamera a mikrofon budou u postýlky. Hodí se starší iPhone.")
+                }
+                .confirmationDialog("Používat tento iPhone u miminka?", isPresented: $confirmBaby, titleVisibility: .visible) {
+                    Button("Ano, bude vysílat") {
+                        settings.role = .baby
+                        dismiss()
+                    }
+                } message: {
+                    Text("Hlídání na tomto telefonu se vypne. Zpět ho přepnete na obrazovce iPhonu u miminka.")
                 }
 
                 Section("Stav") {
@@ -91,10 +135,14 @@ struct SettingsView: View {
                     row("Zvuk", engine.soundStatus.title)
                     row("Zpoždění zvuku", "\(engine.delayMilliseconds) ms")
                     row("Obraz", "\(Int(engine.videoSize.width)) × \(Int(engine.videoSize.height))")
-                    row("Ovládání kamery", camera.ptzReady ? "Připraveno" : "Nenalezeno")
+                    if settings.source == .camera {
+                        row("Ovládání kamery", camera.ptzReady ? "Připraveno" : "Nenalezeno")
+                    }
                     row("Baterie", battery.summary)
                     Button("Znovu připojit") { engine.reconnect(why: "settings") }
-                    Button("Znovu načíst ovládání kamery") { Task { await camera.loadConfig() } }
+                    if settings.source == .camera {
+                        Button("Znovu načíst ovládání kamery") { Task { await camera.loadConfig() } }
+                    }
                 }
 
                 Section {
@@ -108,7 +156,7 @@ struct SettingsView: View {
                 Section {
                     row("Verze", Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String ?? "–")
                 } footer: {
-                    Text("Chůvička funguje jen v domácí síti. Obraz ani zvuk nikdy neopustí váš domov.")
+                    Text("Chůvička funguje jen doma: v domácí síti, nebo přímo mezi dvěma iPhony. Obraz ani zvuk nikdy neopustí váš domov.")
                 }
             }
             .navigationTitle("Nastavení")

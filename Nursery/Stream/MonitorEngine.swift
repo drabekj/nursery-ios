@@ -1,4 +1,5 @@
 import AVFoundation
+import MediaPlayer
 import Combine
 import Network
 import os
@@ -134,6 +135,13 @@ final class MonitorEngine: ObservableObject {
         settings.$quality.dropFirst().removeDuplicates().sink { [weak self] _ in
             DispatchQueue.main.async { self?.reconnect(why: "quality changed") }
         }.store(in: &bag)
+        // A new source, or a new pairing: connect again.
+        Publishers.CombineLatest3(settings.$source, settings.$babyName, settings.$babyCode)
+            .dropFirst()
+            .removeDuplicates { $0 == $1 }
+            .debounce(for: .milliseconds(300), scheduler: DispatchQueue.main)
+            .sink { [weak self] _ in MainActor.assumeIsolated { self?.reconnect(why: "source changed") } }
+            .store(in: &bag)
 
         let center = NotificationCenter.default
         center.addObserver(forName: AVAudioSession.interruptionNotification, object: nil, queue: .main) { [weak self] note in
@@ -176,6 +184,33 @@ final class MonitorEngine: ObservableObject {
 
     // MARK: The life cycle
 
+    /// This iPhone is at the baby now. The parent's monitor sleeps: no stream, no sound, no alerts.
+    private(set) var suspended = false
+    var hasStarted: Bool { timer != nil }
+
+    func suspend() {
+        guard !suspended else { return }
+        suspended = true
+        Log.shared.add("monitor suspended: this iPhone is at the baby")
+        stopClient()
+        connection = .idle
+        audio.stop()
+        activityLog.interrupt()
+        NurseryAlerts.disarmWatchdog()
+        NurseryAlerts.clearLoss()
+        activity.update(status: .muted, enabled: false)
+        MPNowPlayingInfoCenter.default().nowPlayingInfo = nil
+    }
+
+    func resume() {
+        guard suspended else { return }
+        suspended = false
+        Log.shared.add("monitor resumed")
+        guard hasStarted else { start(); return }
+        applyMode()
+        reconnect(why: "monitor resumed")
+    }
+
     func start() {
         Log.shared.add("app started, version \(Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String ?? "?")")
         if timer == nil {
@@ -217,6 +252,7 @@ final class MonitorEngine: ObservableObject {
     }
 
     func sceneBecameActive() {
+        guard !suspended else { return }
         isForeground = true
         Log.shared.add("foreground")
         NurseryAlerts.disarmWatchdog()
@@ -229,6 +265,7 @@ final class MonitorEngine: ObservableObject {
     }
 
     func sceneEnteredBackground() {
+        guard !suspended else { return }
         isForeground = false
         Log.shared.add("background, sound \(mode.rawValue)")
         UIApplication.shared.isIdleTimerDisabled = false
@@ -285,8 +322,13 @@ final class MonitorEngine: ObservableObject {
     }
 
     private func connect() {
-        guard !Self.isDemo else { return }
+        guard !Self.isDemo, !suspended else { return }
         stopClient()
+        if settings.source == .phone && (settings.babyName.isEmpty || settings.babyCode.isEmpty) {
+            connection = .retrying("Není spárovaný iPhone u miminka. Spárujte ho v Nastavení → Zdroj.")
+            failures = max(failures, 2)
+            return
+        }
         // Each attempt gets 6 s before the "no data" check can fire. Without this, the check fired
         // again every 0.5 s and killed each new attempt before it could finish.
         shared.withLock { $0.lastPacket = Date() }
@@ -298,7 +340,7 @@ final class MonitorEngine: ObservableObject {
         let url = settings.streamURL(audioOnly: onlyAudio)
 
         let client: RTSPClient
-        do { client = try RTSPClient(url: url) } catch {
+        do { client = try RTSPClient(url: url, endpoint: settings.babyEndpoint) } catch {
             connection = .retrying("Adresa serveru není platná.")
             return
         }
@@ -421,6 +463,7 @@ final class MonitorEngine: ObservableObject {
 
     private func applyMode() {
         guard !Self.isDemo else { updateStatus(force: true); return }
+        guard !suspended else { return }
         switch mode {
         case .live, .silent:
             activateAudioSession()
@@ -521,6 +564,7 @@ final class MonitorEngine: ObservableObject {
     // MARK: The clock (10 Hz)
 
     private func tick() {
+        guard !suspended else { return }
         ticks += 1
         let now = Date()
         let s = shared.withLock { state -> Shared in

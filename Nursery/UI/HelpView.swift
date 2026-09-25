@@ -29,6 +29,9 @@ struct HelpView: View {
                       "Chůvička nic nepřehrává, ale dál poslouchá. Když se miminko ozve, přijde upozornění. Hodí se, když nechcete celou noc slyšet šum pokoje. Zapnete ho podržením tlačítka Zvuk.")
                 topic("chart.bar.xaxis", "Přehled",
                       "Ukazuje, kdy Chůvička poslouchala a kdy se miminko ozvalo, i s fotkou z kamery. Šedá místa znamenají, že Chůvička neposlouchala. To není totéž co ticho.")
+                topic("iphone.gen3.radiowaves.left.and.right", "Dva iPhony místo kamery",
+                      "Starší iPhone může být kamerou u postýlky. Na něm zvolte Nastavení → Použít jako iPhone u miminka. Na svém telefonu pak v Nastavení → Zdroj zvolte iPhone u miminka a zadejte jeho kód.",
+                      footnote: "iPhone u miminka musí mít Chůvičku otevřenou a nezamčenou, jinak iOS zastaví kameru. Zvuk poběží i se zamčeným telefonem. Nechte ho na nabíječce.")
                 topic("hand.raised", "Soukromí",
                       "Obraz i zvuk zůstávají ve vaší domácí síti. Nic se neposílá na internet a kamera sama přístup k internetu nemá.")
                 topic("calendar.badge.exclamationmark", "Platnost instalace",
