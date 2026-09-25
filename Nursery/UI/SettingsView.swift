@@ -4,6 +4,7 @@ struct SettingsView: View {
     @EnvironmentObject private var settings: Settings
     @EnvironmentObject private var engine: MonitorEngine
     @EnvironmentObject private var camera: CameraControl
+    @EnvironmentObject private var battery: BatteryMonitor
     @Environment(\.dismiss) private var dismiss
     @State private var host = ""
 
@@ -45,7 +46,7 @@ struct SettingsView: View {
                 } header: {
                     Text("Upozornění")
                 } footer: {
-                    Text("Citlivost určuje, co se počítá jako zvuk – pro upozornění i pro přehled Aktivita. Upozornění chodí, jen když Chůvička běží na pozadí, a nejvýš jednou za minutu.")
+                    Text("Citlivost určuje, co se počítá jako zvuk – pro upozornění i pro Přehled. Upozornění chodí, jen když Chůvička běží na pozadí, a nejvýš jednou za minutu.")
                 }
                 .onChange(of: settings.alertOnSound) { _, on in if on { NurseryAlerts.requestPermission() } }
                 .onChange(of: settings.alertOnLoss) { _, on in if on { NurseryAlerts.requestPermission() } }
@@ -91,9 +92,17 @@ struct SettingsView: View {
                     row("Zpoždění zvuku", "\(engine.delayMilliseconds) ms")
                     row("Obraz", "\(Int(engine.videoSize.width)) × \(Int(engine.videoSize.height))")
                     row("Ovládání kamery", camera.ptzReady ? "Připraveno" : "Nenalezeno")
-                    NavigationLink("Záznam událostí") { EventLogView() }
+                    row("Baterie", battery.summary)
                     Button("Znovu připojit") { engine.reconnect(why: "settings") }
                     Button("Znovu načíst ovládání kamery") { Task { await camera.loadConfig() } }
+                }
+
+                Section {
+                    NavigationLink("Technický záznam") { EventLogView() }
+                } header: {
+                    Text("Diagnostika")
+                } footer: {
+                    Text("Podrobný záznam pro řešení potíží, třeba když zvuk v noci vypadl. Běžně ho nepotřebujete. Když něco nefunguje, pošlete ho tlačítkem Sdílet.")
                 }
 
                 Section {
@@ -147,7 +156,7 @@ struct EventLogView: View {
             }
         }
         .overlay { if log.entries.isEmpty { ContentUnavailableView("Žádné události", systemImage: "list.bullet.rectangle") } }
-        .navigationTitle("Záznam událostí")
+        .navigationTitle("Technický záznam")
         .toolbar { ShareLink(item: log.text) }
     }
 }

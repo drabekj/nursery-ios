@@ -72,7 +72,8 @@ final class Settings: ObservableObject {
         case low, medium, high
         var id: String { rawValue }
         var title: String { switch self { case .low: "Jen hlasitý pláč"; case .medium: "Pláč i fňukání"; case .high: "Každý zvuk" } }
-        var threshold: Float { switch self { case .low: 0.68; case .medium: 0.52; case .high: 0.38 } }
+        /// How far above the noise floor of the room a sound must be.
+        var margin: Float { switch self { case .low: 0.32; case .medium: 0.2; case .high: 0.12 } }
     }
 
     enum Quality: String, CaseIterable, Identifiable {

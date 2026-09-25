@@ -61,7 +61,7 @@ jobs:
             sleep 9
             xcrun simctl io "$UDID" screenshot "shots/$1.png"
           }
-          for s in main alerts aim activity settings night; do shot "$s" "$s" light; done
+          for s in main alerts aim activity settings night help; do shot "$s" "$s" light; done
           shot main-dark main dark
           shot activity-dark activity dark
 

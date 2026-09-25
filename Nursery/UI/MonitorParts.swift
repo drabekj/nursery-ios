@@ -261,7 +261,7 @@ struct RoomPanel: View {
         }
         .padding(.top, 6)
         .contentShape(Rectangle())
-        .accessibilityHint("Zobrazí aktivitu zvuků")
+        .accessibilityHint("Otevře přehled")
     }
 }
 

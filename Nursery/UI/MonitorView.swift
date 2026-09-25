@@ -19,7 +19,7 @@ struct MonitorView: View {
     @State private var flash = false
     @State private var askAlerts = false
 
-    enum Sheet: String, Identifiable { case settings, activity; var id: String { rawValue } }
+    enum Sheet: String, Identifiable { case settings, activity, help; var id: String { rawValue } }
 
     var body: some View {
         ZStack {
@@ -44,7 +44,8 @@ struct MonitorView: View {
         .sheet(item: $sheet) { s in
             switch s {
             case .settings: SettingsView()
-            case .activity: ActivityView(activity: engine.activityLog).presentationDetents([.medium, .large])
+            case .activity: ActivityView(activity: engine.activityLog).presentationDetents([.large])
+            case .help: HelpView()
             }
         }
         .sheet(item: $shared) { item in ShareSheet(items: [item.image]).presentationDetents([.medium, .large]) }
@@ -127,7 +128,8 @@ struct MonitorView: View {
         }
         ToolbarItem(placement: .topBarTrailing) {
             Menu {
-                Button { sheet = .activity } label: { Label("Aktivita", systemImage: "waveform.path.ecg") }
+                Button { sheet = .activity } label: { Label("Přehled", systemImage: "chart.bar.xaxis") }
+                Button { sheet = .help } label: { Label("Jak Chůvička funguje", systemImage: "questionmark.circle") }
                 Button { sheet = .settings } label: { Label("Nastavení", systemImage: "gearshape") }
                 Divider()
                 Button { engine.reconnect(why: "menu") } label: { Label("Znovu připojit", systemImage: "arrow.clockwise") }
@@ -212,6 +214,7 @@ struct MonitorView: View {
         case "night": night = true
         case "activity": sheet = .activity
         case "settings": sheet = .settings
+        case "help": sheet = .help
         case "alerts": askAlerts = true
         default: break
         }

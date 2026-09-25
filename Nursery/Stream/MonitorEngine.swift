@@ -29,7 +29,7 @@ final class MonitorEngine: ObservableObject {
     enum Overall: Equatable { case live, soundOnly, connecting, reconnecting, offline(String) }
 
     /// The demo mode shows a still picture and a fake sound. Start the app with `-demo YES`.
-    static let isDemo = UserDefaults.standard.bool(forKey: "demo")
+    nonisolated static let isDemo = UserDefaults.standard.bool(forKey: "demo")
 
     @Published private(set) var connection: Connection = .idle
     @Published private(set) var pictureLive = false
@@ -119,9 +119,9 @@ final class MonitorEngine: ObservableObject {
         nowPlaying.onPlay = { [weak self] in self?.soundOn() }
         nowPlaying.onPause = { [weak self] in self?.mode = .off }
 
-        activityLog.threshold = settings.sensitivity.threshold
-        activityLog.onEventStart = { [weak self] event in self?.soundEventStarted(event) }
-        settings.$sensitivity.sink { [weak self] s in self?.activityLog.threshold = s.threshold }.store(in: &bag)
+        activityLog.margin = settings.sensitivity.margin
+        activityLog.onEpisodeStart = { [weak self] episode in self?.episodeStarted(episode) }
+        settings.$sensitivity.sink { [weak self] s in self?.activityLog.margin = s.margin }.store(in: &bag)
 
         settings.$loudness.dropFirst().sink { [weak self] l in self?.audio.setGain(decibels: l.decibels) }.store(in: &bag)
         settings.$quality.dropFirst().removeDuplicates().sink { [weak self] _ in
@@ -213,9 +213,9 @@ final class MonitorEngine: ObservableObject {
         NurseryAlerts.disarmWatchdog()
         audioOnlyTask?.cancel()
         UIApplication.shared.isIdleTimerDisabled = settings.keepAwake
-        shared.withLock { $0.renderVideo = true }
+        shared.withLock { $0.renderVideo = !nightMode }
         client?.queue.async { [renderer] in renderer.reset() }
-        if audioOnly || client == nil { reconnect(why: "back in the foreground") }
+        if client == nil || (audioOnly && !nightMode) { reconnect(why: "back in the foreground") }
     }
 
     func sceneEnteredBackground() {
@@ -256,7 +256,7 @@ final class MonitorEngine: ObservableObject {
 
     // MARK: The connection
 
-    private var wantsAudioOnly: Bool { !isForeground && !pip.isActive && mode != .off }
+    private var wantsAudioOnly: Bool { (!isForeground || nightMode) && !pip.isActive && mode != .off }
 
     private func stopClient() {
         guard !Self.isDemo else { return }
@@ -410,14 +410,44 @@ final class MonitorEngine: ObservableObject {
         if !isForeground, mode != .off, client == nil { reconnect(why: "sound on in the background") }
     }
 
-    /// A sound starts in the room. In silent mode, or with the loud-sound alert on, tell the parent.
-    private func soundEventStarted(_ event: SoundActivity.Event) {
-        Log.shared.add(String(format: "sound event, level %.2f", event.peak))
+    /// It returns a full frame from go2rtc. The app sets it (CameraControl.snapshot).
+    var snapshotProvider: (() async -> UIImage?)?
+
+    /// An episode starts in the room. Keep a photo of the moment, and in silent mode
+    /// (or with the sound alert on) tell the parent.
+    private func episodeStarted(_ episode: SoundActivity.Episode) {
+        Log.shared.add(String(format: "sound episode, level %.2f, floor %.2f", episode.peak, activityLog.noiseFloor))
+        if let snapshotProvider {
+            Task {
+                // Wait a moment: the photo then shows the baby during the sound, not before it.
+                try? await Task.sleep(for: .seconds(1.5))
+                if let image = await snapshotProvider() { Moments.save(image, for: episode.id) }
+            }
+        }
         let wanted = mode == .silent || (mode == .live && settings.alertOnSound)
         guard wanted, UIApplication.shared.applicationState != .active,
               Date().timeIntervalSince(lastSoundAlert) > 60 else { return }
         lastSoundAlert = Date()
-        NurseryAlerts.postSound(at: event.start)
+        NurseryAlerts.postSound(at: episode.start)
+    }
+
+    // MARK: Night mode
+
+    /// Night mode: the screen is almost black, so the picture is not needed.
+    /// The app then asks for the sound only, as in the background. This saves the battery.
+    @Published private(set) var nightMode = false
+
+    func setNightMode(_ on: Bool) {
+        guard on != nightMode else { return }
+        nightMode = on
+        Log.shared.add(on ? "night mode on" : "night mode off")
+        shared.withLock { $0.renderVideo = !on }
+        if on {
+            if mode != .off, !audioOnly { reconnect(why: "night mode: sound only") }
+        } else if isForeground {
+            client?.queue.async { [renderer] in renderer.reset() }
+            if audioOnly || client == nil { reconnect(why: "night mode off") }
+        }
     }
 
     private func audioInterrupted(_ note: Notification) {

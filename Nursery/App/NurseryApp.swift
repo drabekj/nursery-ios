@@ -5,6 +5,7 @@ struct NurseryApp: App {
     @StateObject private var settings: Settings
     @StateObject private var engine: MonitorEngine
     @StateObject private var camera: CameraControl
+    @StateObject private var battery = BatteryMonitor()
     @Environment(\.scenePhase) private var phase
     @State private var started = false
 
@@ -30,12 +31,15 @@ struct NurseryApp: App {
                 .environmentObject(settings)
                 .environmentObject(engine)
                 .environmentObject(camera)
+                .environmentObject(battery)
                 .preferredColorScheme(scheme)
                 .tint(Theme.accent)
                 .environment(\.locale, Locale(identifier: "cs_CZ"))   // Czech dates and times, also on an English phone.
                 .task {
                     guard !started else { return }
                     started = true
+                    battery.start()
+                    engine.snapshotProvider = { [camera] in await camera.snapshot() }
                     engine.start()
                     UIApplication.shared.isIdleTimerDisabled = settings.keepAwake
                     await camera.loadConfig()
