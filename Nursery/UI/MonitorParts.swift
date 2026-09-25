@@ -176,6 +176,40 @@ struct PiPButton: View {
 
 // MARK: - The room
 
+/// The words for the state of the room. The picture view and the sound view say the same thing.
+@MainActor
+enum RoomWords {
+    static func hearsRoom(_ e: MonitorEngine) -> Bool { e.soundStatus == .listening || e.soundStatus == .silent }
+
+    static func headline(_ e: MonitorEngine) -> String {
+        switch e.soundStatus {
+        case .listening, .silent: e.roomLevel.title
+        case .connecting: "Připojování"
+        case .lost: "Zvuk vypadl"
+        case .muted: "Zvuk vypnut"
+        }
+    }
+
+    static func color(_ e: MonitorEngine) -> Color {
+        switch e.soundStatus {
+        case .lost: Theme.alarm
+        case .muted, .connecting: .secondary
+        default: .primary
+        }
+    }
+
+    static func subline(_ e: MonitorEngine, _ settings: Settings) -> String {
+        switch e.soundStatus {
+        case .listening:
+            settings.loudness == .normal ? "Živý zvuk" : "Živý zvuk · \(settings.loudness.title) +\(Int(settings.loudness.decibels)) dB"
+        case .silent: "Tichý režim · při zvuku přijde upozornění"
+        case .connecting: "Spouštění živého zvuku…"
+        case .lost: "Obnovování spojení s kamerou…"
+        case .muted: "Zapnete ho tlačítkem Zvuk"
+        }
+    }
+}
+
 /// The state of the room, in large words, and the last 6 seconds of sound.
 struct RoomPanel: View {
     @EnvironmentObject private var engine: MonitorEngine
@@ -187,58 +221,35 @@ struct RoomPanel: View {
         VStack(alignment: .leading, spacing: 16) {
             HStack(alignment: .top) {
                 VStack(alignment: .leading, spacing: 4) {
-                    Text(headline)
+                    Text(RoomWords.headline(engine))
                         .font(.system(size: 34, weight: .semibold, design: .rounded))
-                        .foregroundStyle(headlineColor)
+                        .foregroundStyle(RoomWords.color(engine))
                         .contentTransition(.opacity)
-                        .animation(.easeInOut(duration: 0.35), value: headline)
-                    Text(subline)
+                        .animation(.easeInOut(duration: 0.35), value: RoomWords.headline(engine))
+                    Text(RoomWords.subline(engine, settings))
                         .font(.subheadline)
                         .foregroundStyle(.secondary)
                 }
                 Spacer(minLength: 8)
-                Button(action: openActivity) { lastSound }
+                Button(action: openActivity) { LastSoundLabel(activity: activity, alignment: .trailing) }
                     .buttonStyle(.plain)
+                    .padding(.top, 6)
             }
             .accessibilityElement(children: .combine)
 
-            Waveform(history: engine.history, dim: !hearsRoom)
+            Waveform(history: engine.history, dim: !RoomWords.hearsRoom(engine))
                 .frame(height: 84)
         }
     }
+}
 
-    private var hearsRoom: Bool { engine.soundStatus == .listening || engine.soundStatus == .silent }
+/// "Poslední zvuk před 3 min", or "Ozývá se" while a sound goes on.
+struct LastSoundLabel: View {
+    @ObservedObject var activity: SoundActivity
+    var alignment: HorizontalAlignment = .trailing
 
-    private var headline: String {
-        switch engine.soundStatus {
-        case .listening, .silent: engine.roomLevel.title
-        case .connecting: "Připojování"
-        case .lost: "Zvuk vypadl"
-        case .muted: "Zvuk vypnut"
-        }
-    }
-
-    private var headlineColor: Color {
-        switch engine.soundStatus {
-        case .lost: Theme.alarm
-        case .muted, .connecting: .secondary
-        default: .primary
-        }
-    }
-
-    private var subline: String {
-        switch engine.soundStatus {
-        case .listening:
-            settings.loudness == .normal ? "Živý zvuk" : "Živý zvuk · \(settings.loudness.title) +\(Int(settings.loudness.decibels)) dB"
-        case .silent: "Tichý režim · při zvuku přijde upozornění"
-        case .connecting: "Spouštění živého zvuku…"
-        case .lost: "Obnovování spojení s kamerou…"
-        case .muted: "Zapnete ho tlačítkem Zvuk"
-        }
-    }
-
-    @ViewBuilder private var lastSound: some View {
-        VStack(alignment: .trailing, spacing: 3) {
+    var body: some View {
+        VStack(alignment: alignment, spacing: 3) {
             if activity.current != nil {
                 HStack(spacing: 7) {
                     PulseDot(color: Theme.warn)
@@ -259,7 +270,6 @@ struct RoomPanel: View {
                 Text("Zatím žádný zvuk").font(.footnote).foregroundStyle(.secondary)
             }
         }
-        .padding(.top, 6)
         .contentShape(Rectangle())
         .accessibilityHint("Otevře přehled")
     }
@@ -275,12 +285,14 @@ struct ControlBar: View {
     @EnvironmentObject private var settings: Settings
     @Binding var aiming: Bool
     let actions: MonitorActions
+    /// Aim and Photo need the picture. The sound view has no picture, so it leaves them out.
+    var pictureTools = true
 
     var body: some View {
         GlassGroup(spacing: 10) {
             HStack(spacing: 10) {
                 soundButton
-                if camera.ptzReady || MonitorEngine.isDemo {
+                if pictureTools, camera.ptzReady || MonitorEngine.isDemo {
                     Button {
                         Haptics.tap()
                         withAnimation(.spring(response: 0.35)) { aiming.toggle() }
@@ -289,11 +301,15 @@ struct ControlBar: View {
                     }
                     .buttonStyle(PressScale())
                     .disabled(engine.connection != .live)
+                    .transition(.scale(scale: 0.8).combined(with: .opacity))
                 }
-                Button(action: actions.snapshot) {
-                    BarLabel(title: "Fotka", symbol: "camera.fill", isOn: false, tint: Theme.moon)
+                if pictureTools {
+                    Button(action: actions.snapshot) {
+                        BarLabel(title: "Fotka", symbol: "camera.fill", isOn: false, tint: Theme.moon)
+                    }
+                    .buttonStyle(PressScale())
+                    .transition(.scale(scale: 0.8).combined(with: .opacity))
                 }
-                .buttonStyle(PressScale())
                 Button(action: actions.night) {
                     BarLabel(title: "Noční", symbol: "moon.fill", isOn: false, tint: Theme.moon)
                 }

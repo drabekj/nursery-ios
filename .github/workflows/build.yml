@@ -61,8 +61,9 @@ jobs:
             sleep 9
             xcrun simctl io "$UDID" screenshot "shots/$1.png"
           }
-          for s in main alerts aim activity settings night help; do shot "$s" "$s" light; done
+          for s in main sound alerts aim activity settings night help; do shot "$s" "$s" light; done
           shot main-dark main dark
+          shot sound-dark sound dark
           shot activity-dark activity dark
 
       - name: Upload the screenshots and logs

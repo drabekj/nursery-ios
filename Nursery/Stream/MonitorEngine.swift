@@ -114,6 +114,7 @@ final class MonitorEngine: ObservableObject {
         audio.setGain(decibels: settings.loudness.decibels)
 
         pip.attach(to: videoView.displayLayer)
+        pip.automatic = !settings.soundView
         pip.onActiveChange = { [weak self] active in self?.pictureInPictureChanged(active) }
 
         nowPlaying.onPlay = { [weak self] in self?.soundOn() }
@@ -186,6 +187,7 @@ final class MonitorEngine: ObservableObject {
     private func startDemo() {
         connection = .live
         everHeard = true
+        audioOnly = settings.soundView
         activityLog.loadDemo()
         if let image = UIImage(named: "DemoFrame") { renderer.showStill(image) }
         shared.withLock { $0.lastVideo = .distantFuture; $0.lastAudio = .distantFuture; $0.lastPacket = .distantFuture }
@@ -213,9 +215,10 @@ final class MonitorEngine: ObservableObject {
         NurseryAlerts.disarmWatchdog()
         audioOnlyTask?.cancel()
         UIApplication.shared.isIdleTimerDisabled = settings.keepAwake
-        shared.withLock { $0.renderVideo = !nightMode }
+        let render = wantsPicture
+        shared.withLock { $0.renderVideo = render }
         client?.queue.async { [renderer] in renderer.reset() }
-        if client == nil || (audioOnly && !nightMode) { reconnect(why: "back in the foreground") }
+        if client == nil || audioOnly != wantsAudioOnly { reconnect(why: "back in the foreground") }
     }
 
     func sceneEnteredBackground() {
@@ -256,7 +259,15 @@ final class MonitorEngine: ObservableObject {
 
     // MARK: The connection
 
-    private var wantsAudioOnly: Bool { (!isForeground || nightMode) && !pip.isActive && mode != .off }
+    /// The picture is needed only on a screen that shows it: not in Night mode, not in the sound view.
+    private var wantsPicture: Bool { !nightMode && !settings.soundView }
+
+    /// In the foreground, the app asks for the sound only when no screen shows the picture.
+    /// In the background, it asks for the sound only, unless the sound is off (then it closes the stream).
+    private var wantsAudioOnly: Bool {
+        guard !pip.isActive else { return false }
+        return isForeground ? !wantsPicture : mode != .off
+    }
 
     private func stopClient() {
         guard !Self.isDemo else { return }
@@ -441,13 +452,29 @@ final class MonitorEngine: ObservableObject {
         guard on != nightMode else { return }
         nightMode = on
         Log.shared.add(on ? "night mode on" : "night mode off")
-        shared.withLock { $0.renderVideo = !on }
-        if on {
-            if mode != .off, !audioOnly { reconnect(why: "night mode: sound only") }
-        } else if isForeground {
-            client?.queue.async { [renderer] in renderer.reset() }
-            if audioOnly || client == nil { reconnect(why: "night mode off") }
-        }
+        applyPicture(why: on ? "night mode: sound only" : "night mode off")
+    }
+
+    // MARK: The sound view
+
+    /// The sound view: the parent chose to only listen. The screen shows the room, not the picture,
+    /// so the app asks go2rtc for the sound only. That saves the battery, the Wi-Fi, and the heat.
+    func setSoundView(_ on: Bool) {
+        guard on != settings.soundView else { return }
+        settings.soundView = on
+        Log.shared.add(on ? "sound view" : "picture view")
+        pip.automatic = !on          // With no picture, a swipe home must not open an empty small window.
+        applyPicture(why: on ? "sound view: sound only" : "picture view")
+    }
+
+    /// It starts or stops the picture after Night mode or the sound view changes.
+    private func applyPicture(why: String) {
+        let render = wantsPicture || pip.isActive
+        shared.withLock { $0.renderVideo = render }
+        if Self.isDemo { audioOnly = !render; return }
+        guard isForeground else { return }
+        if render { client?.queue.async { [renderer] in renderer.reset() } }
+        if client == nil || audioOnly != wantsAudioOnly { reconnect(why: why) }
     }
 
     private func audioInterrupted(_ note: Notification) {

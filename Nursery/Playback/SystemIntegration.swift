@@ -204,12 +204,17 @@ final class PictureInPicture: NSObject, ObservableObject, AVPictureInPictureCont
         let source = AVPictureInPictureController.ContentSource(sampleBufferDisplayLayer: layer, playbackDelegate: self)
         let c = AVPictureInPictureController(contentSource: source)
         c.delegate = self
-        c.canStartPictureInPictureAutomaticallyFromInline = true   // Swipe home: the small window opens.
+        c.canStartPictureInPictureAutomaticallyFromInline = automatic   // Swipe home: the small window opens.
         c.requiresLinearPlayback = true
         observation = c.observe(\.isPictureInPicturePossible, options: [.initial, .new]) { [weak self] c, _ in
             DispatchQueue.main.async { self?.isPossible = c.isPictureInPicturePossible }
         }
         controller = c
+    }
+
+    /// A swipe home opens the small window. The sound view turns this off.
+    var automatic = true {
+        didSet { controller?.canStartPictureInPictureAutomaticallyFromInline = automatic }
     }
 
     func toggle() {

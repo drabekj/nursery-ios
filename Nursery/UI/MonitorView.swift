@@ -1,9 +1,11 @@
 import SwiftUI
 
-/// The main screen. It adapts to three shapes:
-/// - iPhone portrait: the picture at the top, the room below, the controls at the thumb.
-/// - Landscape: the picture fills the screen, and the controls fade.
-/// - iPad: the picture on the left, the room and the controls on the right.
+/// The main screen. It has two views, and the switch at the top chooses:
+/// - Obraz: the picture, the room below it, and the controls at the thumb.
+/// - Jen zvuk: no picture. The room fills the screen, and the picture tools go away.
+///
+/// Each view adapts to three shapes: iPhone portrait, landscape (the picture fills the screen),
+/// and iPad (the stage on the left, the room and the controls on the right).
 struct MonitorView: View {
     @EnvironmentObject private var engine: MonitorEngine
     @EnvironmentObject private var camera: CameraControl
@@ -21,15 +23,16 @@ struct MonitorView: View {
 
     enum Sheet: String, Identifiable { case settings, activity, help; var id: String { rawValue } }
 
+    private var soundView: Bool { settings.soundView }
+    private var wide: Bool { hSize == .regular || vSize == .compact }
+
     var body: some View {
         ZStack {
             AmbientBackground(level: engine.level, status: engine.soundStatus)
-            if vSize == .compact {
+            if vSize == .compact && !soundView {
                 FullScreenMonitor(zoom: zoom, pip: engine.pip, aiming: $aiming, actions: actions)
-            } else if hSize == .regular {
-                wideLayout
             } else {
-                phoneLayout
+                mainLayout
             }
             if flash {
                 Color.white.ignoresSafeArea().transition(.opacity).allowsHitTesting(false).zIndex(4)
@@ -61,36 +64,22 @@ struct MonitorView: View {
         MonitorActions(snapshot: snapshot, night: { enterNight() }, move: move)
     }
 
-    // MARK: iPhone portrait
+    private func setSoundView(_ on: Bool) {
+        withAnimation(.spring(response: 0.5, dampingFraction: 0.86)) {
+            aiming = false
+            engine.setSoundView(on)
+        }
+    }
 
-    private var phoneLayout: some View {
+    // MARK: The layout
+
+    private var mainLayout: some View {
         NavigationStack {
             VStack(spacing: 0) {
-                VideoHero(zoom: zoom, pip: engine.pip, aiming: $aiming, onMove: move, fullScreen: {
-                    Orientation.request(.landscapeRight)
-                })
-                .padding(.horizontal, 8)
-
-                RoomPanel(activity: engine.activityLog) { sheet = .activity }
-                    .padding(.horizontal, 20)
-                    .padding(.top, 22)
-
-                HourStrip(activity: engine.activityLog) { sheet = .activity }
-                    .padding(.horizontal, 16)
-                    .padding(.top, 20)
-
-                Spacer(minLength: 12)
-
-                if askAlerts {
-                    AlertOffer(allow: allowAlerts, dismiss: { withAnimation { askAlerts = false } })
-                        .padding(.horizontal, 16)
-                        .padding(.bottom, 12)
-                        .transition(.move(edge: .bottom).combined(with: .opacity))
-                }
-
-                ControlBar(aiming: $aiming, actions: actions)
-                    .padding(.horizontal, 16)
-                    .padding(.bottom, 8)
+                ViewSwitch(soundView: soundView, choose: setSoundView)
+                    .padding(.top, 4)
+                    .padding(.bottom, wide ? 12 : 16)
+                if wide { wideContent } else { phoneContent }
             }
             .toolbar { toolbar }
             .navigationTitle("Chůvička")
@@ -99,26 +88,81 @@ struct MonitorView: View {
         }
     }
 
-    // MARK: iPad
+    private var stageTransition: AnyTransition {
+        .asymmetric(insertion: .opacity.combined(with: .scale(scale: 0.94)), removal: .opacity)
+    }
 
-    private var wideLayout: some View {
-        NavigationStack {
-            HStack(alignment: .top, spacing: 24) {
-                VideoHero(zoom: zoom, pip: engine.pip, aiming: $aiming, onMove: move, fullScreen: nil)
-                VStack(spacing: 20) {
-                    RoomPanel(activity: engine.activityLog) { sheet = .activity }
-                    HourStrip(activity: engine.activityLog) { sheet = .activity }
-                    Spacer()
-                    if askAlerts { AlertOffer(allow: allowAlerts, dismiss: { askAlerts = false }) }
-                    ControlBar(aiming: $aiming, actions: actions)
-                }
-                .frame(width: 360)
+    // iPhone portrait.
+    private var phoneContent: some View {
+        VStack(spacing: 0) {
+            if soundView {
+                SoundStage(activity: engine.activityLog) { sheet = .activity }
+                    .padding(.horizontal, 20)
+                    .transition(stageTransition)
+                PeekCard { setSoundView(false) }
+                    .padding(.horizontal, 16)
+                    .padding(.top, 22)
+                    .transition(.opacity)
+            } else {
+                VideoHero(zoom: zoom, pip: engine.pip, aiming: $aiming, onMove: move, fullScreen: {
+                    Orientation.request(.landscapeRight)
+                })
+                .padding(.horizontal, 8)
+                .transition(stageTransition)
+
+                RoomPanel(activity: engine.activityLog) { sheet = .activity }
+                    .padding(.horizontal, 20)
+                    .padding(.top, 22)
+                    .transition(.opacity)
             }
-            .padding(24)
-            .toolbar { toolbar }
-            .navigationTitle("Chůvička")
-            .navigationBarTitleDisplayMode(.inline)
+
+            HourStrip(activity: engine.activityLog) { sheet = .activity }
+                .padding(.horizontal, 16)
+                .padding(.top, soundView ? 12 : 20)
+
+            Spacer(minLength: 12).frame(maxHeight: soundView ? 16 : .infinity)
+
+            if askAlerts {
+                AlertOffer(allow: allowAlerts, dismiss: { withAnimation { askAlerts = false } })
+                    .padding(.horizontal, 16)
+                    .padding(.bottom, 12)
+                    .transition(.move(edge: .bottom).combined(with: .opacity))
+            }
+
+            ControlBar(aiming: $aiming, actions: actions, pictureTools: !soundView)
+                .padding(.horizontal, 16)
+                .padding(.bottom, 8)
         }
+    }
+
+    // iPad, and the sound view in landscape.
+    private var wideContent: some View {
+        HStack(alignment: .top, spacing: 24) {
+            if soundView {
+                SoundStage(activity: engine.activityLog) { sheet = .activity }
+                    .frame(maxWidth: .infinity, maxHeight: .infinity)
+                    .transition(stageTransition)
+            } else {
+                VideoHero(zoom: zoom, pip: engine.pip, aiming: $aiming, onMove: move, fullScreen: nil)
+                    .transition(stageTransition)
+            }
+            VStack(spacing: 20) {
+                if soundView {
+                    PeekCard { setSoundView(false) }
+                } else {
+                    RoomPanel(activity: engine.activityLog) { sheet = .activity }
+                }
+                if vSize != .compact {
+                    HourStrip(activity: engine.activityLog) { sheet = .activity }
+                }
+                Spacer(minLength: 0)
+                if askAlerts { AlertOffer(allow: allowAlerts, dismiss: { askAlerts = false }) }
+                ControlBar(aiming: $aiming, actions: actions, pictureTools: !soundView)
+            }
+            .frame(width: 360)
+        }
+        .padding(.horizontal, 24)
+        .padding(.bottom, vSize == .compact ? 8 : 24)
     }
 
     @ToolbarContentBuilder
@@ -273,7 +317,7 @@ struct StatusBadge: View {
     private var text: String {
         switch overall {
         case .live: pictureLive ? "Živě" : "Čekání na obraz"
-        case .soundOnly: "Jen zvuk"
+        case .soundOnly: "Živě"          // The switch already says "Jen zvuk".
         case .connecting: "Připojování"
         case .reconnecting: "Obnovování spojení"
         case .offline: "Nedostupné"

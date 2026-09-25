@@ -14,10 +14,13 @@ struct HelpView: View {
                 topic("bell.badge", "Když se něco pokazí",
                       "Když vypadne spojení s kamerou, přijde po 20 sekundách upozornění a Chůvička se sama připojí znovu. Kdyby iOS aplikaci ukončil, do 2,5 minuty přijde upozornění „Chůvička přestala hlídat“. Stačí ji znovu otevřít.",
                       footnote: "Upozornění fungují, jen když je povolíte. Aplikaci nezavírejte přejetím nahoru v přepínači aplikací, tím hlídání ukončíte.")
+                topic("waveform", "Obraz, nebo jen zvuk",
+                      "Přepínač nahoře volí, co hlavní obrazovka ukazuje. Obraz ukazuje živé video z postýlky. Jen zvuk ukazuje jen pokojíček: kruh, který se rozvlní se zvukem, a slovy, co se děje. Video se v tu chvíli vůbec nestahuje.",
+                      footnote: "Jen zvuk šetří baterii i Wi-Fi a telefon méně hřeje. Na miminko se můžete kdykoli podívat tlačítkem Nahlédnout do postýlky. Pořídí jednu fotku z kamery, bez živého obrazu.")
                 topic("moon.stars", "Noční režim",
                       "Displej zůstane zapnutý, ale téměř černý a na nejnižším jasu. Telefon se sám nezamkne. Obraz se zastaví, zvuk a upozornění běží dál. Když se miminko ozve, vlnovka se rozsvítí. Klepnutím displej probudíte.")
                 topic("battery.75", "Baterie a nabíjení",
-                      "Nejúspornější je zamčený telefon, kdy běží jen zvuk. Noční režim spotřebuje o něco víc, protože svítí displej. Nejvíc spotřebuje otevřená aplikace se živým obrazem. Na celou noc doporučujeme nabíječku.",
+                      "Nejúspornější je zamčený telefon, kdy běží jen zvuk. Noční režim a zobrazení Jen zvuk spotřebují o něco víc, protože svítí displej. Nejvíc spotřebuje otevřená aplikace se živým obrazem. Na celou noc doporučujeme nabíječku.",
                       footnote: "Spotřebu vašeho telefonu Chůvička měří sama. Teď: \(battery.summary).")
                 topic("bell.badge.fill", "Tichý režim",
                       "Chůvička nic nepřehrává, ale dál poslouchá. Když se miminko ozve, přijde upozornění. Hodí se, když nechcete celou noc slyšet šum pokoje. Zapnete ho podržením tlačítka Zvuk.")

@@ -99,6 +99,8 @@ final class Settings: ObservableObject {
     @Published var alertOnSound: Bool { didSet { d.set(alertOnSound, forKey: "alertOnSound") } }
     @Published var sensitivity: Sensitivity { didSet { d.set(sensitivity.rawValue, forKey: "sensitivity") } }
     @Published var appearance: Appearance { didSet { d.set(appearance.rawValue, forKey: "appearance") } }
+    /// The main screen shows the room only, with no picture. See `MonitorEngine.setSoundView`.
+    @Published var soundView: Bool { didSet { if !MonitorEngine.isDemo { d.set(soundView, forKey: "soundView") } } }
 
     init() {
         host = d.string(forKey: "host") ?? "192.168.0.136"
@@ -110,6 +112,8 @@ final class Settings: ObservableObject {
         alertOnSound = d.object(forKey: "alertOnSound") as? Bool ?? false
         sensitivity = Sensitivity(rawValue: d.string(forKey: "sensitivity") ?? "") ?? .medium
         appearance = Appearance(rawValue: d.string(forKey: "appearance") ?? "") ?? .light
+        // The screenshots of the sound view use `-demoScreen sound…`.
+        soundView = MonitorEngine.isDemo ? d.string(forKey: "demoScreen")?.hasPrefix("sound") == true : d.bool(forKey: "soundView")
     }
 
     var trimmedHost: String { host.trimmingCharacters(in: .whitespacesAndNewlines) }

@@ -25,6 +25,7 @@ private func eventsText(_ n: Int) -> String {
 }
 
 /// The one sentence at the top: what the parent wants to know first.
+@MainActor
 private struct Summary {
     let headline: String
     let detail: String

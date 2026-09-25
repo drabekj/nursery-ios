@@ -172,6 +172,7 @@ struct PressScale: ButtonStyle {
 
 enum Haptics {
     static func tap() { UIImpactFeedbackGenerator(style: .light).impactOccurred() }
+    static func select() { UISelectionFeedbackGenerator().selectionChanged() }
     static func firm() { UIImpactFeedbackGenerator(style: .medium).impactOccurred() }
     static func error() { UINotificationFeedbackGenerator().notificationOccurred(.error) }
 }
