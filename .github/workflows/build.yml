@@ -51,13 +51,13 @@ jobs:
           xcrun simctl boot "$UDID"
           xcrun simctl bootstatus "$UDID" -b
           xcrun simctl ui "$UDID" appearance dark
-          xcrun simctl status_bar "$UDID" override --time 21:41 --batteryState charged --batteryLevel 100 --wifiBars 3 --cellularMode notSupported
+          xcrun simctl status_bar "$UDID" override --time 21:41 --dataNetwork wifi --wifiMode active --wifiBars 3 --batteryState charged --batteryLevel 100 || true
           APP=$(find build/sim -name 'Nursery.app' -path '*iphonesimulator*' | head -1)
           xcrun simctl install "$UDID" "$APP"
           mkdir -p shots
           for s in main aim activity night settings alerts; do
             xcrun simctl terminate "$UDID" cz.drabek.nursery || true
-            xcrun simctl launch "$UDID" cz.drabek.nursery -demo YES -demoScreen $s
+            xcrun simctl launch "$UDID" cz.drabek.nursery -demo YES -demoScreen $s -AppleLocale en_GB
             sleep 9
             xcrun simctl io "$UDID" screenshot "shots/$s.png"
           done

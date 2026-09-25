@@ -126,14 +126,7 @@ struct Waveform: View {
         .accessibilityValue(Text(Waveform.word(for: history.last ?? 0)))
     }
 
-    static func word(for v: Float) -> String {
-        switch v {
-        case ..<0.15: "Quiet"
-        case ..<0.45: "Some sound"
-        case ..<0.75: "Loud"
-        default: "Very loud"
-        }
-    }
+    static func word(for v: Float) -> String { RoomLevel(v).title }
 }
 
 // MARK: - The repeat button

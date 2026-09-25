@@ -74,6 +74,10 @@ struct MonitorView: View {
                     .padding(.horizontal, 20)
                     .padding(.top, 22)
 
+                HourStrip(activity: engine.activityLog) { sheet = .activity }
+                    .padding(.horizontal, 16)
+                    .padding(.top, 20)
+
                 Spacer(minLength: 12)
 
                 if askAlerts {
@@ -102,6 +106,7 @@ struct MonitorView: View {
                 VideoHero(zoom: zoom, pip: engine.pip, aiming: $aiming, onMove: move, fullScreen: nil)
                 VStack(spacing: 20) {
                     RoomPanel(activity: engine.activityLog) { sheet = .activity }
+                    HourStrip(activity: engine.activityLog) { sheet = .activity }
                     Spacer()
                     if askAlerts { AlertOffer(allow: allowAlerts, dismiss: { askAlerts = false }) }
                     ControlBar(aiming: $aiming, actions: actions)
@@ -252,25 +257,15 @@ struct AmbientBackground: View {
 struct StatusBadge: View {
     let overall: MonitorEngine.Overall
     let pictureLive: Bool
-    @Environment(\.accessibilityReduceMotion) private var reduceMotion
-    @State private var pulse = false
-
     var body: some View {
-        HStack(spacing: 6) {
-            Circle()
-                .fill(color)
-                .frame(width: 8, height: 8)
-                .opacity(pulse ? 0.45 : 1)
+        HStack(spacing: 7) {
+            PulseDot(color: color, animated: overall == .live || overall == .soundOnly)
             Text(text)
                 .font(.subheadline.weight(.semibold))
                 .contentTransition(.opacity)
         }
         .fixedSize()
         .accessibilityElement(children: .combine)
-        .onAppear {
-            guard !reduceMotion else { return }
-            withAnimation(.easeInOut(duration: 1.1).repeatForever(autoreverses: true)) { pulse = true }
-        }
         .animation(.easeInOut, value: text)
     }
 
@@ -304,7 +299,6 @@ struct AlertOffer: View {
             Image(systemName: "bell.badge.fill")
                 .font(.title2)
                 .foregroundStyle(Theme.moon)
-                .symbolEffect(.bounce, options: .nonRepeating)
             VStack(alignment: .leading, spacing: 2) {
                 Text("Know when the sound stops").font(.subheadline.weight(.semibold))
                 Text("Nursery can alert you if the connection drops, or when the baby makes a sound.")
@@ -312,7 +306,11 @@ struct AlertOffer: View {
             }
             Spacer(minLength: 0)
             VStack(spacing: 6) {
-                Button("Allow", action: allow).buttonStyle(.borderedProminent).controlSize(.small)
+                Button(action: allow) {
+                    Text("Allow").fontWeight(.semibold).foregroundStyle(.black)
+                }
+                .buttonStyle(.borderedProminent)
+                .controlSize(.small)
                 Button("Later", action: dismiss).font(.caption).foregroundStyle(.secondary)
             }
         }

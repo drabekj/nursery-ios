@@ -48,6 +48,60 @@ enum Theme {
     }
 }
 
+/// The loudness of the room in words. The engine holds a word for a moment before it changes,
+/// so the large headline does not flicker with each syllable.
+enum RoomLevel: Int, Comparable {
+    case quiet, some, loud, veryLoud
+
+    init(_ v: Float) {
+        switch v {
+        case ..<0.15: self = .quiet
+        case ..<0.45: self = .some
+        case ..<0.75: self = .loud
+        default: self = .veryLoud
+        }
+    }
+
+    var title: String {
+        switch self {
+        case .quiet: "Quiet"
+        case .some: "Some sound"
+        case .loud: "Loud"
+        case .veryLoud: "Very loud"
+        }
+    }
+
+    static func < (a: RoomLevel, b: RoomLevel) -> Bool { a.rawValue < b.rawValue }
+}
+
+/// A dot that stays at full colour, with a soft ring that grows and fades.
+/// A dimming dot looked brown in the dark; a ring keeps the colour true.
+struct PulseDot: View {
+    let color: Color
+    var size: CGFloat = 8
+    var animated = true
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
+    @State private var grow = false
+
+    var body: some View {
+        Circle()
+            .fill(color)
+            .frame(width: size, height: size)
+            .background {
+                if animated && !reduceMotion {
+                    Circle()
+                        .stroke(color, lineWidth: 1.5)
+                        .scaleEffect(grow ? 2.4 : 1)
+                        .opacity(grow ? 0 : 0.7)
+                }
+            }
+            .onAppear {
+                withAnimation(.easeOut(duration: 1.4).repeatForever(autoreverses: false)) { grow = true }
+            }
+            .accessibilityHidden(true)
+    }
+}
+
 extension Font {
     static func rounded(_ style: Font.TextStyle, _ weight: Font.Weight = .regular) -> Font {
         .system(style, design: .rounded).weight(weight)

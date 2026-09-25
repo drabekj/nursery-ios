@@ -39,6 +39,8 @@ final class MonitorEngine: ObservableObject {
     /// The loudness in the last 6 seconds, oldest first. One value each 0.1 s.
     @Published private(set) var history: [Float] = Array(repeating: 0, count: 60)
     @Published private(set) var videoSize = CGSize(width: 16, height: 9)
+    /// The loudness in words, with a hold time. A louder word shows after 0.4 s, a quieter one after 2.5 s.
+    @Published private(set) var roomLevel: RoomLevel = .quiet
     @Published private(set) var audioOnly = false
     @Published private(set) var delayMilliseconds = 0
     @Published private(set) var failures = 0
@@ -88,6 +90,8 @@ final class MonitorEngine: ObservableObject {
     private var everHeard = false
     private var lostSince: Date?
     private var alerted = false
+    private var levelCandidate: RoomLevel?
+    private var levelCandidateSince = Date()
     private var lastSoundAlert = Date.distantPast
     private var ticks = 0
     private var timer: Timer?
@@ -440,6 +444,7 @@ final class MonitorEngine: ObservableObject {
         if mode != .off, soundStatus == .listening || soundStatus == .silent {
             activityLog.feed(level: smoothed, at: now)
         }
+        holdRoomLevel(RoomLevel(smoothed), now: now)
 
         guard ticks % 5 == 0 else { return }       // The rest runs at 2 Hz.
         pictureLive = now.timeIntervalSince(s.lastVideo) < 3
@@ -452,6 +457,19 @@ final class MonitorEngine: ObservableObject {
         }
         updateStatus(force: false, lastAudio: s.lastAudio)
         if ticks % 100 == 0 { activity.heartbeat() }
+    }
+
+    private func holdRoomLevel(_ next: RoomLevel, now: Date) {
+        guard next != roomLevel else { levelCandidate = nil; return }
+        if levelCandidate != next {
+            levelCandidate = next
+            levelCandidateSince = now
+        }
+        let hold: TimeInterval = next > roomLevel ? 0.4 : 2.5
+        if now.timeIntervalSince(levelCandidateSince) >= hold {
+            roomLevel = next
+            levelCandidate = nil
+        }
     }
 
     private func updateStatus(force: Bool, lastAudio: Date? = nil) {

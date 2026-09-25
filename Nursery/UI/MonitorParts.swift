@@ -80,8 +80,10 @@ struct VideoPlaceholder: View {
                     .font(.caption).foregroundStyle(.secondary).multilineTextAlignment(.center)
                     .padding(.horizontal, 24)
                 HStack(spacing: 10) {
-                    Button("Try Again") { engine.reconnect(why: "user asked") }
-                        .buttonStyle(.borderedProminent)
+                    Button { engine.reconnect(why: "user asked") } label: {
+                        Text("Try Again").foregroundStyle(.black)
+                    }
+                    .buttonStyle(.borderedProminent)
                     Button("Settings") {
                         if let url = URL(string: UIApplication.openSettingsURLString) { UIApplication.shared.open(url) }
                     }
@@ -187,8 +189,8 @@ struct RoomPanel: View {
                     Text(headline)
                         .font(.system(size: 34, weight: .semibold, design: .rounded))
                         .foregroundStyle(headlineColor)
-                        .contentTransition(.interpolate)
-                        .animation(.easeInOut(duration: 0.3), value: headline)
+                        .contentTransition(.opacity)
+                        .animation(.easeInOut(duration: 0.35), value: headline)
                     Text(subline)
                         .font(.subheadline)
                         .foregroundStyle(.secondary)
@@ -208,7 +210,7 @@ struct RoomPanel: View {
 
     private var headline: String {
         switch engine.soundStatus {
-        case .listening, .silent: Waveform.word(for: engine.level)
+        case .listening, .silent: engine.roomLevel.title
         case .connecting: "Connecting"
         case .lost: "No sound"
         case .muted: "Sound off"
@@ -237,11 +239,12 @@ struct RoomPanel: View {
     @ViewBuilder private var lastSound: some View {
         VStack(alignment: .trailing, spacing: 3) {
             if activity.current != nil {
-                Label("Sound now", systemImage: "circle.fill")
-                    .labelStyle(.titleAndIcon)
-                    .font(.footnote.weight(.semibold))
-                    .foregroundStyle(Theme.warn)
-                    .symbolEffect(.pulse)
+                HStack(spacing: 7) {
+                    PulseDot(color: Theme.warn)
+                    Text("Sound now")
+                }
+                .font(.footnote.weight(.semibold))
+                .foregroundStyle(Theme.warn)
             } else if let last = activity.lastSound {
                 Text("Last sound").font(.caption).foregroundStyle(.secondary)
                 (Text(last, style: .relative) + Text(" ago"))

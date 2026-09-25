@@ -113,3 +113,61 @@ private struct EventRow: View {
         return s < 60 ? "\(max(s, 1)) s" : "\(s / 60) min \(s % 60) s"
     }
 }
+
+/// The last hour at a glance, on the main screen. It fills the space under the room panel
+/// with the answer to "was it quiet?", and a tap opens the full Activity.
+struct HourStrip: View {
+    @ObservedObject var activity: SoundActivity
+    let open: () -> Void
+
+    var body: some View {
+        Button(action: open) {
+            VStack(alignment: .leading, spacing: 10) {
+                HStack(alignment: .firstTextBaseline) {
+                    Text("Last hour").font(.subheadline.weight(.semibold))
+                    Spacer()
+                    Text(summary).font(.footnote).foregroundStyle(.secondary)
+                    Image(systemName: "chevron.right").font(.caption.weight(.semibold)).foregroundStyle(.tertiary)
+                }
+                if activity.minutes.isEmpty {
+                    Text("Fills while Nursery listens")
+                        .font(.caption).foregroundStyle(.tertiary)
+                        .frame(maxWidth: .infinity, minHeight: 44)
+                } else {
+                    Chart {
+                        ForEach(activity.minutes) { m in
+                            BarMark(x: .value("Time", m.start, unit: .minute), y: .value("Loudness", max(m.peak, 0.04)))
+                                .foregroundStyle(Theme.level(m.peak).opacity(m.peak >= activity.threshold ? 1 : 0.55))
+                                .cornerRadius(1.5)
+                        }
+                    }
+                    .chartYScale(domain: 0...1)
+                    .chartXAxis(.hidden)
+                    .chartYAxis(.hidden)
+                    .frame(height: 44)
+                    HStack {
+                        Text("60 min ago")
+                        Spacer()
+                        Text("now")
+                    }
+                    .font(.caption2).foregroundStyle(.tertiary)
+                }
+            }
+            .padding(16)
+            .glass(in: RoundedRectangle(cornerRadius: 24, style: .continuous), interactive: true)
+            .contentShape(RoundedRectangle(cornerRadius: 24, style: .continuous))
+        }
+        .buttonStyle(.plain)
+        .accessibilityLabel("Last hour. \(summary)")
+        .accessibilityHint("Opens the sound activity")
+    }
+
+    private var summary: String {
+        let hour = activity.events.filter { $0.end > Date().addingTimeInterval(-3600) }
+        switch hour.count {
+        case 0: return activity.current == nil ? "No sounds" : "Sound now"
+        case 1: return "1 sound"
+        default: return "\(hour.count) sounds"
+        }
+    }
+}
