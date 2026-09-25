@@ -57,6 +57,7 @@ struct MonitorView: View {
         .onChange(of: engine.connection) { _, c in
             if c == .live { Task { await offerAlerts() } }
         }
+        .onChange(of: aiming) { _, on in Log.shared.add(on ? "aim on" : "aim off") }
         .onAppear(perform: applyDemoScreen)
     }
 
@@ -253,6 +254,7 @@ struct MonitorView: View {
     /// `-demoScreen aim|night|activity|settings` opens a screen at launch, for the screenshots.
     private func applyDemoScreen() {
         guard MonitorEngine.isDemo else { return }
+        Log.shared.add("demo screen \(UserDefaults.standard.string(forKey: "demoScreen") ?? "none")")
         switch UserDefaults.standard.string(forKey: "demoScreen") {
         case "aim": aiming = true
         case "night": night = true

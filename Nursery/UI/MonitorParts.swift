@@ -22,6 +22,8 @@ struct VideoHero: View {
             if aiming {
                 AimOverlay(onMove: onMove) { withAnimation(.spring(response: 0.35)) { aiming = false } }
                     .transition(.opacity)
+                    .onAppear { Log.shared.add("aim overlay shown") }
+                    .onDisappear { Log.shared.add("aim overlay gone") }
             }
         }
         .aspectRatio(engine.videoSize.width / max(engine.videoSize.height, 1), contentMode: .fit)
@@ -126,7 +128,7 @@ struct AimOverlay: View {
             }
         }
         .overlay(alignment: .topTrailing) {
-            Button("Hotovo", action: done)
+            Button("Hotovo") { Log.shared.add("aim: Hotovo"); done() }
                 .font(.subheadline.weight(.semibold))
                 .padding(.horizontal, 14).padding(.vertical, 8)
                 .glass(in: Capsule(), interactive: true)
@@ -139,7 +141,7 @@ struct AimOverlay: View {
             // Leave the aiming mode after 20 s with no use.
             while !Task.isCancelled {
                 try? await Task.sleep(for: .seconds(2))
-                if Date().timeIntervalSince(lastUse) > 20 { done(); break }
+                if Date().timeIntervalSince(lastUse) > 20 { Log.shared.add("aim: 20 s with no use"); done(); break }
             }
         }
     }
