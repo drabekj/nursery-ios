@@ -178,14 +178,12 @@ private struct ChoiceCard: View {
                     .frame(width: 52, height: 52)
                     .background(Theme.moon.opacity(0.25), in: RoundedRectangle(cornerRadius: 14, style: .continuous))
                 VStack(alignment: .leading, spacing: 4) {
-                    HStack(spacing: 8) {
-                        Text(title).font(.title3.weight(.semibold)).foregroundStyle(.primary)
-                        if let badge {
-                            Text(badge).font(.caption.weight(.bold)).foregroundStyle(.black)
-                                .padding(.horizontal, 8).padding(.vertical, 3)
-                                .background(Theme.moon, in: Capsule())
-                        }
+                    if let badge {
+                        Text(badge).font(.caption.weight(.bold)).foregroundStyle(.black)
+                            .padding(.horizontal, 8).padding(.vertical, 3)
+                            .background(Theme.moon, in: Capsule())
                     }
+                    Text(title).font(.title3.weight(.semibold)).foregroundStyle(.primary)
                     Text(subtitle).font(.subheadline).foregroundStyle(.secondary)
                         .multilineTextAlignment(.leading)
                         .fixedSize(horizontal: false, vertical: true)
@@ -255,8 +253,9 @@ private struct WelcomePage: View {
         Page(title: "Chůvička", subtitle: "Uslyšíte a uvidíte miminko, i když jste ve vedlejší místnosti.",
              primary: "Začít", primaryAction: next) {
             Image("Artwork").resizable().scaledToFit()
-                .frame(maxWidth: 220).frame(maxWidth: .infinity)
-                .clipShape(RoundedRectangle(cornerRadius: 40, style: .continuous))
+                .frame(maxWidth: 200)
+                .clipShape(RoundedRectangle(cornerRadius: 44, style: .continuous))
+                .frame(maxWidth: .infinity)
                 .accessibilityHidden(true)
             VStack(alignment: .leading, spacing: 16) {
                 benefit("waveform", "Živý zvuk i obraz, i se zamčeným telefonem")
@@ -463,12 +462,15 @@ private struct CameraDetailsPage: View {
                     Text("Najdete ji v aplikaci kamery, v informacích o zařízení.").font(.footnote).foregroundStyle(.secondary)
                         .frame(maxWidth: .infinity, alignment: .leading)
                 }
-                field("Uživatel", "", text: $settings.rtspUser, keyboard: .default)
-                SecureField("Heslo", text: $password)
-                    .textContentType(.password)
-                    .font(.title3)
-                    .padding(16)
-                    .glass(in: RoundedRectangle(cornerRadius: 18, style: .continuous))
+                field("Uživatel", "uživatel účtu kamery", text: $settings.rtspUser, keyboard: .default)
+                VStack(alignment: .leading, spacing: 6) {
+                    Text("Heslo").font(.subheadline.weight(.semibold)).foregroundStyle(.secondary)
+                    SecureField("heslo účtu kamery", text: $password)
+                        .textContentType(.password)
+                        .font(.title3)
+                        .padding(16)
+                        .glass(in: RoundedRectangle(cornerRadius: 18, style: .continuous))
+                }
             }
         }
     }
@@ -533,8 +535,8 @@ private struct TestPage: View {
     @State private var slow = false
 
     var body: some View {
-        Page(back: back, title: test.passed ? "Hotovo! \(name) je připojený." : (test.running ? "Zkouším spojení…" : "Něco nevyšlo"),
-             subtitle: test.passed ? "Obraz i zvuk k vám dorazí." : nil,
+        Page(back: back, title: test.passed ? "Hotovo, funguje to!" : (test.running ? "Zkouším spojení…" : "Něco nevyšlo"),
+             subtitle: test.passed ? "\(name): obraz i zvuk k vám dorazí." : nil,
              primary: test.passed ? "Pokračovat" : (test.running ? nil : "Zkusit znovu"),
              primaryAction: { test.passed ? next() : run() },
              secondary: !test.passed && !test.running ? "Zpět a upravit" : nil, secondaryAction: back) {
