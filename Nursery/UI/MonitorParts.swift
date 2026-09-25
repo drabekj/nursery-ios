@@ -141,7 +141,8 @@ struct AimOverlay: View {
             // Leave the aiming mode after 20 s with no use.
             while !Task.isCancelled {
                 try? await Task.sleep(for: .seconds(2))
-                if Date().timeIntervalSince(lastUse) > 20 { Log.shared.add("aim: 20 s with no use"); done(); break }
+                // Not in the demo: a slow simulator took the screenshot after the 20 s, with no arrows.
+                if !MonitorEngine.isDemo, Date().timeIntervalSince(lastUse) > 20 { Log.shared.add("aim: 20 s with no use"); done(); break }
             }
         }
     }

@@ -121,7 +121,9 @@ struct MonitorView: View {
                 .padding(.horizontal, 16)
                 .padding(.top, soundView ? 12 : 20)
 
-            Spacer(minLength: 12).frame(maxHeight: soundView ? 16 : .infinity)
+            // The spacer must stay a plain Spacer. Wrapped in a frame, it took half of the free
+            // height from the picture, and the picture shrank to 60 % of the width.
+            if soundView { Spacer().frame(height: 16) } else { Spacer(minLength: 12) }
 
             if askAlerts {
                 AlertOffer(allow: allowAlerts, dismiss: { withAnimation { askAlerts = false } })
