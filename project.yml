@@ -11,7 +11,7 @@ options:
 settings:
   base:
     SWIFT_VERSION: "5.0"
-    MARKETING_VERSION: "1.3"
+    MARKETING_VERSION: "1.4"
     CURRENT_PROJECT_VERSION: "1"
     CODE_SIGN_STYLE: Automatic
     # Set your team here, or in Xcode under Signing & Capabilities (both targets).
@@ -53,11 +53,15 @@ targets:
         UIBackgroundModes:
           - audio
         NSSupportsLiveActivities: true
+        # chuvicka://pair?…: the QR code of the phone at the baby opens the app.
+        CFBundleURLTypes:
+          - CFBundleURLName: cz.drabek.nursery.pair
+            CFBundleURLSchemes: [chuvicka]
         NSLocalNetworkUsageDescription: Chůvička se připojuje ke kameře nebo k druhému iPhonu přes vaši domácí síť. Obraz ani zvuk neopustí váš domov.
         # The two phones find each other with Bonjour.
         NSBonjourServices:
           - _chuvicka._tcp
-        NSCameraUsageDescription: Jako iPhone u miminka vysílá Chůvička obraz z kamery do telefonů rodičů. Jen ve vaší domácí síti.
+        NSCameraUsageDescription: Fotoaparát naskenuje QR kód z telefonu u miminka. Jako telefon u miminka z něj Chůvička posílá obraz do telefonů rodičů, nikdy přes cizí server.
         NSMicrophoneUsageDescription: Jako iPhone u miminka vysílá Chůvička zvuk z pokojíčku do telefonů rodičů. Jen ve vaší domácí síti.
         # The server is a LAN address on plain HTTP and RTSP.
         NSAppTransportSecurity:

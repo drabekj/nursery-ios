@@ -372,6 +372,9 @@ final class MonitorEngine: ObservableObject {
 
     private func chooseRoute() async {
         switch settings.source {
+        case .camera where settings.cameraKind == .rtsp:
+            // A camera straight on the LAN: no Tailscale way (a camera cannot run Tailscale).
+            viaTailscale = false
         case .camera:
             // The LAN address first: at home it answers at once. Away, it does not, in 1.2 s.
             let home = settings.trimmedHost
@@ -479,6 +482,8 @@ final class MonitorEngine: ObservableObject {
     private func awayHint(_ message: String) -> String {
         guard failures >= 1 else { return message }
         switch settings.source {
+        case .camera where settings.cameraKind == .rtsp:
+            return message + " Mimo domov kamera přímo nefunguje. Použijte druhý telefon nebo server go2rtc."
         case .camera where settings.trimmedRemoteHost.isEmpty:
             return message + " Mimo domov zadejte v Nastavení adresu přes Tailscale."
         case .camera:

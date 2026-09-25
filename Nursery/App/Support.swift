@@ -101,6 +101,18 @@ final class Settings: ObservableObject {
 
     private let d = UserDefaults.standard
 
+    /// The first-run guide is done. An install from before the guide counts as done.
+    @Published var onboarded: Bool { didSet { d.set(onboarded, forKey: "onboarded") } }
+    @Published var cameraKind: CameraKind { didSet { d.set(cameraKind.rawValue, forKey: "cameraKind") } }
+    @Published var rtspBrand: CameraBrand { didSet { d.set(rtspBrand.rawValue, forKey: "rtspBrand") } }
+    @Published var rtspHost: String { didSet { d.set(rtspHost, forKey: "rtspHost") } }
+    @Published var rtspPort: Int { didSet { d.set(rtspPort, forKey: "rtspPort") } }
+    @Published var rtspUser: String { didSet { d.set(rtspUser, forKey: "rtspUser") } }
+    /// "Jiná kamera": the address from the camera's manual, with no user and password.
+    @Published var rtspCustom: String { didSet { d.set(rtspCustom, forKey: "rtspCustom") } }
+    /// The go2rtc streams: the main one and the small one (sound only, the photo).
+    @Published var streamMain: String { didSet { d.set(streamMain, forKey: "streamMain") } }
+    @Published var streamSmall: String { didSet { d.set(streamSmall, forKey: "streamSmall") } }
     @Published var host: String { didSet { d.set(host, forKey: "host") } }
     /// The Pi's Tailscale address. Away from home the app uses it when the LAN address does not answer.
     @Published var remoteHost: String { didSet { d.set(remoteHost, forKey: "remoteHost") } }
@@ -136,6 +148,18 @@ final class Settings: ObservableObject {
     @Published var soundView: Bool { didSet { if !MonitorEngine.isDemo { d.set(soundView, forKey: "soundView") } } }
 
     init() {
+        // An install from before the guide has settings already: it needs no guide.
+        let existing = ["host", "soundMode", "soundView", "source", "loudness", "alertOfferShown", "nightExplained", "role"]
+            .contains { d.object(forKey: $0) != nil }
+        onboarded = d.object(forKey: "onboarded") as? Bool ?? existing
+        cameraKind = CameraKind(rawValue: d.string(forKey: "cameraKind") ?? "") ?? .go2rtc
+        rtspBrand = CameraBrand(rawValue: d.string(forKey: "rtspBrand") ?? "") ?? .tapo
+        rtspHost = d.string(forKey: "rtspHost") ?? ""
+        rtspPort = d.object(forKey: "rtspPort") as? Int ?? 554
+        rtspUser = d.string(forKey: "rtspUser") ?? ""
+        rtspCustom = d.string(forKey: "rtspCustom") ?? ""
+        streamMain = d.string(forKey: "streamMain") ?? "nursery"
+        streamSmall = d.string(forKey: "streamSmall") ?? "nursery_sd"
         host = d.string(forKey: "host") ?? "192.168.0.136"
         remoteHost = d.string(forKey: "remoteHost") ?? "100.104.188.72"        // rpi-host on the tailnet.
         babyAddresses = d.stringArray(forKey: "babyAddresses") ?? []
@@ -159,6 +183,7 @@ final class Settings: ObservableObject {
         unitDirect = d.bool(forKey: "unitDirect")
         if MonitorEngine.isDemo {
             let screen = d.string(forKey: "demoScreen") ?? ""
+            onboarded = !screen.hasPrefix("wizard")
             role = screen.hasPrefix("baby") ? .baby : .parent
             unitCode = "482913"
         }
@@ -195,9 +220,9 @@ final class Settings: ObservableObject {
         // and the Tapo camera sends no packets at all. It worked only while another phone watched
         // the same stream, so the sound view, Night mode and the background failed at random.
         // Tested on 25 Sep 2026 with Tools/rtsp_check.py. The 360p picture costs about 0.3 Mbit/s.
-        if audioOnly { return "rtsp://\(serverHost):8554/nursery_sd" }
-        let name = quality == .high ? "nursery" : "nursery_sd"
-        return "rtsp://\(serverHost):8554/\(name)"
+        if cameraKind == .rtsp { return rtspURL(small: audioOnly || quality == .low) }
+        if audioOnly { return "rtsp://\(serverHost):8554/\(streamSmall)" }
+        return "rtsp://\(serverHost):8554/\(quality == .high ? streamMain : streamSmall)"
     }
 }
 
@@ -269,7 +294,9 @@ final class CameraControl: ObservableObject {
             guard let endpoint = settings.babyEndpoint else { return nil }
             return await BabyLink.frame(endpoint: endpoint, code: settings.babyCode)
         }
-        let src = settings.quality == .high ? "nursery" : "nursery_sd"
+        // A camera with no go2rtc gives no photo on request.
+        guard settings.cameraKind == .go2rtc else { return nil }
+        let src = settings.quality == .high ? settings.streamMain : settings.streamSmall
         guard let url = URL(string: "http://\(settings.serverHost):1984/api/frame.jpeg?src=\(src)") else { return nil }
         var req = URLRequest(url: url)
         req.timeoutInterval = 8          // go2rtc waits for a keyframe.

@@ -31,8 +31,19 @@ struct NurseryApp: App {
         WindowGroup {
             Group {
                 // The same app on both phones: the parent watches, the iPhone at the baby sends.
-                if settings.role == .baby { BabyUnitView() } else { MonitorView() }
+                if !settings.onboarded {
+                    OnboardingView {
+                        engine.resume()
+                        if settings.source == .camera { Task { await camera.loadConfig() } }
+                    }
+                } else if settings.role == .baby { BabyUnitView() } else { MonitorView() }
             }
+                // The pairing QR code also opens from the system camera.
+                .onOpenURL { url in
+                    guard let link = PairLink(url: url) else { return }
+                    link.apply(to: settings)
+                    if settings.onboarded, settings.role == .parent { engine.reconnect(why: "paired by link") }
+                }
                 .environmentObject(settings)
                 .environmentObject(babyUnit)
                 .environmentObject(engine)
@@ -46,7 +57,8 @@ struct NurseryApp: App {
                     started = true
                     battery.start()
                     engine.snapshotProvider = { [camera] in await camera.snapshot() }
-                    if settings.role == .baby {
+                    // The phone at the baby, or the guide still open: the monitor waits.
+                    if settings.role == .baby || !settings.onboarded {
                         engine.suspend()
                         return
                     }
@@ -60,6 +72,10 @@ struct NurseryApp: App {
                 }
                 .onChange(of: settings.keepAwake) { _, on in
                     if settings.role == .parent { UIApplication.shared.isIdleTimerDisabled = on }
+                }
+                // The guide again, from Settings: the monitor and the sending wait for it.
+                .onChange(of: settings.onboarded) { _, done in
+                    if !done { engine.suspend(); babyUnit.stop() }
                 }
                 .onChange(of: settings.role) { _, role in
                     switch role {

@@ -286,6 +286,12 @@ private struct BabySendingView: View {
                 .font(.subheadline.weight(.semibold))
                 .foregroundStyle(unit.cameraPaused ? Theme.warn : (unit.parents > 0 ? Theme.calm : Color.white.opacity(0.7)))
                 .multilineTextAlignment(.center)
+            if unit.parents == 0 {
+                // No parent yet: the QR code is the easiest way to pair.
+                QRCodeView(text: pairLink.url.absoluteString)
+                    .frame(maxWidth: 220)
+                Text("Naskenujte telefonem rodiče").font(.headline).foregroundStyle(.white)
+            }
             HStack(spacing: 8) {
                 Text("Kód").foregroundStyle(.white.opacity(0.5))
                 Text(spaced(settings.unitCode)).monospacedDigit().foregroundStyle(.white.opacity(0.85))
@@ -307,13 +313,19 @@ private struct BabySendingView: View {
         .overlay(alignment: .bottom) { batteryLine.padding(.bottom, 20) }
     }
 
-    /// The controls show for 20 s, then the screen goes dark again.
+    private var pairLink: PairLink {
+        PairLink(name: BabyUnit.serviceName(settings.unitName), code: settings.unitCode,
+                 addresses: Reach.localAddresses().map { "\($0):\(BabyService.port.rawValue)" })
+    }
+
+    /// The controls show for 20 s, then the screen goes dark again. With no parent yet, they stay.
     private func wake() {
         withAnimation(.easeOut(duration: 0.3)) { awake = true }
         restore()
         sleepTask?.cancel()
         sleepTask = Task {
             try? await Task.sleep(for: .seconds(20))
+            while unit.parents == 0 && !Task.isCancelled { try? await Task.sleep(for: .seconds(2)) }
             guard !Task.isCancelled else { return }
             withAnimation(.easeInOut(duration: 0.6)) { awake = false }
             dim()

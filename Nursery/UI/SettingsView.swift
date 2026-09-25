@@ -160,6 +160,13 @@ struct SettingsView: View {
                 }
 
                 Section {
+                    Button("Spustit průvodce nastavením") {
+                        dismiss()
+                        settings.onboarded = false
+                    }
+                }
+
+                Section {
                     NavigationLink("Technický záznam") { EventLogView() }
                 } header: {
                     Text("Diagnostika")
