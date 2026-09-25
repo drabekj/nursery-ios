@@ -15,7 +15,7 @@ struct HelpView: View {
                       "Když vypadne spojení s kamerou, přijde po 20 sekundách upozornění a Chůvička se sama připojí znovu. Kdyby iOS aplikaci ukončil, do 2,5 minuty přijde upozornění „Chůvička přestala hlídat“. Stačí ji znovu otevřít.",
                       footnote: "Upozornění fungují, jen když je povolíte. Aplikaci nezavírejte přejetím nahoru v přepínači aplikací, tím hlídání ukončíte.")
                 topic("waveform", "Obraz, nebo jen zvuk",
-                      "Přepínač nahoře volí, co hlavní obrazovka ukazuje. Obraz ukazuje živé video z postýlky. Jen zvuk ukazuje jen pokojíček: kruh, který se rozvlní se zvukem, a slovy, co se děje. Obraz se nezobrazuje. Z kamery Tapo se stahuje jen v nejnižší kvalitě, protože bez něj neposílá ani zvuk. Z iPhonu u miminka jde jen zvuk.",
+                      "Přepínač nahoře volí, co hlavní obrazovka ukazuje. Obraz ukazuje živé video z postýlky. Jen zvuk ukazuje jen pokojíček: kruh, který se rozvlní se zvukem, a slovy, co se děje. Obraz se nezobrazuje. Z kamery Tapo se stahuje jen v nejnižší kvalitě, protože bez něj neposílá ani zvuk. Z telefonu u miminka jde jen zvuk.",
                       footnote: "Jen zvuk šetří baterii i Wi-Fi a telefon méně hřeje. Na miminko se můžete kdykoli podívat tlačítkem Nahlédnout do postýlky. Pořídí jednu fotku z kamery, bez živého obrazu.")
                 topic("speaker.wave.1", "Hlasitost",
                       "Chůvička hraje tak hlasitě, jak je nastavený iPhone. Když je hlasitost iPhonu pod 20 %, ukáže Chůvička upozornění a posuvník hlasitosti. Když je zvuk vypnutý, tlačítko Zvuk svítí červeně.",
@@ -29,9 +29,9 @@ struct HelpView: View {
                       "Chůvička nic nepřehrává, ale dál poslouchá. Když se miminko ozve, přijde upozornění. Hodí se, když nechcete celou noc slyšet šum pokoje. Zapnete ho podržením tlačítka Zvuk.")
                 topic("chart.bar.xaxis", "Přehled",
                       "Ukazuje, kdy Chůvička poslouchala a kdy se miminko ozvalo, i s fotkou z kamery. Šedá místa znamenají, že Chůvička neposlouchala. To není totéž co ticho.")
-                topic("iphone.gen3.radiowaves.left.and.right", "Dva iPhony místo kamery",
-                      "Starší iPhone může být kamerou u postýlky. Na něm zvolte Nastavení → Použít jako iPhone u miminka. Na svém telefonu pak v Nastavení → Zdroj zvolte iPhone u miminka a zadejte jeho kód.",
-                      footnote: "iPhone u miminka musí mít Chůvičku otevřenou a nezamčenou, jinak iOS zastaví kameru. Zvuk poběží i se zamčeným telefonem. Nechte ho na nabíječce.")
+                topic("iphone.gen3.radiowaves.left.and.right", "Dva telefony místo kamery",
+                      "Starší iPhone nebo telefon s Androidem může být kamerou u postýlky. Nainstalujte na něj Chůvičku a zvolte Nastavení → Použít jako telefon u miminka. Na svém telefonu pak v Nastavení → Zdroj zvolte Telefon u miminka a zadejte jeho kód. Spolu fungují všechny kombinace iPhonu a Androidu.",
+                      footnote: "iPhone u miminka musí mít Chůvičku otevřenou a nezamčenou, jinak iOS zastaví kameru. Zvuk poběží i se zamčeným telefonem. Android u miminka vysílá obraz i zvuk i se zhasnutým displejem. Oba nechte na nabíječce.")
                 topic("hand.raised", "Soukromí",
                       "Obraz i zvuk zůstávají ve vaší domácí síti. Nic se neposílá na internet a kamera sama přístup k internetu nemá.")
                 topic("calendar.badge.exclamationmark", "Platnost instalace",

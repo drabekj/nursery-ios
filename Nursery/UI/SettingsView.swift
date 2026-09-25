@@ -96,7 +96,7 @@ struct SettingsView: View {
                             LabeledContent {
                                 Text(settings.babyName.isEmpty ? "Nespárováno" : settings.babyName)
                             } label: {
-                                Label("iPhone u miminka", systemImage: "iphone.gen3")
+                                Label("Telefon u miminka", systemImage: "iphone.gen3")
                             }
                         }
                     }
@@ -117,20 +117,20 @@ struct SettingsView: View {
                     Button {
                         confirmBaby = true
                     } label: {
-                        Label("Použít jako iPhone u miminka", systemImage: "iphone.gen3.radiowaves.left.and.right")
+                        Label("Použít jako telefon u miminka", systemImage: "iphone.gen3.radiowaves.left.and.right")
                     }
                 } header: {
                     Text("Tento iPhone")
                 } footer: {
                     Text("Tento iPhone pak nehlídá, ale vysílá: jeho kamera a mikrofon budou u postýlky. Hodí se starší iPhone.")
                 }
-                .confirmationDialog("Používat tento iPhone u miminka?", isPresented: $confirmBaby, titleVisibility: .visible) {
+                .confirmationDialog("Používat tento telefon u miminka?", isPresented: $confirmBaby, titleVisibility: .visible) {
                     Button("Ano, bude vysílat") {
                         settings.role = .baby
                         dismiss()
                     }
                 } message: {
-                    Text("Hlídání na tomto telefonu se vypne. Zpět ho přepnete na obrazovce iPhonu u miminka.")
+                    Text("Hlídání na tomto telefonu se vypne. Zpět ho přepnete na obrazovce telefonu u miminka.")
                 }
 
                 Section("Stav") {

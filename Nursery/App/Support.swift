@@ -90,7 +90,7 @@ final class Settings: ObservableObject {
     enum Source: String, CaseIterable, Identifiable {
         case camera, phone
         var id: String { rawValue }
-        var title: String { switch self { case .camera: "Kamera v pokojíčku"; case .phone: "iPhone u miminka" } }
+        var title: String { switch self { case .camera: "Kamera v pokojíčku"; case .phone: "Telefon u miminka" } }
     }
 
     enum Appearance: String, CaseIterable, Identifiable {

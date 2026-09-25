@@ -79,9 +79,9 @@ struct VideoPlaceholder: View {
             } else if case .offline(let why) = engine.overall {
                 Image(systemName: "wifi.exclamationmark").font(.system(size: 30)).foregroundStyle(Theme.alarm)
                     .symbolEffect(.pulse)
-                Text(settings.source == .phone ? "iPhone u miminka je nedostupný" : "Kamera je nedostupná").font(.headline)
+                Text(settings.source == .phone ? "Telefon u miminka je nedostupný" : "Kamera je nedostupná").font(.headline)
                 Text(settings.source == .phone
-                     ? "Zkontrolujte, že na iPhonu u miminka běží vysílání a že jsou oba telefony na stejné Wi-Fi."
+                     ? "Zkontrolujte, že na telefonu u miminka běží vysílání a že jsou oba telefony na stejné Wi-Fi."
                      : "Zkontrolujte, že je telefon připojený k domácí Wi-Fi a že má Chůvička povolený přístup k místní síti.")
                     .font(.caption).foregroundStyle(.secondary).multilineTextAlignment(.center)
                     .padding(.horizontal, 24)
@@ -112,8 +112,8 @@ struct VideoPlaceholder: View {
         if engine.overall == .reconnecting { return "Obnovování spojení…" }
         guard settings.source == .phone else { return "Připojování ke kameře…" }
         // Live sound with no picture: iOS stopped the camera of the iPhone at the baby.
-        return engine.overall == .live ? "Obraz stojí. Je iPhone u miminka odemčený a Chůvička na něm otevřená?"
-                                       : "Připojování k iPhonu u miminka…"
+        return engine.overall == .live ? "Obraz stojí. Je telefon u miminka odemčený a Chůvička na něm otevřená?"
+                                       : "Připojování k telefonu u miminka…"
     }
 }
 

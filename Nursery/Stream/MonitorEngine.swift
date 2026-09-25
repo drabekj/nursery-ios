@@ -325,7 +325,7 @@ final class MonitorEngine: ObservableObject {
         guard !Self.isDemo, !suspended else { return }
         stopClient()
         if settings.source == .phone && (settings.babyName.isEmpty || settings.babyCode.isEmpty) {
-            connection = .retrying("Není spárovaný iPhone u miminka. Spárujte ho v Nastavení → Zdroj.")
+            connection = .retrying("Není spárovaný telefon u miminka. Spárujte ho v Nastavení → Zdroj.")
             failures = max(failures, 2)
             return
         }

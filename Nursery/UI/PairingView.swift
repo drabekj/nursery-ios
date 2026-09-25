@@ -38,17 +38,17 @@ struct PairingView: View {
                 if browser.names.isEmpty {
                     HStack(spacing: 12) {
                         ProgressView()
-                        Text("Hledám iPhone u miminka…").foregroundStyle(.secondary)
+                        Text("Hledám telefon u miminka…").foregroundStyle(.secondary)
                     }
                 }
             } header: {
-                Text("iPhony u miminka v okolí")
+                Text("Telefony u miminka v okolí")
             } footer: {
                 if let failed = browser.failed { Text(failed).foregroundStyle(Theme.alarm) }
             }
 
             Section("Jak na to") {
-                step(1, "Na druhém iPhonu nainstalujte Chůvičku a otevřete Nastavení → Použít jako iPhone u miminka.")
+                step(1, "Na druhém telefonu (iPhonu nebo Androidu) nainstalujte Chůvičku a otevřete Nastavení → Použít jako telefon u miminka.")
                 step(2, "Položte ho k postýlce, nejlépe naležato a 1–2 metry od miminka, a připojte nabíječku.")
                 step(3, "Klepněte tady na jeho název a zadejte šestimístný kód, který ukazuje.")
             }
@@ -59,7 +59,7 @@ struct PairingView: View {
                     .foregroundStyle(.secondary)
             }
         }
-        .navigationTitle("iPhone u miminka")
+        .navigationTitle("Telefon u miminka")
         .navigationBarTitleDisplayMode(.inline)
         .onAppear { browser.start() }
         .onDisappear { browser.stop() }

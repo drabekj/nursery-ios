@@ -17,7 +17,7 @@ final class RTSPClient: @unchecked Sendable {
             case .unreachable(let why): return "Server neodpovídá (\(why))."
             case .closed: return "Server ukončil spojení."
             case .timeout(let what): return "Žádná odpověď na \(what)."
-            case .status(401, _): return "Nesprávný párovací kód. Zadejte kód z iPhonu u miminka."
+            case .status(401, _): return "Nesprávný párovací kód. Zadejte kód z telefonu u miminka."
             case .status(let code, let reason): return "Server odpověděl \(code) \(reason)."
             case .noUsableTrack: return "Stream nemá video H.264 ani zvuk G.711."
             case .badURL: return "Adresa streamu není platná."
