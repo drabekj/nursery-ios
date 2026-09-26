@@ -24,11 +24,20 @@ object Alerts {
         val now = System.currentTimeMillis()
         if (now - lastSound < 60_000) return            // At most one a minute.
         lastSound = now
-        post(context, SOUND, "Miminko se ozvalo", "Klepnutím otevřete Chůvičku.")
+        // The app is open but muted: a tap turns the sound on, the app is already there.
+        if (Monitor.foreground.value && Monitor.mode.value == SoundMode.OFF) {
+            val unmute = PendingIntent.getService(context, 2,
+                Intent(context, ParentService::class.java).setAction(ParentService.ACTION_UNMUTE), PendingIntent.FLAG_IMMUTABLE)
+            post(context, SOUND, "Miminko se ozvalo", "Ztlumeno · klepnutím zapnete zvuk", unmute)
+        } else {
+            post(context, SOUND, "Miminko se ozvalo", "Klepnutím otevřete Chůvičku.")
+        }
     }
 
-    private fun post(context: Context, id: Int, title: String, text: String) {
-        val open = PendingIntent.getActivity(context, 0, Intent(context, MainActivity::class.java), PendingIntent.FLAG_IMMUTABLE)
+    fun clearSound(context: Context) = context.getSystemService(NotificationManager::class.java).cancel(SOUND)
+
+    private fun post(context: Context, id: Int, title: String, text: String, tap: PendingIntent? = null) {
+        val open = tap ?: PendingIntent.getActivity(context, 0, Intent(context, MainActivity::class.java), PendingIntent.FLAG_IMMUTABLE)
         val n = NotificationCompat.Builder(context, App.CHANNEL_ALERTS)
             .setSmallIcon(R.drawable.ic_stat)
             .setContentTitle(title)

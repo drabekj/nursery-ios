@@ -3,6 +3,7 @@ package cz.drabek.chuvicka.ui
 import android.content.Intent
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.ScrollState
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
@@ -38,9 +39,10 @@ import cz.drabek.chuvicka.PairLink
 import cz.drabek.chuvicka.Settings
 import cz.drabek.chuvicka.parent.BabyFinder
 import cz.drabek.chuvicka.parent.Monitor
+import kotlinx.coroutines.delay
 
 /**
- * The settings: five rows for everyone, the rest under "Pro pokročilé" (collapsed).
+ * The settings: four cards for everyone, the rest under "Pro pokročilé" (collapsed).
  * The word Tailscale is only on the "Mimo domov" page.
  */
 @Composable
@@ -61,8 +63,13 @@ fun SettingsScreen(back: () -> Unit, openLog: () -> Unit, becomeBaby: () -> Unit
     var confirmBaby by remember { mutableStateOf(false) }
     // The demo screen "settings-advanced" shows the group open.
     var advanced by remember { mutableStateOf(App.demoScreen == "settings-advanced") }
+    val scroll = rememberScrollState()
+    // The demo screen also scrolls down, so the screenshot shows the rows.
+    LaunchedEffect(Unit) {
+        if (App.demoScreen == "settings-advanced") { delay(800); scroll.animateScrollTo(scroll.maxValue) }
+    }
 
-    Page("Nastavení", back) {
+    Page("Nastavení", back, scroll) {
         val go2rtc = source == Settings.Source.CAMERA && cameraKind == Settings.KIND_GO2RTC
         val camera = when {
             source == Settings.Source.PHONE -> if (babyName.isEmpty()) "Nespárováno" else "Telefon u miminka „$babyName“"
@@ -72,27 +79,26 @@ fun SettingsScreen(back: () -> Unit, openLog: () -> Unit, becomeBaby: () -> Unit
         Section(null) {
             NavRow("Kamera", camera) { openWizard(WizardStep.SOURCE) }
         }
-        Section("Zvuk", footer = "Zesílená se hodí do tichého pokoje. Celkovou hlasitost dál ovládáte tlačítky na boku telefonu.") {
+        Section("Zvuk", footer = "Zesílená se hodí do tichého pokoje.") {
             Choice("Hlasitost", Settings.Loudness.entries.map { it to it.title }, loudness) {
                 Settings.set(Settings.loudness, "loudness", it); Monitor.setGain(it.decibels)
             }
         }
-        Section("Upozornění", footer = "Na výpadek spojení a na pláč při ztlumeném nebo tichém zvuku Chůvička upozorní vždy. Nejvýš jednou za minutu.") {
-            Switchy("Upozornit na pláč i když zvuk hraje", alertOnSound) { Settings.set(Settings.alertOnSound, "alertOnSound", it) }
-        }
-        Section("Tento telefon", footer = "Tento telefon pak nehlídá, ale vysílá: jeho kamera a mikrofon budou u postýlky.") {
-            TextButton(onClick = { confirmBaby = true }, Modifier.padding(horizontal = 8.dp)) { Text("Použít tento telefon u miminka") }
+        Section(null, footer = "Tento telefon pak nehlídá, ale vysílá: jeho kamera a mikrofon budou u postýlky.") {
+            NavRow("Použít tento telefon u miminka", null) { confirmBaby = true }
         }
         Section(null) {
             NavRow("Nápověda", null, openHelp)
-        }
-        Section(null) {
+            HorizontalDivider(Modifier.padding(start = 16.dp), color = colors.muted.copy(alpha = 0.2f))
             Row(Modifier.fillMaxWidth().clickable { advanced = !advanced }.padding(16.dp), verticalAlignment = Alignment.CenterVertically) {
                 Text("Pro pokročilé", Modifier.weight(1f), color = colors.ink)
                 Icon(if (advanced) Icons.Filled.ExpandLess else Icons.Filled.ExpandMore, if (advanced) "Skrýt" else "Zobrazit", tint = colors.muted)
             }
         }
         if (advanced) {
+            Section("Upozornění", footer = "Na výpadek spojení a na pláč, když zvuk neslyšíte, upozorní Chůvička vždy.") {
+                Switchy("Upozornit na pláč i když zvuk hraje", alertOnSound) { Settings.set(Settings.alertOnSound, "alertOnSound", it) }
+            }
             Section("Displej") {
                 Choice("Vzhled", Settings.Appearance.entries.map { it to it.title }, appearance) { Settings.set(Settings.appearance, "appearance", it) }
             }
@@ -119,7 +125,7 @@ fun SettingsScreen(back: () -> Unit, openLog: () -> Unit, becomeBaby: () -> Unit
                 NavRow("Spustit průvodce znovu", null) { openWizard(WizardStep.WELCOME) }
             }
         }
-        Text("Doma jde obraz v domácí síti, mimo domov šifrovaně přes vaši soukromou síť. Obraz ani zvuk nikdy nejdou přes cizí server.",
+        Text("Obraz ani zvuk nikdy nejdou přes cizí server.",
             Modifier.padding(horizontal = 20.dp, vertical = 12.dp), fontSize = 13.sp, color = colors.muted)
     }
     if (confirmBaby) AlertDialog(
@@ -241,10 +247,10 @@ fun LogScreen(back: () -> Unit) {
 // MARK: The parts of a settings page
 
 @Composable
-fun Page(title: String, back: () -> Unit, content: @Composable ColumnScope.() -> Unit) {
+fun Page(title: String, back: () -> Unit, scroll: ScrollState = rememberScrollState(), content: @Composable ColumnScope.() -> Unit) {
     Column(Modifier.fillMaxSize().background(colors.sky).systemBarsPadding()) {
         Header(title, back)
-        Column(Modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(bottom = 24.dp), content = content)
+        Column(Modifier.fillMaxSize().verticalScroll(scroll).padding(bottom = 24.dp), content = content)
     }
 }
 

@@ -38,6 +38,12 @@ class ParentService : Service() {
             stopSelf()
             return START_NOT_STICKY
         }
+        // The tap on the cry alert while the app was open and muted: the sound on. Then the usual start.
+        if (intent?.action == ACTION_UNMUTE) {
+            Alerts.clearSound(this)
+            if (Monitor.paused.value) { stopSelf(); return START_NOT_STICKY }      // The parent stopped the monitor since.
+            Monitor.setMode(SoundMode.LIVE)
+        }
         ServiceCompat.startForeground(this, 1, notification(Monitor.status.value),
             if (Build.VERSION.SDK_INT >= 29) ServiceInfo.FOREGROUND_SERVICE_TYPE_MEDIA_PLAYBACK else 0)
         if (timer == null) {
@@ -92,6 +98,7 @@ class ParentService : Service() {
 
     companion object {
         private const val ACTION_STOP = "stop"
+        const val ACTION_UNMUTE = "unmute"
         fun start(context: Context) = context.startForegroundService(Intent(context, ParentService::class.java))
         fun stop(context: Context) = context.stopService(Intent(context, ParentService::class.java))
     }

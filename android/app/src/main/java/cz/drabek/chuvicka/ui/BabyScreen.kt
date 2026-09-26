@@ -77,7 +77,7 @@ private fun BabySetup(start: () -> Unit, becomeParent: () -> Unit, openWizard: (
             Spacer(Modifier.height(16.dp))
             Text("Nebo zadejte párovací kód", fontWeight = FontWeight.SemiBold, color = colors.muted)
             Text(spaced(code), fontSize = 44.sp, fontWeight = FontWeight.SemiBold, color = colors.ink)
-            Text("Na telefonu rodiče: Nastavení → Kamera → Druhý telefon.", fontSize = 12.sp, color = colors.muted, textAlign = TextAlign.Center)
+            Text("Na telefonu rodiče zvolte Hlídat miminko → Druhý telefon. Později: Nastavení → Kamera.", fontSize = 12.sp, color = colors.muted, textAlign = TextAlign.Center)
             TextButton(onClick = { Settings.set(Settings.unitCode, "unitCode", Settings.newCode()) }) { Text("Nový kód") }
         }
 
@@ -152,7 +152,8 @@ private fun BabySending(stop: () -> Unit) {
     DisposableEffect(awake) {
         view.keepScreenOn = true
         val window = (view.context as? android.app.Activity)?.window
-        if (!awake && !App.demo) window?.attributes = window?.attributes?.apply { screenBrightness = 0.01f }
+        // Awake, at most 30 %: the white QR code is a lot of light next to the cot.
+        if (!App.demo) window?.attributes = window?.attributes?.apply { screenBrightness = if (awake) 0.3f else 0.01f }
         onDispose {
             window?.attributes = window?.attributes?.apply { screenBrightness = android.view.WindowManager.LayoutParams.BRIGHTNESS_OVERRIDE_NONE }
         }

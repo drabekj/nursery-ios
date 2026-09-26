@@ -39,8 +39,10 @@ import androidx.compose.material.icons.filled.Lock
 import androidx.compose.material.icons.filled.MoreVert
 import androidx.compose.material.icons.filled.PictureInPictureAlt
 import androidx.compose.material.icons.filled.StopCircle
+import androidx.compose.material.icons.filled.TouchApp
 import androidx.compose.material.icons.filled.Videocam
 import androidx.compose.material.icons.filled.Visibility
+import androidx.compose.material.icons.filled.WbSunny
 import androidx.compose.material.icons.filled.WifiOff
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
@@ -55,8 +57,12 @@ import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalView
 import androidx.compose.ui.res.painterResource
+import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.semantics.semantics
+import androidx.compose.ui.semantics.stateDescription
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.compose.ui.viewinterop.AndroidView
@@ -65,6 +71,7 @@ import cz.drabek.chuvicka.R
 import cz.drabek.chuvicka.Settings
 import cz.drabek.chuvicka.parent.Connection
 import cz.drabek.chuvicka.parent.Monitor
+import cz.drabek.chuvicka.parent.RoomLevel
 import cz.drabek.chuvicka.parent.SoundMode
 import cz.drabek.chuvicka.parent.SoundStatus
 import cz.drabek.chuvicka.parent.VideoDecoder
@@ -92,13 +99,15 @@ fun ParentScreen(openSettings: () -> Unit, openHelp: () -> Unit, pip: Boolean, e
     if (pip) { VideoSurface(Modifier.fillMaxSize()); return }
     val paused by Monitor.paused.collectAsState()
     val context = androidx.compose.ui.platform.LocalContext.current
+    // Every "Ukončit hlídání" asks first. The demo screen "stop" shows the question.
+    var confirmStop by remember { mutableStateOf(App.demoScreen == "stop") }
     if (paused) {
         PausedScreen { Monitor.paused.value = false; cz.drabek.chuvicka.parent.ParentService.start(context) }
         return
     }
     Box(Modifier.fillMaxSize().background(colors.sky)) {
         Column(Modifier.fillMaxSize().systemBarsPadding().padding(horizontal = 16.dp)) {
-            TopRow(openSettings, openHelp)
+            TopRow(openSettings, openHelp, requestStop = { confirmStop = true })
             ViewSwitch(soundView) { on ->
                 Settings.set(Settings.soundView, "soundView", on)
                 Monitor.reconnect(if (on) "sound view" else "picture view")
@@ -113,13 +122,21 @@ fun ParentScreen(openSettings: () -> Unit, openHelp: () -> Unit, pip: Boolean, e
             Spacer(Modifier.height(8.dp))
         }
         AnimatedVisibility(night, enter = fadeIn(tween(500)), exit = fadeOut(tween(500))) {
-            NightScreen { Monitor.night.value = false; Monitor.reconnect("night mode off") }
+            NightScreen(close = { Monitor.night.value = false; Monitor.reconnect("night mode off") }, requestStop = { confirmStop = true })
         }
     }
+    // Also over Night mode: the one bright thing, the parent is about to leave the night anyway.
+    if (confirmStop) AlertDialog(
+        onDismissRequest = { confirmStop = false },
+        title = { Text("Ukončit hlídání?") },
+        text = { Text("Chůvička přestane poslouchat a nepřijde žádné upozornění.") },
+        confirmButton = { TextButton(onClick = { confirmStop = false; stopWatching(context) }) { Text("Ukončit hlídání", color = colors.alarm) } },
+        dismissButton = { TextButton(onClick = { confirmStop = false }) { Text("Zrušit") } },
+    )
 }
 
 @Composable
-private fun TopRow(openSettings: () -> Unit, openHelp: () -> Unit) {
+private fun TopRow(openSettings: () -> Unit, openHelp: () -> Unit, requestStop: () -> Unit) {
     val connection by Monitor.connection.collectAsState()
     val pictureLive by Monitor.pictureLive.collectAsState()
     val soundView by Settings.soundView.collectAsState()
@@ -136,7 +153,6 @@ private fun TopRow(openSettings: () -> Unit, openHelp: () -> Unit) {
             Text(text, fontWeight = FontWeight.SemiBold, fontSize = 15.sp, color = colors.ink)
         }
         Text("Chůvička", Modifier.weight(1f), textAlign = TextAlign.Center, fontWeight = FontWeight.SemiBold, fontSize = 18.sp, color = colors.ink)
-        val context = androidx.compose.ui.platform.LocalContext.current
         var menu by remember { mutableStateOf(false) }
         Box {
             IconButton(onClick = { menu = true }, Modifier.clip(CircleShape).background(colors.card)) {
@@ -146,7 +162,7 @@ private fun TopRow(openSettings: () -> Unit, openHelp: () -> Unit) {
                 DropdownMenuItem(text = { Text("Nastavení") }, onClick = { menu = false; openSettings() })
                 DropdownMenuItem(text = { Text("Nápověda") }, onClick = { menu = false; openHelp() })
                 HorizontalDivider()
-                DropdownMenuItem(text = { Text("Ukončit hlídání", color = colors.alarm) }, onClick = { menu = false; stopWatching(context) })
+                DropdownMenuItem(text = { Text("Ukončit hlídání", color = colors.alarm) }, onClick = { menu = false; requestStop() })
             }
         }
     }
@@ -264,11 +280,10 @@ private fun VideoPlaceholder() {
 
 @Composable
 private fun SoundStage() {
-    val mode by Monitor.mode.collectAsState()
     Column(horizontalAlignment = Alignment.CenterHorizontally) {
         Box(Modifier.weight(1f).fillMaxWidth(), contentAlignment = Alignment.Center) {
-            Orb(Modifier.fillMaxHeight().aspectRatio(1f).widthIn(max = 280.dp)
-                .clickable(onClickLabel = "Zvuk") { Monitor.setMode(if (mode == SoundMode.OFF) SoundMode.LIVE else SoundMode.OFF) })
+            // Only a picture: the Zvuk button below is the one way to mute.
+            Orb(Modifier.fillMaxHeight().aspectRatio(1f).widthIn(max = 280.dp).semantics { contentDescription = "Zvuk v pokojíčku" })
         }
         Spacer(Modifier.height(12.dp))
         RoomWords(center = true)
@@ -370,8 +385,10 @@ private fun RoomWords(center: Boolean) {
     val soundNow by Monitor.soundNow.collectAsState()
     val lastSound by Monitor.lastSound.collectAsState()
     val loudness by Settings.loudness.collectAsState()
+    // The level word lags; while a sound goes on, it says at least "Slabé zvuky", not "Ticho".
+    val heard = if (soundNow && (status == SoundStatus.LISTENING || status == SoundStatus.SILENT)) maxOf(room, RoomLevel.SOME) else room
     val headline = when (status) {
-        SoundStatus.LISTENING, SoundStatus.SILENT, SoundStatus.MUTED -> room.title
+        SoundStatus.LISTENING, SoundStatus.SILENT, SoundStatus.MUTED -> heard.title
         SoundStatus.CONNECTING -> "Připojování"
         SoundStatus.LOST -> "Zvuk vypadl"
     }
@@ -399,7 +416,9 @@ private fun RoomWords(center: Boolean) {
                 Text("Právě se ozývá", fontSize = 14.sp, fontWeight = FontWeight.SemiBold, color = colors.warn)
             }
         } else {
-            Text(lastSound?.let { "Poslední zvuk ${ago(it, now)}" } ?: "Zatím žádný zvuk", fontSize = 14.sp, fontWeight = FontWeight.SemiBold,
+            // "Zatím ticho" only when the room is quiet, and not under "Ticho" in the sound view.
+            val last = lastSound?.let { "Poslední zvuk ${ago(it, now)}" } ?: if (room > RoomLevel.QUIET || center) null else "Zatím ticho"
+            if (last != null) Text(last, fontSize = 14.sp, fontWeight = FontWeight.SemiBold,
                 color = colors.ink.copy(alpha = if (mode == SoundMode.OFF) 0.4f else 0.8f))
         }
     }
@@ -416,8 +435,8 @@ private fun VolumeWarning() {
             Icon(if (volume < 0.01f) Icons.AutoMirrored.Filled.VolumeOff else Icons.AutoMirrored.Filled.VolumeUp, null, tint = colors.warn)
             Spacer(Modifier.width(12.dp))
             Column(Modifier.weight(1f)) {
-                Text(if (volume < 0.01f) "Hlasitost telefonu je vypnutá" else "Hlasitost telefonu je nízká · ${(volume * 100).toInt()} %", fontWeight = FontWeight.SemiBold, color = colors.ink)
-                Text("Pláč nemusíte slyšet.", fontSize = 13.sp, color = colors.muted)
+                Text(if (volume < 0.01f) "Hlasitost telefonu je vypnutá" else "Hlasitost telefonu je nízká", fontWeight = FontWeight.SemiBold, color = colors.ink)
+                Text(if (volume < 0.01f) "Pláč nemusíte slyšet." else "${(volume * 100).toInt()} % · pláč nemusíte slyšet.", fontSize = 13.sp, color = colors.muted)
             }
             Button(onClick = { Monitor.raiseVolume() },
                 colors = ButtonDefaults.buttonColors(containerColor = colors.moon, contentColor = Color.Black)) { Text("Zesílit") }
@@ -433,8 +452,9 @@ private fun ControlBar() {
             BarButton(
                 title = when (mode) { SoundMode.LIVE -> "Zvuk"; SoundMode.OFF -> "Ztlumeno" },
                 icon = when (mode) { SoundMode.LIVE -> Icons.AutoMirrored.Filled.VolumeUp; SoundMode.OFF -> Icons.AutoMirrored.Filled.VolumeOff },
-                fill = if (mode == SoundMode.OFF) colors.alarm else colors.moon,     // Off is red: nothing plays.
-                ink = if (mode == SoundMode.OFF) Color.White else Color.Black,
+                fill = if (mode == SoundMode.OFF) colors.warn else colors.moon,     // Muted is amber: a chosen, safe state. Red is for a fault.
+                ink = Color.Black,               // Black on amber reads in both light and dark.
+                modifier = Modifier.semantics { stateDescription = if (mode == SoundMode.OFF) "Ztlumeno" else "Živý zvuk" },
                 onClick = { Monitor.setMode(if (mode == SoundMode.OFF) SoundMode.LIVE else SoundMode.OFF) },
             )
         }
@@ -446,8 +466,8 @@ private fun ControlBar() {
 }
 
 @Composable
-private fun BarButton(title: String, icon: ImageVector, fill: Color, ink: Color, onClick: () -> Unit) {
-    Column(Modifier.fillMaxWidth().height(68.dp).clip(RoundedCornerShape(24.dp)).background(fill)
+private fun BarButton(title: String, icon: ImageVector, fill: Color, ink: Color, modifier: Modifier = Modifier, onClick: () -> Unit) {
+    Column(modifier.fillMaxWidth().height(68.dp).clip(RoundedCornerShape(24.dp)).background(fill)
         .clickable(onClick = onClick),
         horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.Center) {
         Icon(icon, null, tint = ink)
@@ -459,11 +479,12 @@ private fun BarButton(title: String, icon: ImageVector, fill: Color, ink: Color,
 // MARK: Night mode
 
 /**
- * Almost black, at the lowest brightness: the time, the sound, and the state. The first tap shows
- * the controls for 5 s, the next tap ends Night mode. The explainer shows once, and from the (i) button.
+ * Almost black, at the lowest brightness: the time, the sound, and the state. A tap shows the
+ * controls for 5 s, the next tap hides them. Only "Rozsvítit" ends Night mode, so a missed tap
+ * does not light the phone. The explainer shows once, and from the (i) button.
  */
 @Composable
-fun NightScreen(close: () -> Unit) {
+fun NightScreen(close: () -> Unit, requestStop: () -> Unit) {
     val history by Monitor.history.collectAsState()
     val status by Monitor.status.collectAsState()
     val soundNow by Monitor.soundNow.collectAsState()
@@ -495,8 +516,8 @@ fun NightScreen(close: () -> Unit) {
     var shown by remember { mutableIntStateOf(0) }
     LaunchedEffect(shown) { if (shown > 0 && !demoControls) { delay(5_000); controls = false } }
 
-    Box(Modifier.fillMaxSize().background(Color.Black).clickable(enabled = !explain) {
-        if (controls) close() else { controls = true; shown++ }
+    Box(Modifier.fillMaxSize().background(Color.Black).clickable(enabled = !explain, onClickLabel = if (controls) "Skrýt ovládání" else "Zobrazit ovládání") {
+        if (controls) controls = false else { controls = true; shown++ }
     }) {
         Column(Modifier.fillMaxSize().alpha(if (explain) 0f else 1f).systemBarsPadding().padding(24.dp),
             horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.Center) {
@@ -505,10 +526,11 @@ fun NightScreen(close: () -> Unit) {
             Box(Modifier.alpha(if (soundNow) 0.95f else 0.55f)) { Waveform(history, Modifier.height(90.dp).padding(horizontal = 16.dp), dim = !soundNow) }
             Spacer(Modifier.height(24.dp))
             val low = volume < 0.2f && status == SoundStatus.LISTENING
-            Text(when { low -> "Hlasitost telefonu je nízká"; soundNow -> "Ozývá se"; else -> status.title },
+            // Silent is muted but hearing: the cry alert still comes.
+            Text(when { low -> "Hlasitost telefonu je nízká"; soundNow -> "Ozývá se"; status == SoundStatus.SILENT -> "Ztlumeno · na pláč upozorní"; else -> status.title },
                 color = when { status == SoundStatus.LOST -> DarkPalette.alarm; low -> DarkPalette.warn.copy(alpha = 0.8f); else -> Color.White.copy(alpha = if (soundNow) 0.6f else 0.28f) })
             Spacer(Modifier.height(60.dp))
-            Text(if (controls) "Dalším klepnutím noční režim ukončíte" else "Klepnutím zobrazíte ovládání", fontSize = 12.sp,
+            Text(if (controls) "Klepnutím vedle tlačítek je skryjete" else "Klepnutím zobrazíte ovládání", fontSize = 12.sp,
                 color = Color.White.copy(alpha = 0.2f), textAlign = TextAlign.Center)
             val (percent, charging) = battery
             if (percent >= 0) {
@@ -526,14 +548,16 @@ fun NightScreen(close: () -> Unit) {
         AnimatedVisibility(controls && !explain, Modifier.align(Alignment.BottomCenter), enter = fadeIn(), exit = fadeOut()) {
             Row(Modifier.fillMaxWidth().systemBarsPadding().padding(16.dp), horizontalArrangement = Arrangement.spacedBy(10.dp)) {
                 val muted = mode == SoundMode.OFF
+                val glass = Color.White.copy(alpha = 0.12f)
+                val ink = Color.White.copy(alpha = 0.85f)
+                // Muted is amber, as on the main screen. Stop is red text on dim glass, not a bright pill.
                 NightButton(if (muted) "Ztlumeno" else "Zvuk", if (muted) Icons.AutoMirrored.Filled.VolumeOff else Icons.AutoMirrored.Filled.VolumeUp,
-                    if (muted) DarkPalette.alarm.copy(alpha = 0.85f) else Color.White.copy(alpha = 0.12f), Modifier.weight(1f)) {
+                    if (muted) DarkPalette.warn.copy(alpha = 0.85f) else glass, if (muted) Color.Black else ink, Modifier.weight(1f)) {
                     Monitor.setMode(if (muted) SoundMode.LIVE else SoundMode.OFF)
                     shown++                  // The controls stay 5 s more.
                 }
-                NightButton("Ukončit hlídání", Icons.Filled.StopCircle, DarkPalette.alarm.copy(alpha = 0.85f), Modifier.weight(1f)) {
-                    stopWatching(context)
-                }
+                NightButton("Rozsvítit", Icons.Filled.WbSunny, glass, ink, Modifier.weight(1f), onClick = close)
+                NightButton("Ukončit hlídání", Icons.Filled.StopCircle, glass, DarkPalette.alarm, Modifier.weight(1f), onClick = requestStop)
             }
         }
         if (explain) {
@@ -546,12 +570,15 @@ fun NightScreen(close: () -> Unit) {
 }
 
 @Composable
-private fun NightButton(title: String, icon: ImageVector, fill: Color, modifier: Modifier, onClick: () -> Unit) {
-    Button(onClick = onClick, modifier.height(56.dp), shape = RoundedCornerShape(18.dp),
-        colors = ButtonDefaults.buttonColors(containerColor = fill, contentColor = Color.White.copy(alpha = 0.85f))) {
-        Icon(icon, null, Modifier.size(20.dp))
-        Spacer(Modifier.width(8.dp))
-        Text(title, fontWeight = FontWeight.SemiBold)
+private fun NightButton(title: String, icon: ImageVector, fill: Color, ink: Color, modifier: Modifier, onClick: () -> Unit) {
+    // Three in a row: the icon above the word, so the words fit.
+    Button(onClick = onClick, modifier.height(64.dp), shape = RoundedCornerShape(18.dp), contentPadding = PaddingValues(horizontal = 6.dp, vertical = 6.dp),
+        colors = ButtonDefaults.buttonColors(containerColor = fill, contentColor = ink)) {
+        Column(horizontalAlignment = Alignment.CenterHorizontally) {
+            Icon(icon, null, Modifier.size(20.dp))
+            Spacer(Modifier.height(4.dp))
+            Text(title, fontSize = 13.sp, fontWeight = FontWeight.SemiBold, maxLines = 1, overflow = TextOverflow.Ellipsis)
+        }
     }
 }
 
@@ -568,6 +595,7 @@ private fun NightExplainer(modifier: Modifier, done: () -> Unit) {
         NightPoint(Icons.Filled.BrightnessLow, "Displej zůstane zapnutý, ale téměř černý a na nejnižším jasu. Telefon se sám nezamkne.")
         NightPoint(Icons.Filled.GraphicEq, "Zvuk i upozornění běží dál. Obraz se zastaví, aby šetřil baterii.")
         NightPoint(Icons.Filled.BatteryChargingFull, "Na celou noc připojte nabíječku. Stav baterie vidíte dole.")
+        NightPoint(Icons.Filled.TouchApp, "Klepnutím zobrazíte tlačítka Zvuk, Rozsvítit a Ukončit hlídání. Rozsvítit noční režim ukončí.")
         NightPoint(Icons.Filled.Lock, "Chcete šetřit ještě víc? Telefon klidně zamkněte. Zvuk poběží dál i se zamčenou obrazovkou.")
         Button(onClick = done, Modifier.fillMaxWidth().height(50.dp), shape = RoundedCornerShape(14.dp),
             colors = ButtonDefaults.buttonColors(containerColor = DarkPalette.moon, contentColor = Color.Black)) {
