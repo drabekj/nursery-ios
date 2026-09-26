@@ -21,6 +21,7 @@ import cz.drabek.chuvicka.proto.RtpPacket
 import cz.drabek.chuvicka.proto.RtspClient
 import cz.drabek.chuvicka.proto.levelFromRms
 import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.runBlocking
 import java.io.IOException
 import java.net.HttpURLConnection
@@ -34,6 +35,8 @@ enum class RoomLevel(val title: String) {
     companion object {
         fun of(v: Float) = when { v < 0.15f -> QUIET; v < 0.45f -> SOME; v < 0.75f -> LOUD; else -> VERY_LOUD }
     }
+    /** The word in lower case, for a subline during a sound ("hlasitý zvuk"). Never "ticho" there. */
+    val word: String get() = if (this == QUIET) SOME.title.lowercase() else title.lowercase()
 }
 
 enum class SoundStatus(val title: String) {
@@ -57,6 +60,9 @@ sealed interface Connection {
  * One thread holds the connection and reconnects with a growing pause (1, 2, 4, 8 s).
  */
 object Monitor {
+    /** The level of a sound event ("Ozývá se"). Fixed; iOS derives it from the noise floor. */
+    const val SOUND_THRESHOLD = 0.35f
+
     val connection = MutableStateFlow<Connection>(Connection.Idle)
     val status = MutableStateFlow(SoundStatus.CONNECTING)
     val mode = MutableStateFlow(Settings.soundMode.value)
@@ -67,6 +73,15 @@ object Monitor {
     val volume = MutableStateFlow(1f)                 // The phone's media volume, 0...1.
     val soundNow = MutableStateFlow(false)
     val lastSound = MutableStateFlow<Long?>(null)
+    /** The room in one word: Připojuji…, Klid, Ozývá se, Pláče, Nehlídá. Updated at 2 Hz, emitted only on a change. */
+    val roomState: StateFlow<RoomState> get() = _roomState
+    private val _roomState = MutableStateFlow(RoomState.CONNECTING)
+    /** When [roomState] last changed (System.currentTimeMillis). */
+    val roomStateSince: StateFlow<Long> get() = _roomStateSince
+    private val _roomStateSince = MutableStateFlow(System.currentTimeMillis())
+    /** When the last sound event ended ("ticho už 42 min"). Null: no event since the start. */
+    val lastEventEnd: StateFlow<Long?> get() = _lastEventEnd
+    private val _lastEventEnd = MutableStateFlow<Long?>(null)
     /** True when the stream goes over Tailscale: the phone is away from home. */
     val viaTailscale = MutableStateFlow(false)
     /** The address of the phone at the baby now, when Bonjour does not find it (away from home). */
@@ -112,6 +127,13 @@ object Monitor {
     private var quieterSince: Long? = null
     private var aboveSince: Long? = null
     private var belowSince: Long? = null
+    /** The running sound event: its start and its peak level. */
+    private var eventStart: Long? = null
+    private var eventPeak = 0f
+    private var machine = newMachine()
+    private var ticks = 0
+    /** The cry classifier, from the start to the stop of the monitor. Never in the demo. */
+    @Volatile private var cry: CryDetector? = null
 
     val soundOnly get() = Settings.soundView.value || night.value
 
@@ -148,6 +170,10 @@ object Monitor {
         this.context = context.applicationContext
         running = true
         mode.value = Settings.soundMode.value
+        machine = newMachine()
+        cry = if (App.demo) null else CryDetector(this.context)
+        _roomState.value = RoomState.CONNECTING
+        _roomStateSince.value = System.currentTimeMillis()
         player = AudioPlayer().also {
             it.gainDb = Settings.loudness.value.decibels
             it.muted = mode.value != SoundMode.LIVE
@@ -163,6 +189,8 @@ object Monitor {
         thread?.interrupt()
         player?.release()
         player = null
+        cry?.close()
+        cry = null
         unwatchPower()
         connection.value = Connection.Idle
         detailActive.value = false
@@ -472,12 +500,17 @@ object Monitor {
 
     private fun measure(p: RtpPacket, uLaw: Boolean) {
         val table = if (uLaw) G711.uLaw else G711.aLaw
+        // The cry classifier gets a copy of the samples, only while a sound event runs.
+        val detector = cry
+        val samples = if (detector != null && detector.wanted && p.length > 0) FloatArray(p.length) else null
         var sum = 0.0
         for (i in 0 until p.length) {
             val s = table[p.data[p.offset + i].toInt() and 0xFF] / 32768.0
             sum += s * s
+            if (samples != null) samples[i] = s.toFloat()
         }
         if (p.length > 0) peak = max(peak, levelFromRms(sqrt(sum / p.length)))
+        if (samples != null) detector?.feed(samples)
     }
 
     // MARK: The tick, 10 times a second, from the service
@@ -488,6 +521,7 @@ object Monitor {
         history.value = history.value.drop(1) + smoothed
         holdRoomLevel(RoomLevel.of(smoothed), now)
         detectSound(smoothed, now)
+        cry?.setActive(soundNow.value)
 
         pictureLive.value = now - lastVideo < 3000
         val heard = now - lastAudio < 3000
@@ -507,14 +541,16 @@ object Monitor {
         // The alert. Only a loss that lasts 20 s gives a notification.
         if (s == SoundStatus.LOST) {
             if (lostSince == null) lostSince = now
-            if (!alerted && now - lostSince!! > 20_000) {
+            if (!alerted && now - lostSince!! > 20_000 && !App.demo) {
                 alerted = true
-                Alerts.loss(context)
+                Alerts.loss(context, lastAudio)
             }
         } else {
             lostSince = null
             if (alerted && (s == SoundStatus.LISTENING || s == SoundStatus.SILENT)) { alerted = false; Alerts.clearLoss(context) }
         }
+        // The room state at 2 Hz: every 5th tick.
+        if (++ticks % 5 == 0) { if (App.demo) demoRoomState(now) else updateRoomState(now) }
         if (App.demo) return
         val am = context.getSystemService(AudioManager::class.java)
         volume.value = am.getStreamVolume(AudioManager.STREAM_MUSIC).toFloat() / max(1, am.getStreamMaxVolume(AudioManager.STREAM_MUSIC))
@@ -538,27 +574,86 @@ object Monitor {
         }
     }
 
+    /** The room state from the signals. The machine keeps the rules, see RoomState.kt. */
+    private fun updateRoomState(now: Long) {
+        val detector = cry
+        if (detector != null) while (true) machine.classified(detector.verdicts.poll() ?: break)
+        val s = status.value
+        val input = RoomStateMachine.Input(
+            heard = s == SoundStatus.LISTENING || s == SoundStatus.SILENT,
+            everHeard = everHeard,
+            eventRunning = soundNow.value,
+            eventSeconds = eventStart?.let { (now - it) / 1000.0 } ?: 0.0,
+            eventPeak = eventPeak,
+            level = smoothed,
+            loudLevel = max(SOUND_THRESHOLD + 0.15f, 0.45f),
+            classifierAvailable = detector?.available ?: false,
+        )
+        setRoomState(machine.update(input, now), machine.since ?: now)
+    }
+
+    /** The machine with the verdict rule of CryDetector: every cry verdict (0.35 and more) counts. */
+    private fun newMachine() = RoomStateMachine(cryConfidence = Yamnet.BABY_CRY_MIN)
+
+    /** Emit only on a change. */
+    private fun setRoomState(state: RoomState, since: Long) {
+        val before = _roomState.value
+        if (state == before) return
+        _roomStateSince.value = since
+        _roomState.value = state
+        Log.add("room: ${state.title}")
+        if (!App.demo) alert(before, state, since)
+    }
+
+    /**
+     * The cry alert, and „se ozývá" only with Settings.alertOnAnySound. Only when the parent may not
+     * hear it: the sound muted, or the phone volume low. With alertOnSound on, warn also then, but
+     * not while the app is on the screen and heard.
+     */
+    private fun alert(before: RoomState, state: RoomState, now: Long) {
+        val unheard = mode.value == SoundMode.OFF || volume.value < 0.2f
+        val wanted = unheard || Settings.alertOnSound.value
+        if (!wanted || (foreground.value && !unheard)) return
+        val event = eventStart ?: now
+        when {
+            state == RoomState.CRY -> Alerts.cry(context, event, roomLevel.value)
+            state == RoomState.SOUND && before != RoomState.CRY && Settings.alertOnAnySound.value ->
+                Alerts.sound(context, event, roomLevel.value)
+        }
+    }
+
+    /** The line under the word: "ticho už 42 min", "hlasitý zvuk", "velmi hlasitý zvuk · už 38 s". */
+    fun subline(now: Long = System.currentTimeMillis()): String = roomSubline(
+        _roomState.value, now, since = _roomStateSince.value, lastEventEnd = _lastEventEnd.value,
+        lastHeard = lastAudio, level = roomLevel.value, camera = Settings.source.value == Settings.Source.CAMERA,
+    )
+
     /** "Ozývá se": a sound above the level of fussing for 1 s, until 4 s of quiet. */
     private fun detectSound(level: Float, now: Long) {
-        if (level >= 0.35f) {
+        if (level >= SOUND_THRESHOLD) {
             belowSince = null
             if (!soundNow.value) {
                 if (aboveSince == null) aboveSince = now
                 if (now - aboveSince!! >= 1000) {
                     soundNow.value = true
-                    // Warn when the parent may not hear it: the sound muted, or the phone volume low.
-                    // With "every sound" on, warn also then, but not while the app is on the screen and heard.
-                    val unheard = mode.value == SoundMode.OFF || volume.value < 0.2f
-                    val wanted = unheard || Settings.alertOnSound.value
-                    if (wanted && !(foreground.value && !unheard)) Alerts.sound(context)
+                    eventStart = aboveSince
+                    eventPeak = level
                 }
             }
-            if (soundNow.value) lastSound.value = now
+            if (soundNow.value) {
+                lastSound.value = now
+                eventPeak = max(eventPeak, level)
+            }
         } else {
             aboveSince = null
             if (soundNow.value) {
                 if (belowSince == null) belowSince = now
-                if (now - belowSince!! >= 4000) soundNow.value = false
+                if (now - belowSince!! >= 4000) {
+                    soundNow.value = false
+                    _lastEventEnd.value = now
+                    eventStart = null
+                    eventPeak = 0f
+                }
             }
         }
     }
@@ -599,17 +694,64 @@ object Monitor {
     // MARK: Demo
 
     private fun demo() {
+        val now = System.currentTimeMillis()
+        val state = demoState(App.demoScreen)
         connection.value = Connection.Live
         lastAudio = Long.MAX_VALUE / 2
         lastVideo = if (soundOnly) 0 else Long.MAX_VALUE / 2
-        if (App.demoScreen == "muted") setMode(SoundMode.OFF)
+        if (App.demoScreen == "muted" || App.demoScreen == "sound-muted") setMode(SoundMode.OFF)
         if (App.demoScreen == "volume") volume.value = 0.12f
+        // Nehlídá: heard once, nothing for 2 min. Připojuji…: never heard.
+        if (state == RoomState.LOST) {
+            everHeard = true
+            lastAudio = now - 125_000
+            lastVideo = 0
+            connection.value = Connection.Retrying("Telefon u miminka neodpovídá.", 3)
+        }
+        if (state == RoomState.CONNECTING) {
+            lastAudio = 0
+            lastVideo = 0
+            connection.value = Connection.Connecting
+        }
+        // The times for the sublines: "ticho už 42 min", "už 38 s", "před 2 min".
+        _lastEventEnd.value = now - 42 * 60_000
+        if (state != null) {
+            _roomStateSince.value = when (state) {
+                RoomState.CALM -> now - 42 * 60_000
+                RoomState.CRY -> now - 38_000
+                RoomState.SOUND -> now - 6_000
+                else -> now - 105_000
+            }
+            _roomState.value = state
+        }
+    }
+
+    /** The demo screens show a fixed room state; null: the state follows the demo level. */
+    private fun demoState(screen: String): RoomState? = when (screen) {
+        "sound", "sound-muted" -> RoomState.SOUND
+        "sound-cry", "main-cry", "night-cry" -> RoomState.CRY
+        "sound-lost" -> RoomState.LOST
+        "sound-connecting" -> RoomState.CONNECTING
+        "parent-dark", "sound-dark" -> null
+        else -> RoomState.CALM          // klid, main, parent, and the other screens.
+    }
+
+    /** The demo sets the state from the screen name. No classifier in the demo. */
+    private fun demoRoomState(now: Long) {
+        val state = demoState(App.demoScreen) ?: if (smoothed > SOUND_THRESHOLD) RoomState.SOUND else RoomState.CALM
+        setRoomState(state, now)
     }
 
     private fun demoLevel(now: Long): Float {
         val t = now / 1000.0
         val noise = 0.1f + (Math.random() * 0.05).toFloat()
-        return if (t % 12 < 3) max(noise, (kotlin.math.abs(kotlin.math.sin(t * 5.5)) * 0.55 + 0.3).toFloat()) else noise
+        return when (demoState(App.demoScreen)) {
+            RoomState.CRY -> (kotlin.math.abs(kotlin.math.sin(t * 5.5)) * 0.25 + 0.7).toFloat()
+            RoomState.SOUND -> (kotlin.math.abs(kotlin.math.sin(t * 3.1)) * 0.25 + 0.42).toFloat()
+            RoomState.LOST, RoomState.CONNECTING -> 0f
+            RoomState.CALM -> noise
+            null -> if (t % 12 < 3) max(noise, (kotlin.math.abs(kotlin.math.sin(t * 5.5)) * 0.55 + 0.3).toFloat()) else noise
+        }
     }
 }
 

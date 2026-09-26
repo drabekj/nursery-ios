@@ -15,7 +15,6 @@ import androidx.core.app.NotificationCompat
 import androidx.core.app.ServiceCompat
 import cz.drabek.chuvicka.App
 import cz.drabek.chuvicka.MainActivity
-import cz.drabek.chuvicka.R
 import java.util.Timer
 import kotlin.concurrent.fixedRateTimer
 
@@ -28,7 +27,12 @@ class ParentService : Service() {
     private var timer: Timer? = null
     private var wakeLock: PowerManager.WakeLock? = null
     private var wifiLock: WifiManager.WifiLock? = null
-    private var shown: SoundStatus? = null
+    /** What the notification shows now, and when it was posted. */
+    private var shownState: RoomState? = null
+    private var shownText: String? = null
+    private var shownMuted = false
+    private var lastPost = 0L
+    private var ticks = 0
 
     override fun onBind(intent: Intent?): IBinder? = null
 
@@ -44,7 +48,7 @@ class ParentService : Service() {
             if (Monitor.paused.value) { stopSelf(); return START_NOT_STICKY }      // The parent stopped the monitor since.
             Monitor.setMode(SoundMode.LIVE)
         }
-        ServiceCompat.startForeground(this, 1, notification(Monitor.status.value),
+        ServiceCompat.startForeground(this, 1, notification(Monitor.roomState.value, Monitor.subline(), Monitor.mode.value == SoundMode.OFF),
             if (Build.VERSION.SDK_INT >= 29) ServiceInfo.FOREGROUND_SERVICE_TYPE_MEDIA_PLAYBACK else 0)
         if (timer == null) {
             Monitor.start(this)
@@ -56,23 +60,44 @@ class ParentService : Service() {
             wifiLock = wm.createWifiLock(mode, "chuvicka:parent").apply { acquire() }
             timer = fixedRateTimer("monitor-tick", period = 100) {
                 Monitor.tick()
-                val s = Monitor.status.value
-                if (s != shown) {
-                    shown = s
-                    getSystemService(NotificationManager::class.java).notify(1, notification(s))
-                }
+                refreshNotification()
             }
         }
         return START_STICKY
     }
 
-    private fun notification(s: SoundStatus): Notification {
+    /**
+     * The notification follows the room state: at once on a change of the state or of the mute,
+     * the subline ("ticho už 42 min", "už 38 s") every 2 s at most. Never more than one post in 2 s.
+     */
+    private fun refreshNotification() {
+        val state = Monitor.roomState.value
+        val muted = Monitor.mode.value == SoundMode.OFF
+        val changed = state != shownState || muted != shownMuted
+        ticks++
+        if (!changed && ticks % 20 != 0) return
+        val now = System.currentTimeMillis()
+        if (now - lastPost < 2000) return
+        val text = Monitor.subline(now)
+        if (!changed && text == shownText) return
+        shownState = state
+        shownText = text
+        shownMuted = muted
+        lastPost = now
+        getSystemService(NotificationManager::class.java).notify(1, notification(state, text, muted))
+    }
+
+    /** Title: the state word. Text: the subline. The icon and its tint: the state glyph and colour (not colorized). */
+    private fun notification(state: RoomState, text: String, muted: Boolean): Notification {
         val open = PendingIntent.getActivity(this, 0, Intent(this, MainActivity::class.java), PendingIntent.FLAG_IMMUTABLE)
         val stop = PendingIntent.getService(this, 1, Intent(this, ParentService::class.java).setAction(ACTION_STOP), PendingIntent.FLAG_IMMUTABLE)
         return NotificationCompat.Builder(this, App.CHANNEL_RUNNING)
-            .setSmallIcon(R.drawable.ic_stat)
-            .setContentTitle("Chůvička hlídá")
-            .setContentText(s.title)
+            .setSmallIcon(state.notificationIcon)
+            .setColor(state.notificationColor)
+            .setContentTitle(state.title)
+            .setContentText(text)
+            .setSubText(if (muted) "Ztlumeno" else null)
+            .setShowWhen(false)
             .setOngoing(true)
             .setOnlyAlertOnce(true)
             .setContentIntent(open)
