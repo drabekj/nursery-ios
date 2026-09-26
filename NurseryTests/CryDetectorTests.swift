@@ -63,7 +63,9 @@ final class CryDetectorTests: XCTestCase {
             var packet = [Float](repeating: 0, count: 160)
             for i in 0..<160 {
                 let x = Double(t) / 8000
-                packet[i] = Float(0.4 * sin(2 * .pi * (450 + 80 * sin(2 * .pi * 3 * x)) * x)) + Float.random(in: -0.05...0.05)
+                let f = 450 + 80 * sin(6 * Double.pi * x)
+                let v = 0.4 * sin(2 * Double.pi * f * x)
+                packet[i] = Float(v) + Float.random(in: -0.05...0.05)
                 t += 1
             }
             detector.feed(packet)

@@ -777,33 +777,33 @@ final class MonitorEngine: ObservableObject {
     private func roomStateChanged(from old: RoomState, to new: RoomState) {
         guard !Self.isDemo, !suspended, activityLog.current != nil else { return }
         switch new {
-        case .cry: alertSound(cry: true)
-        case .sound where old == .calm: alertSound(cry: false)      // A new sound, not the end of a cry.
+        case .cry: alertSound(crying: true)
+        case .sound where old == .calm: alertSound(crying: false)      // A new sound, not the end of a cry.
         default: break
         }
     }
 
-    private func alertSound(cry: Bool) {
+    private func alertSound(crying: Bool) {
         guard let episode = activityLog.episodes.first else { return }      // The running one, newest first.
         let unheard = mode == .off || volumeLow
-        let wanted = cry ? unheard || settings.alertOnSound : settings.alertOnAnySound
+        let wanted = crying ? unheard || settings.alertOnSound : settings.alertOnAnySound
         // With live sound at a good volume, the parent hears it. An alert on the open app is noise then.
         let appOpen = UIApplication.shared.applicationState == .active
         guard wanted, !(appOpen && !unheard), cryAlertEpisode != episode.id else { return }
-        if !cry, soundAlertEpisode == episode.id { return }
+        if !crying, soundAlertEpisode == episode.id { return }
         // "Pláče" after "se ozývá" of the same episode replaces its card: no rate limit for that.
-        let upgrade = cry && soundAlertEpisode == episode.id
+        let upgrade = crying && soundAlertEpisode == episode.id
         guard upgrade || Date().timeIntervalSince(lastSoundAlert) > 60 else { return }
         lastSoundAlert = Date()
         let level = RoomLevel(max(episode.peak, meter)).title.lowercased()
-        if cry {
+        if crying {
             cryAlertEpisode = episode.id
             NurseryAlerts.postCry(episode: episode.id, since: episode.start, level: level)
         } else {
             soundAlertEpisode = episode.id
             NurseryAlerts.postSound(episode: episode.id, at: episode.start, level: level)
         }
-        Log.shared.add(cry ? "notification: cry" : "notification: sound")
+        Log.shared.add(crying ? "notification: cry" : "notification: sound")
     }
 
     // MARK: Night mode

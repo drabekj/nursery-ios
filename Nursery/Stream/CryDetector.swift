@@ -44,7 +44,7 @@ final class CryDetector: @unchecked Sendable {
     private var failureSink: FailureSink?
     private var request: SNClassifySoundRequest?
     private var analyzer: SNAudioStreamAnalyzer?
-    private var observer: Observer?
+    private var observer: CryObserver?
     private var pending: AVAudioPCMBuffer?
     private var position: AVAudioFramePosition = 0
     private var active = false
@@ -95,7 +95,7 @@ final class CryDetector: @unchecked Sendable {
             // A new analyzer for each event: its frame positions start at 0, and a verdict of an
             // older event can never mix in.
             let analyzer = SNAudioStreamAnalyzer(format: format)
-            let observer = Observer(owner: self)
+            let observer = CryObserver(owner: self)
             try analyzer.add(request, withObserver: observer)
             self.analyzer = analyzer
             self.observer = observer
@@ -193,7 +193,7 @@ final class CryDetector: @unchecked Sendable {
 }
 
 /// The analyzer's observer. It keeps no state of its own.
-private final class Observer: NSObject, SNResultsObserving, @unchecked Sendable {
+private final class CryObserver: NSObject, SNResultsObserving, @unchecked Sendable {
     private weak var owner: CryDetector?
 
     init(owner: CryDetector) { self.owner = owner }
