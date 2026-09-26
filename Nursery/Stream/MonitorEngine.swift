@@ -678,9 +678,34 @@ final class MonitorEngine: ObservableObject {
         reconnect(why: why)
     }
 
-    /// The stream to ask for. A hot phone gets the small stream until it cools down.
+    /// The stream to ask for. 2K only for a zoomed or full-screen picture (it has about 16 times
+    /// the pixels of 360p, and it keeps the Wi-Fi and the decoder busy). A hot phone gets 360p.
     private func streamURL(audioOnly: Bool) -> String {
-        settings.streamURL(audioOnly: audioOnly, preferSmall: thermalHot)
+        settings.streamURL(audioOnly: audioOnly, preferSmall: thermalHot || !wantsDetail)
+    }
+
+    /// A new stream if the wanted URL changed (detail or heat), with the same view.
+    private func refreshStream(why: String) {
+        if client != nil, streamURL(audioOnly: audioOnly) != currentURL { reconnect(why: why) }
+    }
+
+    // MARK: Detail
+
+    /// The screen shows the picture big: zoomed in, full screen, or on an iPad.
+    private var wantsDetail = false
+    private var detailTask: Task<Void, Never>?
+
+    /// Up to 2K after 0.6 s (the pinch has settled). Back to 360p only after 10 s, so a short
+    /// zoom out and in again does not switch twice. Each switch is a reconnect: the sound
+    /// pauses for about a second, and the picture holds its last frame until the next keyframe.
+    func setDetail(_ on: Bool) {
+        detailTask?.cancel()
+        detailTask = Task { [weak self] in
+            try? await Task.sleep(for: .seconds(on ? 0.6 : 10))
+            guard let self, !Task.isCancelled, self.wantsDetail != on else { return }
+            self.wantsDetail = on
+            self.refreshStream(why: on ? "detail: 2K picture" : "no detail: 360p picture")
+        }
     }
 
     // MARK: Heat
@@ -695,7 +720,7 @@ final class MonitorEngine: ObservableObject {
         guard hot != thermalHot else { return }
         thermalHot = hot
         Log.shared.add("thermal state \(state.rawValue): \(hot ? "small picture until the phone cools" : "normal picture")")
-        if client != nil, streamURL(audioOnly: audioOnly) != currentURL { reconnect(why: "thermal state changed") }
+        refreshStream(why: "thermal state changed")
     }
 
     private func audioInterrupted(_ note: Notification) {

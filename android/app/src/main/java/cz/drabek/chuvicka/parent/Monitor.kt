@@ -90,6 +90,16 @@ object Monitor {
 
     val soundOnly get() = Settings.soundView.value || night.value
 
+    /** The picture is big (the phone turned sideways). Only then the 2K stream: it has about
+     *  16 times the pixels of 360p and keeps the Wi-Fi and the decoder busy. */
+    @Volatile private var detail = false
+
+    fun setDetail(on: Boolean) {
+        if (detail == on) return
+        detail = on
+        if (Settings.source.value == Settings.Source.CAMERA && !soundOnly) reconnect(if (on) "detail: 2K picture" else "no detail: 360p picture")
+    }
+
     fun start(context: Context) {
         if (running) return
         this.context = context.applicationContext
@@ -193,7 +203,7 @@ object Monitor {
                 // An IP camera cannot run Tailscale: only at home.
                 Settings.activeHost.value = ""
                 viaTailscale.value = false
-                return RtspClient.forUrl(Settings.cameraUrl(soundOnly))
+                return RtspClient.forUrl(Settings.cameraUrl(soundOnly || !detail))
             }
             val home = Settings.host.value.trim()
             val remote = Settings.remoteHost.value.trim()
@@ -201,7 +211,7 @@ object Monitor {
             if (Settings.activeHost.value != host) Log.add("server: ${if (host == home) "home" else "Tailscale"} $host")
             Settings.activeHost.value = host
             viaTailscale.value = host != home
-            return RtspClient.forUrl(Settings.cameraUrl(soundOnly))
+            return RtspClient.forUrl(Settings.cameraUrl(soundOnly || !detail))
         }
         val name = Settings.babyName.value
         val code = Settings.babyCode.value

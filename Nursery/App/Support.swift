@@ -80,7 +80,8 @@ final class Settings: ObservableObject {
     enum Quality: String, CaseIterable, Identifiable {
         case high, low
         var id: String { rawValue }
-        var title: String { switch self { case .high: "2K (ostré přiblížení)"; case .low: "360p (úspora baterie)" } }
+        /// `high` is 2K only where it shows: zoomed in, or on the full screen. Else 360p.
+        var title: String { switch self { case .high: "2K při přiblížení"; case .low: "Vždy 360p (úspora baterie)" } }
     }
 
     /// What this iPhone does: it watches (the parent) or it is the camera at the baby.

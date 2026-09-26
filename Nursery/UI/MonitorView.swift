@@ -69,7 +69,13 @@ struct MonitorView: View {
             if c == .live { Task { await offerAlerts() } }
         }
         .onChange(of: aiming) { _, on in Log.shared.add(on ? "aim on" : "aim off") }
+        .onChange(of: wantsDetail, initial: true) { _, on in engine.setDetail(on) }
         .onAppear(perform: applyDemoScreen)
+    }
+
+    /// The picture is big (full screen, an iPad) or zoomed in: only then is 2K worth its cost.
+    private var wantsDetail: Bool {
+        !night && !soundView && (vSize == .compact || hSize == .regular || zoom.scale > 1.25)
     }
 
     private var actions: MonitorActions {
