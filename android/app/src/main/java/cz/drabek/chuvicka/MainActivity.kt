@@ -19,6 +19,7 @@ import androidx.core.content.ContextCompat
 import cz.drabek.chuvicka.baby.BabyService
 import cz.drabek.chuvicka.parent.Monitor
 import cz.drabek.chuvicka.parent.ParentService
+import cz.drabek.chuvicka.parent.ServerMigration
 import cz.drabek.chuvicka.ui.BabyScreen
 import cz.drabek.chuvicka.ui.ChuvickaTheme
 import cz.drabek.chuvicka.ui.HelpScreen
@@ -31,6 +32,8 @@ import cz.drabek.chuvicka.ui.SettingsScreen
 import cz.drabek.chuvicka.ui.Wizard
 import cz.drabek.chuvicka.ui.WizardStep
 import cz.drabek.chuvicka.ui.wizardDemoStep
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.withContext
 
 class MainActivity : ComponentActivity() {
     private var pip by mutableStateOf(false)
@@ -87,8 +90,14 @@ class MainActivity : ComponentActivity() {
             BackHandler(!wizardOpen && page != "main") {
                 page = when (page) { "settings" -> "main"; "scan" -> "pairing"; "help" -> helpFrom; else -> "settings" }
             }
+            // Once per launch: a go2rtc camera moves to the direct camera (only the first time after the update).
+            var migrationChecked by remember { mutableStateOf(false) }
             // The monitor waits while the wizard runs: its connection test needs the camera to itself.
             LaunchedEffect(role, wizardOpen) {
+                if (!migrationChecked && !App.demo && Settings.onboarded.value && role == Settings.Role.PARENT && !wizardOpen) {
+                    migrationChecked = true
+                    withContext(Dispatchers.IO) { ServerMigration.run(applicationContext) }
+                }
                 if (role == Settings.Role.PARENT && !wizardOpen && !Monitor.paused.value) ParentService.start(this@MainActivity)
                 else ParentService.stop(this@MainActivity)
             }
