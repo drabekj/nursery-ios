@@ -6,6 +6,7 @@ import java.io.InputStream
 import java.io.OutputStream
 import java.net.InetSocketAddress
 import java.net.Socket
+import java.net.SocketTimeoutException
 import java.net.URI
 import java.net.URLDecoder
 import java.security.MessageDigest
@@ -19,11 +20,18 @@ import kotlin.random.Random
  * connection ends. A keepalive thread sends OPTIONS.
  *
  * An IP camera wants a user and a password: Digest (or Basic) authentication after a 401.
+ *
+ * [directCamera]: the stream comes straight from an IP camera. A camera allows only a few sessions
+ * (a Tapo: 3 per stream path). It refuses one more with a 453, or it just closes the connection
+ * before the PLAY answer. Both become [CameraFull], so the app can say it in words.
  */
 class RtspClient(url: String, private val host: String, private val port: Int,
                  private val user: String = "", private val password: String = "",
-                 private val timeoutMs: Int = 8000) {
-    class Failure(message: String) : IOException(message)
+                 private val timeoutMs: Int = 8000, private val directCamera: Boolean = false) {
+    open class Failure(message: String) : IOException(message)
+
+    /** The camera has no free session: other phones (or apps) watch it now. */
+    class CameraFull : Failure("Kameru teď sleduje příliš mnoho telefonů. Zkuste to za chvíli, nebo zavřete Chůvičku na jiném telefonu.")
 
     class Track(val sdp: SdpTrack, val channel: Int)
 
@@ -33,7 +41,7 @@ class RtspClient(url: String, private val host: String, private val port: Int,
     /** The URL without "user:pass@": the credentials go only in the Authorization header. */
     private val url = withoutCredentials(url)
     private val babyPhone = this.url.startsWith("rtsp://chuvicka/")
-    private var socket: Socket? = null
+    @Volatile private var socket: Socket? = null
     /** The last challenge of the server: "realm", "nonce", "qop", "opaque", or null for Basic. */
     private var digest: Map<String, String>? = null
     private var basic = false
@@ -41,13 +49,34 @@ class RtspClient(url: String, private val host: String, private val port: Int,
     private lateinit var input: InputStream
     private lateinit var output: OutputStream
     private var cseq = 0
-    private var session: String? = null
+    @Volatile private var session: String? = null
     @Volatile private var closed = false
+    /** The server answered PLAY. Before that, a closed connection from a camera means "no free session". */
+    @Volatile private var playAnswered = false
     /** The addresses that the phone at the baby reported in DESCRIBE, for the time away from home. */
     var serverAddresses: List<String> = emptyList(); private set
 
     /** It connects, reads the SDP, and sets up the usable tracks. Then call [play]. */
     fun start(): List<Track> {
+        connect()
+        return beforePlay { setUp() }
+    }
+
+    /** Only the SDP of the stream: OPTIONS, DESCRIBE, and close. No session. For a quick test of a URL. */
+    fun describe(): List<SdpTrack> {
+        try {
+            connect()
+            return beforePlay {
+                request("OPTIONS", url)
+                val describe = request("DESCRIBE", url, mapOf("Accept" to "application/sdp"))
+                Sdp.parse(String(describe.body, Charsets.UTF_8))
+            }
+        } finally {
+            close()
+        }
+    }
+
+    private fun connect() {
         val s = Socket()
         s.tcpNoDelay = true
         s.keepAlive = true
@@ -56,7 +85,9 @@ class RtspClient(url: String, private val host: String, private val port: Int,
         socket = s
         input = BufferedInputStream(s.getInputStream(), 256 * 1024)
         output = s.getOutputStream()
+    }
 
+    private fun setUp(): List<Track> {
         request("OPTIONS", url)
         val describe = request("DESCRIBE", url, mapOf("Accept" to "application/sdp"))
         val base = describe.headers["content-base"] ?: describe.headers["content-location"] ?: url
@@ -77,7 +108,9 @@ class RtspClient(url: String, private val host: String, private val port: Int,
 
     /** PLAY, then the packets, on this thread, until the connection ends. */
     fun play(onPacket: (channel: Int, packet: ByteArray) -> Unit) {
-        request("PLAY", url, mapOf("Range" to "npt=0.000-"))
+        // A full camera often answers DESCRIBE and SETUP, then closes the connection instead of the PLAY answer.
+        beforePlay { request("PLAY", url, mapOf("Range" to "npt=0.000-")) }
+        playAnswered = true
         val keepAlive = Thread {
             try {
                 while (!closed) {
@@ -91,7 +124,7 @@ class RtspClient(url: String, private val host: String, private val port: Int,
         try {
             while (!closed) {
                 val first = input.read()
-                if (first < 0) throw Failure("Server ukončil spojení.")
+                if (first < 0) throw Failure(CLOSED)
                 if (first == 0x24) {
                     val channel = readByte()
                     val length = (readByte() shl 8) or readByte()
@@ -107,10 +140,38 @@ class RtspClient(url: String, private val host: String, private val port: Int,
         }
     }
 
+    /**
+     * It ends the session with TEARDOWN, then closes the socket. Without TEARDOWN an IP camera keeps
+     * the session (65 s on a Tapo), and it counts against its few sessions. A small thread sends it:
+     * close() may run on the main thread, where Android forbids the network.
+     */
     fun close() {
         if (closed) return
         closed = true
-        try { socket?.close() } catch (_: IOException) {}
+        val s = socket ?: return
+        if (session != null && !s.isClosed) {
+            val t = Thread {
+                try { send("TEARDOWN", url, emptyMap()) } catch (_: Exception) {}
+            }.apply { isDaemon = true; name = "rtsp-teardown"; start() }
+            try { t.join(300) } catch (_: InterruptedException) {}
+        }
+        try { s.close() } catch (_: IOException) {}
+    }
+
+    /**
+     * The handshake before the PLAY answer. On a direct camera, a closed connection here means that the
+     * camera has no free session: [CameraFull]. Not a timeout, and not our own close().
+     */
+    private fun <T> beforePlay(block: () -> T): T = try {
+        block()
+    } catch (e: CameraFull) {
+        throw e
+    } catch (e: SocketTimeoutException) {
+        throw e
+    } catch (e: IOException) {
+        val closedByServer = e !is Failure || e.message == CLOSED
+        if (!closed && isCameraFull(null, closedByServer && !playAnswered, directCamera && !babyPhone)) throw CameraFull()
+        throw e
     }
 
     // MARK: The requests
@@ -130,6 +191,7 @@ class RtspClient(url: String, private val host: String, private val port: Int,
                 user.isEmpty() -> "Kamera chce uživatelské jméno a heslo."
                 else -> "Kamera nepřijala uživatelské jméno nebo heslo."
             })
+            if (isCameraFull(r.status, false, directCamera && !babyPhone)) throw CameraFull()
             if (r.status !in 200..299) throw Failure("Server odpověděl ${r.status} ${r.reason}.")
             return r
         }
@@ -138,7 +200,7 @@ class RtspClient(url: String, private val host: String, private val port: Int,
     private fun answer(id: Int): Response {
         while (true) {
             val first = input.read()
-            if (first < 0) throw Failure("Server ukončil spojení.")
+            if (first < 0) throw Failure(CLOSED)
             if (first == 0x24) {                       // A packet before the answer: skip it.
                 readByte(); val length = (readByte() shl 8) or readByte(); readFully(length)
                 continue
@@ -209,7 +271,7 @@ class RtspClient(url: String, private val host: String, private val port: Int,
 
     private fun readByte(): Int {
         val b = input.read()
-        if (b < 0) throw Failure("Server ukončil spojení.")
+        if (b < 0) throw Failure(CLOSED)
         return b
     }
 
@@ -218,13 +280,22 @@ class RtspClient(url: String, private val host: String, private val port: Int,
         var n = 0
         while (n < length) {
             val r = input.read(b, n, length - n)
-            if (r < 0) throw Failure("Server ukončil spojení.")
+            if (r < 0) throw Failure(CLOSED)
             n += r
         }
         return b
     }
 
     companion object {
+        private const val CLOSED = "Server ukončil spojení."
+
+        /**
+         * True when a direct camera refused the session: a 453 (Not Enough Bandwidth), or the camera
+         * closed the connection before the PLAY answer. Never for go2rtc or the phone at the baby.
+         */
+        fun isCameraFull(status: Int?, closedBeforePlay: Boolean, directCamera: Boolean): Boolean =
+            directCamera && (status == 453 || (status == null && closedBeforePlay))
+
         /** A quick TCP test: is this address here? Away from home the LAN address does not answer. */
         fun canConnect(host: String, port: Int, timeoutMs: Int = 1200): Boolean = try {
             Socket().use { it.connect(InetSocketAddress(host, port), timeoutMs) }
@@ -251,9 +322,9 @@ class RtspClient(url: String, private val host: String, private val port: Int,
             return Endpoint(u.host ?: throw Failure("Adresa kamery není platná."), if (u.port > 0) u.port else 554, user, password)
         }
 
-        fun forUrl(url: String): RtspClient {
+        fun forUrl(url: String, directCamera: Boolean = false): RtspClient {
             val e = parse(url)
-            return RtspClient(url, e.host, e.port, e.user, e.password)
+            return RtspClient(url, e.host, e.port, e.user, e.password, directCamera = directCamera)
         }
 
         /** The URL without "user:pass@": the credentials go only in the Authorization header. */
