@@ -144,7 +144,8 @@ final class SoundActivity: ObservableObject {
                 if let since = belowSince, now.timeIntervalSince(since) >= 4 { finish(event) }
             }
         }
-        if now.timeIntervalSince(lastSave) > 30 { save() }
+        // Each 5 minutes: each save rewrites the whole list. The end of an event saves at once.
+        if now.timeIntervalSince(lastSave) > 300 { save() }
     }
 
     /// It ends an event in progress, for example when the sound goes off.
@@ -217,6 +218,11 @@ enum Moments {
     }
 
     static func url(for id: UUID) -> URL { dir.appendingPathComponent("\(id.uuidString).jpg") }
+
+    /// Whether a photo exists, without reading and decoding it.
+    static func exists(for id: UUID) -> Bool {
+        MonitorEngine.isDemo || FileManager.default.fileExists(atPath: url(for: id).path)
+    }
 
     static func image(for id: UUID) -> UIImage? {
         if MonitorEngine.isDemo { return UIImage(named: "DemoFrame") }

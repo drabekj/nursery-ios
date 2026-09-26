@@ -205,7 +205,7 @@ private struct EpisodeRow: View {
                         .font(.subheadline).foregroundStyle(.secondary).monospacedDigit()
                 }
                 Spacer()
-                if Moments.image(for: episode.id) != nil {
+                if Moments.exists(for: episode.id) {
                     Image(systemName: "chevron.right").font(.caption.weight(.semibold)).foregroundStyle(.tertiary)
                 }
             }

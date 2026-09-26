@@ -83,6 +83,16 @@ enum RoomLevel: Int, Comparable {
         }
     }
 
+    /// A typical level for the word, for a glow that follows the words, not each 0.1 s tick.
+    var value: Float {
+        switch self {
+        case .quiet: 0.05
+        case .some: 0.3
+        case .loud: 0.6
+        case .veryLoud: 0.9
+        }
+    }
+
     var title: String {
         switch self {
         case .quiet: "Ticho"
@@ -102,13 +112,16 @@ struct PulseDot: View {
     var size: CGFloat = 8
     var animated = true
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
+    /// It pulses for some seconds after it appears or changes, then it stays still. A pulse that
+    /// never stops keeps SwiftUI drawing 60 frames a second for the whole night.
+    @State private var pulsing = true
 
     var body: some View {
         Circle()
             .fill(color)
             .frame(width: size, height: size)
             .background {
-                if animated && !reduceMotion {
+                if animated && !reduceMotion && pulsing {
                     Circle()
                         .stroke(color, lineWidth: 1.5)
                         .phaseAnimator([false, true]) { ring, grown in
@@ -119,6 +132,11 @@ struct PulseDot: View {
                 }
             }
             .accessibilityHidden(true)
+            .task(id: animated) {
+                pulsing = true
+                try? await Task.sleep(for: .seconds(8))
+                pulsing = false
+            }
     }
 }
 

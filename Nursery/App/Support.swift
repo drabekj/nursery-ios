@@ -211,7 +211,8 @@ final class Settings: ObservableObject {
     }
 
     /// The RTSP stream: the go2rtc restream, or the iPhone at the baby. The query "?audio" asks go2rtc for the sound only.
-    func streamURL(audioOnly: Bool) -> String {
+    /// `preferSmall`: the phone is hot, so the 360p picture also where the setting says 2K.
+    func streamURL(audioOnly: Bool, preferSmall: Bool = false) -> String {
         if source == .phone {
             // The host is not used: the connection goes to the Bonjour service. The code is the path.
             return "rtsp://chuvicka/\(babyCode)" + (audioOnly ? "?audio" : "")
@@ -221,9 +222,9 @@ final class Settings: ObservableObject {
         // and the Tapo camera sends no packets at all. It worked only while another phone watched
         // the same stream, so the sound view, Night mode and the background failed at random.
         // Tested on 25 Sep 2026 with Tools/rtsp_check.py. The 360p picture costs about 0.3 Mbit/s.
-        if cameraKind == .rtsp { return rtspURL(small: audioOnly || quality == .low) }
-        if audioOnly { return "rtsp://\(serverHost):8554/\(streamSmall)" }
-        return "rtsp://\(serverHost):8554/\(quality == .high ? streamMain : streamSmall)"
+        let small = audioOnly || preferSmall || quality == .low
+        if cameraKind == .rtsp { return rtspURL(small: small) }
+        return "rtsp://\(serverHost):8554/\(small ? streamSmall : streamMain)"
     }
 }
 

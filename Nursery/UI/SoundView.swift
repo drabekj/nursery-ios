@@ -57,6 +57,15 @@ struct ViewSwitch: View {
 /// The room as one calm shape. The core shows the state. Three rings show the sound:
 /// the inner ring the sound now, the outer rings the sound a moment ago, so a cry spreads out
 /// like a ripple on water. When the room is quiet, the orb breathes slowly.
+/// The orb of the room now. Only this view watches the meter.
+struct LiveOrb: View {
+    @ObservedObject var levels: LevelMeter
+    let status: NurseryActivityAttributes.Status
+    let soundNow: Bool
+
+    var body: some View { RoomOrb(history: levels.history, status: status, soundNow: soundNow) }
+}
+
 struct RoomOrb: View {
     let history: [Float]
     let status: NurseryActivityAttributes.Status
@@ -77,14 +86,17 @@ struct RoomOrb: View {
                         .fill(color(v).opacity(0.2 - Double(i) * 0.045))
                         .frame(width: core + spread, height: core + spread)
                 }
+                // A plain fill, not glass: glass blurs what is behind it again on each change,
+                // and the core changes 10 times a second.
                 Circle()
-                    .fill(color(value(ago: 0)).opacity(0.22))
+                    .fill(color(value(ago: 0)).opacity(0.3))
+                    .overlay { Circle().strokeBorder(.white.opacity(0.35), lineWidth: 1) }
                     .frame(width: core, height: core)
-                    .glass(in: Circle(), tint: color(value(ago: 0)).opacity(0.25))
                     .overlay { symbol.font(.system(size: core * 0.3, weight: .semibold)) }
             }
             .frame(width: g.size.width, height: g.size.height)
-            .animation(reduceMotion ? nil : .easeOut(duration: 0.3), value: history)
+            // No implicit animation on the history: it changes each 0.1 s, so each animation
+            // started before the last one ended, and the orb never stopped drawing.
         }
         .aspectRatio(1, contentMode: .fit)
         .phaseAnimator([false, true]) { view, inhale in
@@ -142,7 +154,7 @@ struct SoundStage: View {
                 Haptics.firm()
                 engine.soundOn()
             } label: {
-                RoomOrb(history: engine.history, status: engine.soundStatus, soundNow: activity.current != nil)
+                LiveOrb(levels: engine.levels, status: engine.soundStatus, soundNow: activity.current != nil)
             }
             .buttonStyle(PressScale())
             .disabled(engine.mode != .off)

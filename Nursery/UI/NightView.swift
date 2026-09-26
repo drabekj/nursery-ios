@@ -30,7 +30,7 @@ struct NightView: View {
                         .monospacedDigit()
                         .foregroundStyle(Theme.moon.opacity(0.22))
                 }
-                Waveform(history: engine.history, dim: !sound)
+                LiveWaveform(levels: engine.levels, dim: !sound)
                     .frame(height: 90)
                     .padding(.horizontal, 36)
                     .opacity(sound ? 0.95 : 0.55)

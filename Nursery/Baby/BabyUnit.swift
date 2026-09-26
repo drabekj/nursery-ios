@@ -81,7 +81,8 @@ final class BabyUnit: ObservableObject {
         self.server = server
         self.capture = capture
         running = true
-        UIApplication.shared.isIdleTimerDisabled = true      // The camera needs the app on the screen.
+        // The camera needs the app on the screen. Sound only works with the phone locked too.
+        UIApplication.shared.isIdleTimerDisabled = video
         startTimer()
         observe()
         Log.shared.add("baby unit on, \(video ? "picture and sound" : "sound only")")
@@ -132,8 +133,13 @@ final class BabyUnit: ObservableObject {
             raw = capture?.peak.withLock { v -> Float in let p = v; v = 0; return p } ?? 0
         }
         smoothed = raw > smoothed ? raw : smoothed * 0.82 + raw * 0.18
-        history.removeFirst()
-        history.append(smoothed)
+        // Only while the screen shows it. In the background each change still made SwiftUI
+        // redraw, which got the parent app killed for its CPU use.
+        guard UIApplication.shared.applicationState == .active else { return }
+        var h = history
+        h.removeFirst()
+        h.append(smoothed)
+        history = h
     }
 
     // MARK: Interruptions

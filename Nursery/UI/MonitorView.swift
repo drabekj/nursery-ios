@@ -28,11 +28,17 @@ struct MonitorView: View {
 
     var body: some View {
         ZStack {
-            AmbientBackground(level: engine.level, status: engine.soundStatus)
-            if vSize == .compact && !soundView {
-                FullScreenMonitor(zoom: zoom, pip: engine.pip, aiming: $aiming, actions: actions)
+            // Night mode covers everything. Then the monitor under it is not built at all:
+            // behind the black screen it redrew and animated all night for nobody.
+            if !night {
+                AmbientBackground(room: engine.roomLevel, status: engine.soundStatus)
+                if vSize == .compact && !soundView {
+                    FullScreenMonitor(zoom: zoom, pip: engine.pip, aiming: $aiming, actions: actions)
+                } else {
+                    mainLayout
+                }
             } else {
-                mainLayout
+                Color.black.ignoresSafeArea()
             }
             if flash {
                 Color.white.ignoresSafeArea().transition(.opacity).allowsHitTesting(false).zIndex(4)
@@ -299,9 +305,13 @@ struct MonitorActions {
 
 /// A soft glow behind the room panel. It follows the loudness, so the whole screen breathes
 /// with the room. It is dim on purpose: this screen is often the only light at night.
+/// The glow follows the loudness words (Ticho, Slabé zvuky…), which change a few times a minute,
+/// not the 10 Hz level: a full-screen gradient under the glass panels made all of them blur again
+/// on each tick, and its 0.35 s animation never ended.
 struct AmbientBackground: View {
-    let level: Float
+    let room: RoomLevel
     let status: NurseryActivityAttributes.Status
+    private var level: Float { room.value }
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
     var body: some View {
@@ -310,7 +320,7 @@ struct AmbientBackground: View {
             RadialGradient(colors: [glow.opacity(0.10 + Double(level) * 0.28), .clear],
                            center: UnitPoint(x: 0.5, y: 0.62), startRadius: 10, endRadius: 420)
                 .ignoresSafeArea()
-                .animation(reduceMotion ? nil : .easeOut(duration: 0.35), value: level)
+                .animation(reduceMotion ? nil : .easeInOut(duration: 0.8), value: room)
         }
     }
 

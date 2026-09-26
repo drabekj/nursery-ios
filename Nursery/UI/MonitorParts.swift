@@ -251,7 +251,7 @@ struct RoomPanel: View {
             }
             .accessibilityElement(children: .combine)
 
-            Waveform(history: engine.history, dim: !RoomWords.hearsRoom(engine))
+            LiveWaveform(levels: engine.levels, dim: !RoomWords.hearsRoom(engine))
                 .frame(height: 84)
         }
     }
@@ -278,7 +278,6 @@ struct LastSoundLabel: View {
                     Text(last.formatted(.relative(presentation: .numeric, unitsStyle: .abbreviated)
                         .locale(Locale(identifier: "cs_CZ"))))
                         .font(.footnote.weight(.semibold)).monospacedDigit()
-                        .id(context.date)
                 }
             } else {
                 Text("Zatím žádný zvuk").font(.footnote).foregroundStyle(.secondary)
@@ -432,7 +431,7 @@ struct FullScreenMonitor: View {
                     }
                     Spacer()
                     HStack(alignment: .bottom) {
-                        Waveform(history: Array(engine.history.suffix(30)), dim: engine.mode == .off)
+                        LiveWaveform(levels: engine.levels, last: 30, dim: !RoomWords.hearsRoom(engine))
                             .frame(width: 150, height: 36)
                             .padding(12)
                             .glass(in: RoundedRectangle(cornerRadius: 18, style: .continuous))

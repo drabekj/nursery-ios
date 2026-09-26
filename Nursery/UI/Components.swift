@@ -129,6 +129,19 @@ struct Waveform: View {
     static func word(for v: Float) -> String { RoomLevel(v).title }
 }
 
+/// The waveform of the room now. Only this small view watches the meter, so the 10 Hz ticks
+/// redraw it and nothing else.
+struct LiveWaveform: View {
+    @ObservedObject var levels: LevelMeter
+    /// Only the last values, for a narrow waveform.
+    var last: Int?
+    var dim = false
+
+    var body: some View {
+        Waveform(history: last.map { Array(levels.history.suffix($0)) } ?? levels.history, dim: dim)
+    }
+}
+
 // MARK: - The repeat button
 
 /// A button that acts on the press, and again at each interval while the finger stays.

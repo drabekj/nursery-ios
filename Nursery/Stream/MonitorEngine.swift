@@ -38,12 +38,11 @@ final class MonitorEngine: ObservableObject {
     @Published private(set) var connection: Connection = .idle
     @Published private(set) var pictureLive = false
     @Published private(set) var soundStatus: SoundStatus = .connecting
-    /// The loudness of the room now, 0...1.
-    @Published private(set) var level: Float = 0
-    /// The smoothed level. It runs also in the background, where `level` does not change.
+    /// The loudness for the meters. It changes 10 times a second, so it is a separate object:
+    /// only the waveform, the orb and the glow redraw, not every view that watches the engine.
+    let levels = LevelMeter()
+    /// The smoothed level. It runs also in the background, where `levels` does not change.
     private var meter: Float = 0
-    /// The loudness in the last 6 seconds, oldest first. One value each 0.1 s.
-    @Published private(set) var history: [Float] = Array(repeating: 0, count: 60)
     @Published private(set) var videoSize = CGSize(width: 16, height: 9)
     /// The loudness in words, with a hold time. A louder word shows after 0.4 s, a quieter one after 2.5 s.
     @Published private(set) var roomLevel: RoomLevel = .quiet
@@ -91,6 +90,7 @@ final class MonitorEngine: ObservableObject {
     private var client: RTSPClient?
     private var generation = 0
     private var retryDelay: Double = 1
+    private var networkUp = true
     private var retryTask: Task<Void, Never>?
     private var audioOnlyTask: Task<Void, Never>?
     private var isForeground = true
@@ -177,10 +177,16 @@ final class MonitorEngine: ObservableObject {
         }
 
         pathMonitor.pathUpdateHandler = { [weak self] path in
-            guard path.status == .satisfied else { return }
+            let satisfied = path.status == .satisfied
             DispatchQueue.main.async {
+                guard let self else { return }
+                // Only a real return of the network. Tailscale, a Wi-Fi roam or a new route also
+                // send a "satisfied" update, and each one cut the backoff and reconnected at once.
+                let wasDown = !self.networkUp
+                self.networkUp = satisfied
                 // timer != nil: start() ran. The first path update comes before it.
-                guard let self, self.timer != nil, self.connection != .live, self.connection != .connecting else { return }
+                guard satisfied, wasDown, self.timer != nil, !self.suspended,
+                      self.connection != .live, self.connection != .connecting else { return }
                 Log.shared.add("network is back")
                 self.reconnect(why: "network is back")
             }
@@ -191,6 +197,10 @@ final class MonitorEngine: ObservableObject {
         center.addObserver(forName: .nurseryListen, object: nil, queue: .main) { [weak self] _ in
             MainActor.assumeIsolated { self?.mode = .live }
         }
+        center.addObserver(forName: ProcessInfo.thermalStateDidChangeNotification, object: nil, queue: .main) { [weak self] _ in
+            MainActor.assumeIsolated { self?.thermalChanged() }
+        }
+        thermalChanged()
     }
 
     func soundOn() { mode = .live }
@@ -262,6 +272,7 @@ final class MonitorEngine: ObservableObject {
             timer = Timer.scheduledTimer(withTimeInterval: 0.1, repeats: true) { [weak self] _ in
                 MainActor.assumeIsolated { self?.tick() }
             }
+            timer?.tolerance = 0.03          // iOS may then join the wake-ups with other work.
         }
         if Self.isDemo { startDemo(); return }
         activateAudioSession()
@@ -306,7 +317,7 @@ final class MonitorEngine: ObservableObject {
         let render = wantsPicture
         shared.withLock { $0.renderVideo = render }
         client?.queue.async { [renderer] in renderer.reset() }
-        if client == nil || audioOnly != wantsAudioOnly { reconnect(why: "back in the foreground") }
+        updateStream(why: "back in the foreground")
     }
 
     func sceneEnteredBackground() {
@@ -327,14 +338,15 @@ final class MonitorEngine: ObservableObject {
         guard !isForeground, !pip.isActive else { return }
         shared.withLock { $0.renderVideo = false }
         // Also with the sound muted: the app still listens, to warn about a cry.
-        if !audioOnly { reconnect(why: "background: sound only") }
+        updateStream(why: "background: sound only")
     }
 
     private func pictureInPictureChanged(_ active: Bool) {
         Log.shared.add(active ? "picture in picture on" : "picture in picture off")
         if active {
             shared.withLock { $0.renderVideo = true }
-            if audioOnly { reconnect(why: "picture in picture needs the video") }
+            client?.queue.async { [renderer] in renderer.reset() }
+            updateStream(why: "picture in picture needs the video")
         } else if !isForeground {
             enterBackgroundMode()
         }
@@ -382,7 +394,8 @@ final class MonitorEngine: ObservableObject {
             await self.chooseRoute()
             // A newer attempt started while this one looked for the way.
             guard gen == self.generation, !self.suspended else { return }
-            let url = self.settings.streamURL(audioOnly: onlyAudio)
+            let url = self.streamURL(audioOnly: onlyAudio)
+            self.currentURL = url
             let client: RTSPClient
             do { client = try RTSPClient(url: url, endpoint: self.settings.babyEndpoint) } catch {
                 self.connection = .retrying("Adresa serveru není platná.")
@@ -410,30 +423,34 @@ final class MonitorEngine: ObservableObject {
         switch settings.source {
         case .camera where settings.cameraKind == .rtsp:
             // A camera straight on the LAN: no Tailscale way (a camera cannot run Tailscale).
-            viaTailscale = false
+            if viaTailscale { viaTailscale = false }
         case .camera:
             // The LAN address first: at home it answers at once. Away, it does not, in 1.2 s.
             let home = settings.trimmedHost
             let remote = settings.trimmedRemoteHost
             var host = home
             if !remote.isEmpty, remote != home, !(await Reach.canConnect(host: home, port: 8554)) { host = remote }
-            if settings.activeHost != host { Log.shared.add("server: \(host == home ? "home" : "Tailscale") \(host)") }
-            settings.activeHost = host
-            viaTailscale = host != home
+            // Set only a change: each set redraws every view that watches the settings.
+            if settings.activeHost != host {
+                Log.shared.add("server: \(host == home ? "home" : "Tailscale") \(host)")
+                settings.activeHost = host
+            }
+            if viaTailscale != (host != home) { viaTailscale = host != home }
         case .phone:
             // The addresses that the phone reported last time first: the home Wi-Fi, then Tailscale.
             // They need no Bonjour. An Android phone with the screen off often stops answering
             // Bonjour, and then each attempt failed for minutes (26 Sep 2026). Bonjour only when
             // no address answers, for example when the router gave the phone a new address.
-            settings.babyDirect = nil
-            viaTailscale = false
             func tailscale(_ address: String) -> Bool { Reach.split(address).map { Reach.isTailscale($0.host) } ?? false }
+            var direct: String?
             for address in settings.babyAddresses.sorted(by: { !tailscale($0) && tailscale($1) }) {
                 guard let a = Reach.split(address), await Reach.canConnect(host: a.host, port: a.port) else { continue }
-                settings.babyDirect = address
-                viaTailscale = Reach.isTailscale(a.host)
-                return
+                direct = address
+                break
             }
+            if settings.babyDirect != direct { settings.babyDirect = direct }
+            let isTailscale = direct.map(tailscale) ?? false
+            if viaTailscale != isTailscale { viaTailscale = isTailscale }
         }
     }
 
@@ -465,13 +482,16 @@ final class MonitorEngine: ObservableObject {
                 guard let packet = RTPPacket(bytes) else { return }
                 let now = Date()
                 if channel == video?.channel {
-                    guard let unit = depacketizer.push(packet) else { return }
                     let draw = shared.withLock { s -> Bool in
                         s.lastVideo = now
                         s.lastPacket = now
                         return s.renderVideo
                     }
-                    if draw { renderer.render(unit, depacketizer: depacketizer) }
+                    // Nothing shows the picture (the sound view, Night mode, the background):
+                    // do not even assemble the frames. When the drawing starts again, the gap in
+                    // the sequence makes the depacketizer wait for the next keyframe.
+                    guard draw, let unit = depacketizer.push(packet) else { return }
+                    renderer.render(unit, depacketizer: depacketizer)
                 } else if channel == sound?.channel {
                     shared.withLock { s in
                         s.lastAudio = now
@@ -507,7 +527,9 @@ final class MonitorEngine: ObservableObject {
         failures += 1
         pictureLive = false
         let delay = retryDelay
-        retryDelay = min(retryDelay * 2, 8)
+        // In the background, after a long outage (the camera is off for the night), try every 30 s,
+        // not every 8 s: each try wakes the Wi-Fi radio. In the foreground, 8 s at most.
+        retryDelay = min(retryDelay * 2, !isForeground && failures >= 10 ? 30 : 8)
         retryTask?.cancel()
         retryTask = Task { [weak self] in
             try? await Task.sleep(for: .seconds(delay))
@@ -540,6 +562,9 @@ final class MonitorEngine: ObservableObject {
         do {
             // .playback: the sound continues on the lock screen and with the silent switch on.
             try session.setCategory(.playback, mode: .default, options: [])
+            // 40 ms audio buffers: fewer wake-ups of the audio thread than the default 5-10 ms.
+            // The jitter cushion (80-400 ms) is far larger, so the delay does not change noticeably.
+            try? session.setPreferredIOBufferDuration(0.04)
             // An incoming-call banner does not interrupt the sound (a full-screen call still does).
             try session.setPrefersNoInterruptionsFromSystemAlerts(true)
             try session.setActive(true)
@@ -586,7 +611,10 @@ final class MonitorEngine: ObservableObject {
             Task {
                 // Wait a moment: the photo then shows the baby during the sound, not before it.
                 try? await Task.sleep(for: .seconds(1.5))
-                if let image = await snapshotProvider() { Moments.save(image, for: episode.id) }
+                guard let image = await snapshotProvider() else { return }
+                // Scale and JPEG-encode off the main thread: about 0.1 s of work.
+                let id = episode.id
+                await Task.detached(priority: .utility) { Moments.save(image, for: id) }.value
             }
         }
         let unheard = mode == .off || volumeLow
@@ -608,6 +636,8 @@ final class MonitorEngine: ObservableObject {
         guard on != nightMode else { return }
         nightMode = on
         Log.shared.add(on ? "night mode on" : "night mode off")
+        // Night mode takes the picture off the screen, so a swipe home opens no small window.
+        pip.automatic = !on && !settings.soundView
         applyPicture(why: on ? "night mode: sound only" : "night mode off")
     }
 
@@ -619,7 +649,7 @@ final class MonitorEngine: ObservableObject {
         guard on != settings.soundView else { return }
         settings.soundView = on
         Log.shared.add(on ? "sound view" : "picture view")
-        pip.automatic = !on          // With no picture, a swipe home must not open an empty small window.
+        pip.automatic = !on && !nightMode    // With no picture, a swipe home must not open an empty small window.
         applyPicture(why: on ? "sound view: sound only" : "picture view")
     }
 
@@ -630,7 +660,42 @@ final class MonitorEngine: ObservableObject {
         if Self.isDemo { audioOnly = !render; return }
         guard isForeground else { return }
         if render { client?.queue.async { [renderer] in renderer.reset() } }
-        if client == nil || audioOnly != wantsAudioOnly { reconnect(why: why) }
+        updateStream(why: why)
+    }
+
+    /// The URL of the current stream, to see if a change of view needs a new one.
+    private var currentURL: String?
+
+    /// A new stream only when the wanted one differs. With the camera, the small picture, the sound
+    /// view, Night mode and the background can all use the same 360p stream: then only the drawing
+    /// changes, with no reconnect, no gap in the sound, and no new handshake.
+    private func updateStream(why: String) {
+        let wanted = wantsAudioOnly
+        guard client == nil || (wanted != audioOnly && streamURL(audioOnly: wanted) != currentURL) else {
+            audioOnly = wanted
+            return
+        }
+        reconnect(why: why)
+    }
+
+    /// The stream to ask for. A hot phone gets the small stream until it cools down.
+    private func streamURL(audioOnly: Bool) -> String {
+        settings.streamURL(audioOnly: audioOnly, preferSmall: thermalHot)
+    }
+
+    // MARK: Heat
+
+    /// The phone is hot (thermal state serious or critical). The app then asks for the 360p
+    /// picture instead of 2K, which cuts the Wi-Fi and the decoder work, until it cools down.
+    private(set) var thermalHot = false
+
+    private func thermalChanged() {
+        let state = ProcessInfo.processInfo.thermalState
+        let hot = state == .serious || state == .critical
+        guard hot != thermalHot else { return }
+        thermalHot = hot
+        Log.shared.add("thermal state \(state.rawValue): \(hot ? "small picture until the phone cools" : "normal picture")")
+        if client != nil, streamURL(audioOnly: audioOnly) != currentURL { reconnect(why: "thermal state changed") }
     }
 
     private func audioInterrupted(_ note: Notification) {
@@ -674,11 +739,7 @@ final class MonitorEngine: ObservableObject {
         // redraw the monitor. In the background that cost 100 % of a core, and iOS killed the app
         // after 48 s ("cpu usage, 80 % over 60 s", 25 Sep 2026).
         let visible = isForeground || pip.isActive
-        if visible {
-            level = smoothed
-            history.removeFirst()
-            history.append(smoothed)
-        }
+        if visible { levels.push(smoothed) }
 
         if soundStatus == .listening || soundStatus == .silent {
             activityLog.feed(level: smoothed, at: now)
@@ -766,5 +827,22 @@ final class MonitorEngine: ObservableObject {
 
         guard !Self.isDemo else { return }
         activity.update(status: status, enabled: settings.liveActivity)
+    }
+}
+
+/// The loudness for the meters: the waveform, the orb and the glow. It is a separate object
+/// because it changes 10 times a second. Only the views that draw it watch it, so a change
+/// does not make SwiftUI rebuild the whole monitor with its charts and glass panels.
+@MainActor
+final class LevelMeter: ObservableObject {
+    /// The last 6 seconds, oldest first. One value each 0.1 s.
+    @Published private(set) var history: [Float] = Array(repeating: 0, count: 60)
+    var level: Float { history.last ?? 0 }
+
+    func push(_ value: Float) {
+        var h = history
+        h.removeFirst()
+        h.append(value)
+        history = h          // One change, one redraw.
     }
 }
