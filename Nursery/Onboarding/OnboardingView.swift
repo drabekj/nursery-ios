@@ -496,8 +496,9 @@ private struct CameraDetailsPage: View {
                     field("Adresa RTSP", "192.168.0.50:554/live", text: $settings.rtspCustom, keyboard: .URL)
                 } else {
                     field("Adresa kamery", "například 192.168.0.50", text: $settings.rtspHost, keyboard: .numbersAndPunctuation)
-                    Text("Najdete ji v aplikaci kamery pod Informace o zařízení.").font(.footnote).foregroundStyle(.secondary)
-                        .frame(maxWidth: .infinity, alignment: .leading)
+                    FinderSection(port: 554, what: "kameru",
+                                  hint: "Kameru jsme v síti nenašli. Je zapnutá a na stejné Wi-Fi? Adresu najdete také v aplikaci kamery, obvykle pod Informace o zařízení.",
+                                  host: $settings.rtspHost)
                 }
                 field("Uživatel", "uživatel účtu kamery", text: $settings.rtspUser, keyboard: .default)
                 VStack(alignment: .leading, spacing: 6) {
@@ -545,6 +546,9 @@ private struct Go2rtcPage: View {
              }) {
             VStack(alignment: .leading, spacing: 12) {
                 row("Adresa serveru", text: $settings.host)
+                FinderSection(port: 1984, what: "server",
+                              hint: "Server jsme v síti nenašli. Běží na něm go2rtc a je na stejné Wi-Fi?",
+                              host: $settings.host)
                 if manual {
                     row("Stream pro detail", text: $settings.streamMain)
                     row("Běžný stream", text: $settings.streamSmall)

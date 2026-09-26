@@ -48,6 +48,7 @@ import cz.drabek.chuvicka.Settings
 import cz.drabek.chuvicka.WizardEvents
 import cz.drabek.chuvicka.baby.BabyState
 import cz.drabek.chuvicka.parent.BabyFinder
+import cz.drabek.chuvicka.parent.CameraFinder
 import kotlinx.coroutines.delay
 import java.net.URI
 
@@ -493,7 +494,10 @@ private fun CameraStep(frame: Frame, next: () -> Unit) {
         if (other) {
             Field(url, { url = it }, "Adresa streamu", "Začíná rtsp://, najdete ji v návodu ke kameře.", KeyboardType.Uri)
         } else {
-            Field(ip, { ip = it }, "Adresa kamery", "Například 192.168.0.50. Najdete ji v aplikaci kamery pod Informace o zařízení.", KeyboardType.Uri)
+            Field(ip, { ip = it }, "Adresa kamery", "Například 192.168.0.50", KeyboardType.Uri)
+            FinderSection(554, "kameru",
+                "Kameru jsme v síti nenašli. Je zapnutá a na stejné Wi-Fi? Adresu najdete také v aplikaci kamery, obvykle pod Informace o zařízení.",
+                ip) { ip = it }
         }
         Field(user, { user = it }, "Uživatelské jméno")
         Field(password, { password = it }, "Heslo", password = true)
@@ -502,6 +506,50 @@ private fun CameraStep(frame: Frame, next: () -> Unit) {
             Settings.CameraBrand.TAPO -> Note("Účet kamery vytvoříte v aplikaci Tapo: Kamera → Nastavení → Pokročilé → Účet kamery. Není to váš účet Tapo.")
             Settings.CameraBrand.REOLINK -> Note("Kamery Reolink posílají zvuk ve formátu, který Chůvička neumí přehrát. Obraz ale funguje.", colors.warn)
             else -> {}
+        }
+    }
+}
+
+/** "Najít kameru": it searches the home Wi-Fi; one find fills an empty address by itself. */
+@Composable
+private fun FinderSection(port: Int, what: String, hint: String, host: String, pick: (String) -> Unit) {
+    val current by rememberUpdatedState(host)
+    var round by remember { mutableIntStateOf(if (host.isBlank() && !App.demo) 1 else 0) }
+    var searching by remember { mutableStateOf(false) }
+    var found by remember { mutableStateOf<List<CameraFinder.Found>?>(null) }
+    LaunchedEffect(round) {
+        if (round == 0) return@LaunchedEffect
+        searching = true
+        val list = CameraFinder.scan(port)
+        found = list
+        searching = false
+        if (list.size == 1 && current.isBlank()) pick(list[0].host)
+    }
+    Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+        val list = found
+        when {
+            searching -> Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+                CircularProgressIndicator(Modifier.size(18.dp), strokeWidth = 2.dp)
+                Text("Hledám $what v domácí síti…", color = colors.muted, fontSize = 14.sp)
+            }
+            list == null -> SmallButton("Najít $what v domácí síti") { round++ }
+            list.isEmpty() -> {
+                Note(hint)
+                SmallButton("Hledat znovu") { round++ }
+            }
+            else -> {
+                Text(if (list.size == 1) "Našli jsme:" else "Vyberte ji ze seznamu:", color = colors.muted, fontSize = 14.sp, fontWeight = FontWeight.SemiBold)
+                list.forEach { item ->
+                    Row(Modifier.fillMaxWidth().clip(RoundedCornerShape(16.dp)).background(colors.card)
+                        .clickable(onClickLabel = "Použít tuto adresu") { pick(item.host) }.padding(14.dp),
+                        verticalAlignment = Alignment.CenterVertically) {
+                        Text(item.label ?: "Zařízení", color = colors.ink, modifier = Modifier.weight(1f))
+                        Text(item.host, color = colors.muted)
+                        if (current.trim() == item.host) Text("  ✓", color = colors.calm, fontWeight = FontWeight.Bold)
+                    }
+                }
+                SmallButton("Hledat znovu") { round++ }
+            }
         }
     }
 }
@@ -525,6 +573,7 @@ private fun ServerStep(frame: Frame, next: () -> Unit) {
             next()
         }, below = { if (!manual) SmallButton("Upravit streamy ručně") { manual = true } }) {
         Field(host, { host = it }, "Adresa serveru", "Například ${HomeDefaults.SERVER_HOST.ifEmpty { "192.168.0.10" }}", KeyboardType.Uri)
+        FinderSection(1984, "server", "Server jsme v síti nenašli. Běží na něm go2rtc a je na stejné Wi-Fi?", host) { host = it }
         if (manual) {
             Field(main, { main = it }, "Stream pro detail", "Obraz ve vysoké kvalitě")
             Field(small, { small = it }, "Běžný stream", "Pro běžné sledování, režim Jen zvuk a fotku")

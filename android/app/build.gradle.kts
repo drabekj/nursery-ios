@@ -12,8 +12,8 @@ android {
         applicationId = "cz.drabek.chuvicka"
         minSdk = 26          // Android 8: an old phone can be the baby phone.
         targetSdk = 35
-        versionCode = 7
-        versionName = "1.7"
+        versionCode = 8
+        versionName = "1.8"
     }
 
     // The release key comes from CI secrets, so each new APK installs over the old one.
