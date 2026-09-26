@@ -234,9 +234,9 @@ final class Settings: ObservableObject {
     }
 }
 
-/// The pan, the tilt, and the power, through the Home Assistant webhooks.
-/// The webhook ids come from the config file that go2rtc already serves on the LAN.
-/// Thus no id is in the app, and no setup is necessary on a new telephone.
+/// The pan, the tilt, and the power. A camera read directly turns over ONVIF, with its own account.
+/// With go2rtc, through the Home Assistant webhooks: the webhook ids come from the config file that
+/// go2rtc already serves on the LAN. Thus no id is in the app, and no setup is necessary on a new telephone.
 @MainActor
 final class CameraControl: ObservableObject {
     enum Direction: String {
@@ -252,6 +252,9 @@ final class CameraControl: ObservableObject {
     private var ptzID: String? { didSet { ptzReady = ptzID != nil } }
     private var powerID: String? { didSet { powerReady = powerID != nil } }
     private let settings: Settings
+    /// A camera read directly: pan and tilt over ONVIF. The profile token stays in memory only.
+    private var onvif: ONVIFClient?
+    private var bag = Set<AnyCancellable>()
     private let session: URLSession = {
         let c = URLSessionConfiguration.ephemeral
         c.timeoutIntervalForRequest = 4
@@ -263,12 +266,31 @@ final class CameraControl: ObservableObject {
         self.settings = settings
         ptzID = settings.cameraControl ? UserDefaults.standard.string(forKey: "ptzID") : nil
         powerID = settings.cameraControl ? UserDefaults.standard.string(forKey: "powerID") : nil
-        ptzReady = ptzID != nil          // The observers do not run in init.
+        ptzReady = ptzID != nil && settings.cameraKind == .go2rtc     // The observers do not run in init.
         powerReady = powerID != nil
+        // The engine found the camera at a new address: ask the camera there.
+        settings.$rtspHost.dropFirst().removeDuplicates()
+            .debounce(for: .seconds(1), scheduler: DispatchQueue.main)
+            .sink { [weak self] _ in
+                MainActor.assumeIsolated {
+                    guard let self, self.settings.onboarded, self.settings.source == .camera,
+                          self.settings.cameraKind == .rtsp else { return }
+                    Task { await self.loadConfig() }
+                }
+            }
+            .store(in: &bag)
     }
 
-    /// It reads `window.NURSERY_CONFIG = { ptzWebhook: '…', powerWebhook: '…' }`.
+    /// A direct camera: ONVIF GetProfiles. go2rtc: it reads
+    /// `window.NURSERY_CONFIG = { ptzWebhook: '…', powerWebhook: '…' }`.
     func loadConfig() async {
+        // A camera read directly: ONVIF. The switch in the settings is for the server only.
+        if settings.cameraKind == .rtsp {
+            await loadONVIF()
+            return
+        }
+        onvif = nil
+        ptzReady = ptzID != nil
         // Camera control is off in the settings: no aim, no power button.
         guard settings.cameraControl else {
             if ptzID != nil || powerID != nil { Log.shared.add("camera control off") }
@@ -294,6 +316,31 @@ final class CameraControl: ObservableObject {
         }
     }
 
+    /// GetProfiles on the brand's ONVIF port. No PTZ profile, or no answer: no aim button, silently.
+    private func loadONVIF() async {
+        let host = onvifHost
+        let user = settings.rtspUser.trimmingCharacters(in: .whitespaces)
+        guard !host.isEmpty, !user.isEmpty else {
+            onvif = nil
+            ptzReady = false
+            return
+        }
+        let client = ONVIFClient(host: host, port: settings.rtspBrand.onvifPort, user: user, password: CameraSecret.password)
+        onvif = client
+        let token = await client.loadPTZProfile()
+        guard onvif === client else { return }         // A newer load replaced it.
+        ptzReady = token != nil
+        Log.shared.add("camera control ready: ONVIF move \(ptzReady)")
+    }
+
+    /// The camera's address. "Jiná kamera" has it only in its RTSP address.
+    private var onvifHost: String {
+        guard settings.rtspBrand == .other else { return settings.rtspHost.trimmingCharacters(in: .whitespaces) }
+        var s = settings.rtspCustom.trimmingCharacters(in: .whitespaces)
+        if !s.lowercased().hasPrefix("rtsp://") { s = "rtsp://" + s }
+        return URLComponents(string: s)?.host ?? ""
+    }
+
     static func value(of key: String, in text: String) -> String? {
         let pattern = key + #"\s*:\s*['"]([A-Za-z0-9_-]+)['"]"#
         guard let re = try? NSRegularExpression(pattern: pattern),
@@ -302,10 +349,10 @@ final class CameraControl: ObservableObject {
         return String(text[r])
     }
 
-    /// One full-size frame from go2rtc, to save or to share.
-    /// Aim needs the Tapo camera. The iPhone at the baby cannot turn.
+    /// Aim needs a camera that turns (ONVIF, or Home Assistant with go2rtc). The iPhone at the baby cannot turn.
     var canAim: Bool { ptzReady && settings.source == .camera }
 
+    /// One full-size frame, to save or to share: from go2rtc, from the camera itself, or from the phone at the baby.
     func snapshot() async -> UIImage? {
         if MonitorEngine.isDemo { return UIImage(named: "DemoFrame") }
         if settings.source == .phone {
@@ -313,8 +360,11 @@ final class CameraControl: ObservableObject {
             guard let endpoint = settings.babyEndpoint else { return nil }
             return await BabyLink.frame(endpoint: endpoint, code: settings.babyCode)
         }
-        // A camera with no go2rtc gives no photo on request.
-        guard settings.cameraKind == .go2rtc else { return nil }
+        if settings.cameraKind == .rtsp {
+            // One short session on the stream path that the live connection does not use:
+            // the camera serves at most 3 sessions per path (see MonitorEngine.liveDetail).
+            return await FrameGrabber.grab(url: settings.rtspURL(small: MonitorEngine.liveDetail))
+        }
         let src = settings.streamMain          // Always the main stream: a photo should be sharp.
         guard let url = URL(string: "http://\(settings.serverHost):\(Go2rtc.apiPort)/api/frame.jpeg?src=\(src)") else { return nil }
         var req = URLRequest(url: url)
@@ -330,6 +380,19 @@ final class CameraControl: ObservableObject {
     }
 
     func move(_ direction: Direction) async -> Bool {
+        if settings.cameraKind == .rtsp {
+            guard let onvif else { return false }
+            let v: (x: Float, y: Float)
+            switch direction {
+            case .up: v = (0, 0.5)
+            case .down: v = (0, -0.5)
+            case .left: v = (-0.5, 0)
+            case .right: v = (0.5, 0)
+            }
+            let ok = await onvif.step(x: v.x, y: v.y)
+            lastError = ok ? nil : "Kamera se neotočila."
+            return ok
+        }
         guard let ptzID else { return false }
         return await post(ptzID, body: "direction=\(direction.rawValue)")
     }

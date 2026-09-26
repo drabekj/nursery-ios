@@ -5,13 +5,15 @@ import Network
 /// A flag for one resume of a continuation. Only RTSPClient.queue touches it.
 private final class ResumeOnce: @unchecked Sendable { var done = false }
 
-/// A small RTSP client for go2rtc. It uses RTP interleaved over the one TCP connection.
-/// Only go2rtc reads the camera. This client reads the go2rtc restream, never the camera.
+/// A small RTSP client: for go2rtc, for the phone at the baby, and for an IP camera read directly.
+/// It uses RTP interleaved over the one TCP connection.
 ///
 /// All the state is on `queue`. The callbacks also run on `queue`.
 final class RTSPClient: @unchecked Sendable {
     enum Failure: LocalizedError {
         case unreachable(String), closed, timeout(String), status(Int, String), noUsableTrack, badURL
+        /// The camera refused one more session: it serves only a few at a time (Tapo: 3 per stream).
+        case cameraFull
 
         var errorDescription: String? {
             switch self {
@@ -24,6 +26,7 @@ final class RTSPClient: @unchecked Sendable {
             case .status(let code, let reason): return "Server odpověděl \(code) \(reason)."
             case .noUsableTrack: return "Stream nemá video H.264 ani zvuk G.711."
             case .badURL: return "Adresa streamu není platná."
+            case .cameraFull: return "Kameru teď sleduje příliš mnoho telefonů. Zkuste to za chvíli, nebo zavřete Chůvičku na jiném telefonu."
             }
         }
     }
@@ -62,10 +65,16 @@ final class RTSPClient: @unchecked Sendable {
     private var reported: [String] = []
     /// It fails a connect() that still waits, when stop() comes first. Else the caller waits forever.
     private var failConnect: ((Error) -> Void)?
+    /// An IP camera read directly (not go2rtc, not the phone at the baby). It limits the sessions.
+    private let directCamera: Bool
+    /// The TCP connection was ready, PLAY was answered, stop() was called. Only on `queue`.
+    private var connected = false
+    private var playAnswered = false
+    private var stopRequested = false
     /// The addresses that the phone at the baby reported in DESCRIBE, for the time away from home.
     var serverAddresses: [String] { queue.sync { reported } }
 
-    init(url: String, endpoint: NWEndpoint? = nil) throws {
+    init(url: String, endpoint: NWEndpoint? = nil, directCamera: Bool = false) throws {
         guard var u = URLComponents(string: url), u.scheme == "rtsp", let host = u.host else { throw Failure.badURL }
         // The user and the password leave the URL. They go only in the Authorization header,
         // hashed (Digest), after the camera asks for them.
@@ -77,6 +86,7 @@ final class RTSPClient: @unchecked Sendable {
         self.host = host
         self.port = UInt16(u.port ?? 554)
         self.endpoint = endpoint
+        self.directCamera = directCamera && endpoint == nil      // The phone at the baby is never "full".
     }
 
     // MARK: Login (RFC 2617): IP cameras such as Tapo, Hikvision and Dahua ask for it
@@ -142,7 +152,40 @@ final class RTSPClient: @unchecked Sendable {
 
     /// It connects, reads the SDP, sets up the usable tracks, and starts the stream.
     /// `prepare` runs on `queue` before PLAY. Thus the first packet (a keyframe) is not lost.
+    ///
+    /// A camera that serves too many sessions refuses one more: with RTSP 453, or (Tapo) it answers
+    /// DESCRIBE and SETUP and then closes the TCP connection before it answers PLAY.
+    /// For a direct camera, both become `.cameraFull`.
     func start(prepare: @escaping ([Track]) -> Void) async throws -> [Track] {
+        do {
+            return try await play(prepare: prepare)
+        } catch {
+            var status: Int?
+            if case .status(let code, _)? = error as? Failure { status = code }
+            let closedBeforePlay = queue.sync { connected && !playAnswered && !stopRequested } && Self.isClose(error)
+            if Self.isCameraFull(status: status, closedBeforePlay: closedBeforePlay, directCamera: directCamera) {
+                throw Failure.cameraFull
+            }
+            throw error
+        }
+    }
+
+    /// The camera refused the session because it serves too many. It is pure, for the tests.
+    static func isCameraFull(status: Int?, closedBeforePlay: Bool, directCamera: Bool) -> Bool {
+        guard directCamera else { return false }
+        return status == 453 || (status == nil && closedBeforePlay)
+    }
+
+    /// The other side ended the connection: a close, a reset, or a failed connection after it was ready.
+    private static func isClose(_ error: Error) -> Bool {
+        if error is NWError { return true }
+        switch error as? Failure {
+        case .closed?, .unreachable?: return true
+        default: return false
+        }
+    }
+
+    private func play(prepare: @escaping ([Track]) -> Void) async throws -> [Track] {
         try await connect()
         _ = try? await request("OPTIONS", url)
         let describe = try await request("DESCRIBE", url, ["Accept": "application/sdp"])
@@ -175,6 +218,7 @@ final class RTSPClient: @unchecked Sendable {
             queue.async { prepare(ready); cont.resume() }
         }
         _ = try await request("PLAY", url, ["Range": "npt=0.000-"])
+        queue.sync { self.playAnswered = true }
         return tracks
     }
 
@@ -189,6 +233,7 @@ final class RTSPClient: @unchecked Sendable {
 
     func stop() {
         queue.async {
+            self.stopRequested = true
             guard !self.closed else { return }
             if self.session != nil { self.send("TEARDOWN", self.url, [:]) }
             self.finish(nil)
@@ -230,6 +275,7 @@ final class RTSPClient: @unchecked Sendable {
                     switch state {
                     case .ready:
                         self.failConnect = nil
+                        self.connected = true
                         if !once.done { once.done = true; cont.resume(); self.receive() }
                     case .waiting(let error):
                         // A "waiting" connection does not fail by itself. Stop it here.
