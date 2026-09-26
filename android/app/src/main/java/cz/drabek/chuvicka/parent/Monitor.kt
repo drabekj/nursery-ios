@@ -12,6 +12,7 @@ import cz.drabek.chuvicka.App
 import cz.drabek.chuvicka.Go2rtc
 import cz.drabek.chuvicka.HomeDefaults
 import cz.drabek.chuvicka.Log
+import cz.drabek.chuvicka.Net
 import cz.drabek.chuvicka.Settings
 import cz.drabek.chuvicka.proto.AccessUnit
 import cz.drabek.chuvicka.proto.G711
@@ -20,6 +21,7 @@ import cz.drabek.chuvicka.proto.RtpPacket
 import cz.drabek.chuvicka.proto.RtspClient
 import cz.drabek.chuvicka.proto.levelFromRms
 import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.runBlocking
 import java.io.IOException
 import java.net.HttpURLConnection
 import java.net.URL
@@ -77,6 +79,17 @@ object Monitor {
     val foreground = MutableStateFlow(false)
     /** The connection now uses the detail (main) stream of the camera. */
     val detailActive = MutableStateFlow(false)
+    /** A short message for a toast ("Kamera nalezena na nové adrese"). The screen shows it and sets it back to null. */
+    val notice = MutableStateFlow<String?>(null)
+    /** The direct camera can turn (ONVIF PTZ): the screen shows "Natočit". */
+    val ptzReady = MutableStateFlow(false)
+    @Volatile private var onvif: OnvifClient? = null
+    /** The camera control was checked for this connection. open() and reconnect() reset it. */
+    @Volatile private var controlChecked = false
+    /** The camera settings of the last check, to skip a new check after a mere reconnect. */
+    @Volatile private var controlKey: String? = null
+    /** The last search for a camera that moved to a new address (DHCP): at most once a minute. */
+    private var lastRelocation = 0L
 
     /** The screen's video view, while it shows. */
     @Volatile var videoSink: ((AccessUnit, H264Depacketizer) -> Unit)? = null
@@ -204,6 +217,7 @@ object Monitor {
     fun reconnect(why: String) {
         Log.add("reconnect: $why")
         intentional = true
+        controlChecked = false
         client?.close()
     }
 
@@ -242,6 +256,7 @@ object Monitor {
                 connection.value = Connection.Live
                 pause = 1000L
                 failures = 0
+                checkCameraControl()
                 c.play { channel, bytes ->
                     val p = RtpPacket.parse(bytes) ?: return@play
                     if (channel == video?.channel) {
@@ -258,10 +273,22 @@ object Monitor {
                 if (!running) break
                 if (intentional) { intentional = false; continue }
                 failures++
+                if (e is RtspClient.CameraFull) {
+                    // Other phones hold the camera's few sessions: a fixed, longer pause, and words for people.
+                    connection.value = Connection.Retrying(e.message ?: "", failures)
+                    Log.add("camera full, retry in 15 s")
+                    try { Thread.sleep(15_000) } catch (_: InterruptedException) {}
+                    continue
+                }
+                if (relocate(e, failures)) continue
                 val why = (e.message ?: "Spojení se ukončilo.").let {
-                    if (failures >= 2 && Settings.source.value == Settings.Source.CAMERA &&
-                        Settings.cameraKind.value == Settings.KIND_GO2RTC && "Tailscale" !in it)
-                        "$it Mimo domov zapněte v telefonu Tailscale." else it
+                    val camera = failures >= 2 && Settings.source.value == Settings.Source.CAMERA && "Tailscale" !in it
+                    when {
+                        camera && Settings.cameraKind.value == Settings.KIND_GO2RTC -> "$it Mimo domov zapněte v telefonu Tailscale."
+                        camera && Settings.cameraKind.value == Settings.KIND_RTSP ->
+                            "$it Mimo domov to funguje jen přes domácí Tailscale (Nastavení → Pro pokročilé → Mimo domov)."
+                        else -> it
+                    }
                 }
                 Log.add("connection ended: $why")
                 connection.value = Connection.Retrying(why, failures)
@@ -280,11 +307,13 @@ object Monitor {
      * phone at the baby reported at home. The phone that watches must have Tailscale on.
      */
     private fun open(): RtspClient {
+        controlChecked = false
         if (Settings.source.value == Settings.Source.CAMERA) {
             if (Settings.cameraKind.value == Settings.KIND_RTSP) {
-                // An IP camera cannot run Tailscale: only at home.
+                // The camera's LAN address everywhere: away from home the home's Tailscale route reaches it.
+                // viaTailscale is only for the "Cesta" row: Tailscale on and not in the camera's network.
                 Settings.activeHost.value = ""
-                viaTailscale.value = false
+                viaTailscale.value = Net.hasTailscale() && !sameNetwork(cameraHost(), Net.ipv4())
                 return openCamera()
             }
             val home = Settings.host.value.trim()
@@ -323,7 +352,116 @@ object Monitor {
         val url = StreamPolicy.stream(inputs)
         currentUrl = url
         detailActive.value = StreamPolicy.detail(inputs)
-        return RtspClient.forUrl(url)
+        return RtspClient.forUrl(url, directCamera = Settings.cameraKind.value == Settings.KIND_RTSP)
+    }
+
+    /** The host of the direct camera's saved URL, or "" when the URL is not valid. */
+    private fun cameraHost(): String = try {
+        RtspClient.parse(Settings.rtspUrl.value.trim()).host
+    } catch (_: Exception) {
+        ""
+    }
+
+    /** True when one of this phone's private addresses has the camera's first three parts ("192.168.0"). */
+    private fun sameNetwork(host: String, own: List<String>): Boolean {
+        val prefix = host.split(".").take(3).joinToString(".")
+        if (host.isEmpty()) return true
+        return own.filter { isPrivateIpv4(it) }.any { it.split(".").take(3).joinToString(".") == prefix }
+    }
+
+    private fun isPrivateIpv4(ip: String): Boolean {
+        val p = ip.split(".").mapNotNull { it.toIntOrNull() }
+        return p.size == 4 && (p[0] == 10 || (p[0] == 172 && p[1] in 16..31) || (p[0] == 192 && p[1] == 168))
+    }
+
+    /**
+     * The direct camera does not answer at its saved address: maybe the router gave it a new one.
+     * After 2 failures, at most once a minute, look for it on the home Wi-Fi and adopt the new address.
+     * Not for a wrong password (the camera answered) and not for "Jiná kamera" (no known path).
+     */
+    private fun relocate(e: Exception, failures: Int): Boolean {
+        if (failures < 2 || Settings.source.value != Settings.Source.CAMERA || Settings.cameraKind.value != Settings.KIND_RTSP) return false
+        if (Settings.rtspBrand.value == Settings.CameraBrand.OTHER || isLoginError(e)) return false
+        val now = System.currentTimeMillis()
+        if (now - lastRelocation < 60_000) return false
+        lastRelocation = now
+        val found: String? = try {
+            runBlocking { CameraFinder.relocate() }
+        } catch (x: Exception) {
+            Log.add("camera search failed: ${x.javaClass.simpleName}")
+            null
+        }
+        val host = found ?: return false
+        Settings.set(Settings.rtspUrl, "rtspUrl", replaceHost(Settings.rtspUrl.value, host))
+        if (Settings.rtspUrlSmall.value.isNotBlank()) {
+            Settings.set(Settings.rtspUrlSmall, "rtspUrlSmall", replaceHost(Settings.rtspUrlSmall.value, host))
+        }
+        Log.add("camera moved to $host")
+        notice.value = "Kamera nalezena na nové adrese"
+        return true
+    }
+
+    /** The 401 texts of RtspClient: the camera is there, only the login is wrong. */
+    private fun isLoginError(e: Exception): Boolean {
+        val m = e.message ?: return false
+        return e is RtspClient.Failure && (m.startsWith("Kamera nepřijala") || m.startsWith("Kamera chce"))
+    }
+
+    // MARK: The camera control (ONVIF PTZ)
+
+    /** After Live, once per connection: check in a small thread if the camera can turn. The packets do not wait. */
+    private fun checkCameraControl() {
+        if (controlChecked) return
+        controlChecked = true
+        if (Settings.source.value != Settings.Source.CAMERA || Settings.cameraKind.value != Settings.KIND_RTSP) {
+            onvif = null
+            ptzReady.value = false
+            return
+        }
+        // A mere reconnect (a new view) with the same camera settings: the last answer holds.
+        if (controlKey == cameraControlKey() && ptzReady.value) return
+        Thread({
+            try { loadCameraControl() } catch (e: Exception) { Log.add("camera control: ${e.javaClass.simpleName}") }
+        }, "camera-control").apply { isDaemon = true; start() }
+    }
+
+    private fun cameraControlKey(): String =
+        "${Settings.rtspUrl.value.trim()}|${Settings.rtspUser.value}|${Settings.rtspBrand.value}|${Settings.rtspPassword.hashCode()}"
+
+    /**
+     * It asks the direct camera for a profile that can turn (ONVIF GetProfiles on the brand's port).
+     * Blocking: the monitor calls it in a thread, the screen may call it on Dispatchers.IO (after a settings change).
+     */
+    fun loadCameraControl() {
+        if (App.demo || Settings.source.value != Settings.Source.CAMERA || Settings.cameraKind.value != Settings.KIND_RTSP) {
+            onvif = null
+            ptzReady.value = false
+            return
+        }
+        val key = cameraControlKey()
+        val host = cameraHost()
+        if (host.isEmpty()) {
+            onvif = null
+            ptzReady.value = false
+            return
+        }
+        val client = OnvifClient(host, Settings.rtspBrand.value.onvifPort, Settings.rtspUser.value, Settings.rtspPassword)
+        val ready = client.loadPtzProfile() != null
+        onvif = if (ready) client else null
+        ptzReady.value = ready
+        controlKey = key
+        Log.add("camera control ready: ONVIF move $ready")
+    }
+
+    /** One step of the camera (about 0.6 s of turning). Blocking: call it on Dispatchers.IO. */
+    fun move(direction: PtzDirection): Boolean {
+        val (x, y) = when (direction) {
+            PtzDirection.LEFT -> -0.5f to 0f
+            PtzDirection.RIGHT -> 0.5f to 0f
+            PtzDirection.UP -> 0f to 0.5f
+            PtzDirection.DOWN -> 0f to -0.5f
+        }
+        return onvif?.step(x, y) ?: false
     }
 
     private fun awayHint(message: String): String {
@@ -437,7 +575,11 @@ object Monitor {
     fun snapshot(): ByteArray? {
         if (App.demo) return null
         val url = if (Settings.source.value == Settings.Source.CAMERA) {
-            if (Settings.cameraKind.value == Settings.KIND_RTSP) return null      // An IP camera gives no photo here.
+            if (Settings.cameraKind.value == Settings.KIND_RTSP) {
+                // A short session of its own on the OTHER path than the live stream: a camera allows only
+                // about 3 sessions per path, and this phone's live stream holds one of the live path.
+                return FrameGrabber.grab(Settings.cameraUrl(small = detailActive.value))
+            }
             "http://${Settings.serverHost}:${Go2rtc.API_PORT}/api/frame.jpeg?src=${Settings.encode(Settings.streamMain.value.trim().ifEmpty { HomeDefaults.STREAM_MAIN })}"
         } else {
             val (host, port) = babyDirect ?: BabyFinder.resolve(context, Settings.babyName.value) ?: return null
@@ -469,4 +611,13 @@ object Monitor {
         val noise = 0.1f + (Math.random() * 0.05).toFloat()
         return if (t % 12 < 3) max(noise, (kotlin.math.abs(kotlin.math.sin(t * 5.5)) * 0.55 + 0.3).toFloat()) else noise
     }
+}
+
+/**
+ * The URL with a new host: the scheme, the login, the port and the path stay.
+ * "rtsp://u:p@192.168.0.197:554/stream1" with "192.168.0.50" is "rtsp://u:p@192.168.0.50:554/stream1".
+ */
+fun replaceHost(url: String, host: String): String {
+    val m = Regex("^(rtsp://(?:[^@/]+@)?)[^:/]+", RegexOption.IGNORE_CASE).find(url) ?: return url
+    return url.replaceRange(m.range, m.groupValues[1] + host)
 }
