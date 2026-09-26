@@ -1,0 +1,7 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Pláče: a solid disc with the waveform cut out. -->
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="24dp" android:height="24dp" android:viewportWidth="24" android:viewportHeight="24">
+    <path android:fillColor="#FFFFFFFF" android:fillType="evenOdd"
+        android:pathData="M12,1C18.08,1 23,5.92 23,12C23,18.08 18.08,23 12,23C5.92,23 1,18.08 1,12C1,5.92 5.92,1 12,1zM5.6,10h1.6v4h-1.6zM8.4,8h1.6v8h-1.6zM11.2,6h1.6v12h-1.6zM14,8h1.6v8h-1.6zM16.8,10h1.6v4h-1.6z" />
+</vector>

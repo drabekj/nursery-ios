@@ -25,7 +25,7 @@ class App : Application() {
             setShowBadge(false)
         })
         nm.createNotificationChannel(NotificationChannel(CHANNEL_ALERTS, "Výpadek a pláč", NotificationManager.IMPORTANCE_HIGH).apply {
-            description = "Když se přeruší spojení s pokojíčkem nebo když se miminko ozve."
+            description = "Když se přeruší spojení s pokojíčkem nebo když miminko pláče."
         })
     }
 
@@ -82,6 +82,8 @@ object Settings {
     val appearance = MutableStateFlow(Appearance.AUTO)
     /** Warn about every sound, also when the parent hears it. A muted or quiet phone warns always. */
     val alertOnSound = MutableStateFlow(false)
+    /** Warn also about a sound that is not a cry („Miminko se ozývá"). Off: only the cry warns. */
+    val alertOnAnySound = MutableStateFlow(false)
     /** Live sound or muted. It stays as the parent left it. */
     val soundMode = MutableStateFlow(SoundMode.LIVE)
     val unitName = MutableStateFlow("Pokojíček")
@@ -125,6 +127,7 @@ object Settings {
         loudness.value = enumValueOrNull<Loudness>(p.getString("loudness", null)) ?: Loudness.NORMAL
         appearance.value = enumValueOrNull<Appearance>(p.getString("appearance", null)) ?: Appearance.AUTO
         alertOnSound.value = p.getBoolean("alertOnSound", false)
+        alertOnAnySound.value = p.getBoolean("alertOnAnySound", false)
         soundMode.value = enumValueOrNull<SoundMode>(p.getString("soundMode", null)) ?: SoundMode.LIVE
         unitName.value = p.getString("unitName", null) ?: "Pokojíček"
         unitCode.value = p.getString("unitCode", null) ?: newCode().also { p.edit().putString("unitCode", it).apply() }

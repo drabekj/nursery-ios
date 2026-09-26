@@ -152,3 +152,31 @@ class RoomStateMachine(
 
     private fun seconds(now: Long, then: Long) = (now - then) / 1000.0
 }
+
+/**
+ * The line under the word, for the screen and the notification:
+ * calm "ticho už 42 min" (" · nejspíš spí" after 15 min, "ticho od začátku" before any event),
+ * sound "hlasitý zvuk", cry "velmi hlasitý zvuk · už 38 s", lost "spojení vypadlo před 2 min · zkouší se znovu",
+ * connecting "hledám telefon u miminka" or "hledám kameru". [lastHeard]: the last sound packet.
+ */
+fun roomSubline(state: RoomState, now: Long, since: Long, lastEventEnd: Long?, lastHeard: Long,
+                level: RoomLevel, camera: Boolean): String = when (state) {
+    RoomState.CALM -> if (lastEventEnd == null) "ticho od začátku" else {
+        val minutes = ((now - lastEventEnd) / 60_000).coerceAtLeast(1)
+        "ticho už ${minutesText(minutes)}" + if (minutes >= 15) " · nejspíš spí" else ""
+    }
+    RoomState.SOUND -> level.word
+    RoomState.CRY -> {
+        val seconds = ((now - since) / 1000).coerceAtLeast(0)
+        "${level.word} · už " + if (seconds < 60) "$seconds s" else minutesText(seconds / 60)
+    }
+    RoomState.LOST -> "spojení vypadlo před ${minutesText(((now - lastHeard) / 60_000).coerceAtLeast(1))} · zkouší se znovu"
+    RoomState.CONNECTING -> if (camera) "hledám kameru" else "hledám telefon u miminka"
+}
+
+/** "42 min", "1 h 30 min", "2 h". */
+private fun minutesText(minutes: Long): String = when {
+    minutes < 60 -> "$minutes min"
+    minutes % 60 == 0L -> "${minutes / 60} h"
+    else -> "${minutes / 60} h ${minutes % 60} min"
+}

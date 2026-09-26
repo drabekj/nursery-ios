@@ -160,3 +160,35 @@ class RoomStateTest {
         assertEquals("Nehlídá", RoomState.LOST.title)
     }
 }
+
+/** The line under the word. Android only: the iOS view makes its own. */
+class RoomSublineTest {
+    private val now = 10_000_000_000L
+    private fun line(state: RoomState, since: Long = now, end: Long? = null, heard: Long = now,
+                     level: RoomLevel = RoomLevel.LOUD, camera: Boolean = false) =
+        roomSubline(state, now, since, end, heard, level, camera)
+
+    @Test
+    fun calm() {
+        assertEquals("ticho od začátku", line(RoomState.CALM))
+        assertEquals("ticho už 1 min", line(RoomState.CALM, end = now - 10_000))
+        assertEquals("ticho už 14 min", line(RoomState.CALM, end = now - 14 * 60_000))
+        assertEquals("ticho už 42 min · nejspíš spí", line(RoomState.CALM, end = now - 42 * 60_000))
+        assertEquals("ticho už 1 h 30 min · nejspíš spí", line(RoomState.CALM, end = now - 90 * 60_000))
+    }
+
+    @Test
+    fun soundAndCry() {
+        assertEquals("hlasitý zvuk", line(RoomState.SOUND))
+        assertEquals("slabé zvuky", line(RoomState.SOUND, level = RoomLevel.QUIET))
+        assertEquals("velmi hlasitý zvuk · už 38 s", line(RoomState.CRY, since = now - 38_000, level = RoomLevel.VERY_LOUD))
+        assertEquals("hlasitý zvuk · už 2 min", line(RoomState.CRY, since = now - 150_000))
+    }
+
+    @Test
+    fun lostAndConnecting() {
+        assertEquals("spojení vypadlo před 2 min · zkouší se znovu", line(RoomState.LOST, heard = now - 125_000))
+        assertEquals("hledám telefon u miminka", line(RoomState.CONNECTING))
+        assertEquals("hledám kameru", line(RoomState.CONNECTING, camera = true))
+    }
+}

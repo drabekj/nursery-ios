@@ -35,6 +35,8 @@ enum class RoomLevel(val title: String) {
     companion object {
         fun of(v: Float) = when { v < 0.15f -> QUIET; v < 0.45f -> SOME; v < 0.75f -> LOUD; else -> VERY_LOUD }
     }
+    /** The word in lower case, for a subline during a sound ("hlasitý zvuk"). Never "ticho" there. */
+    val word: String get() = if (this == QUIET) SOME.title.lowercase() else title.lowercase()
 }
 
 enum class SoundStatus(val title: String) {
@@ -541,7 +543,7 @@ object Monitor {
             if (lostSince == null) lostSince = now
             if (!alerted && now - lostSince!! > 20_000 && !App.demo) {
                 alerted = true
-                Alerts.loss(context)
+                Alerts.loss(context, lastAudio)
             }
         } else {
             lostSince = null
@@ -600,7 +602,31 @@ object Monitor {
         _roomStateSince.value = since
         _roomState.value = state
         Log.add("room: ${state.title}")
+        if (!App.demo) alert(before, state, since)
     }
+
+    /**
+     * The cry alert, and „se ozývá" only with Settings.alertOnAnySound. Only when the parent may not
+     * hear it: the sound muted, or the phone volume low. With alertOnSound on, warn also then, but
+     * not while the app is on the screen and heard.
+     */
+    private fun alert(before: RoomState, state: RoomState, now: Long) {
+        val unheard = mode.value == SoundMode.OFF || volume.value < 0.2f
+        val wanted = unheard || Settings.alertOnSound.value
+        if (!wanted || (foreground.value && !unheard)) return
+        val event = eventStart ?: now
+        when {
+            state == RoomState.CRY -> Alerts.cry(context, event, roomLevel.value)
+            state == RoomState.SOUND && before != RoomState.CRY && Settings.alertOnAnySound.value ->
+                Alerts.sound(context, event, roomLevel.value)
+        }
+    }
+
+    /** The line under the word: "ticho už 42 min", "hlasitý zvuk", "velmi hlasitý zvuk · už 38 s". */
+    fun subline(now: Long = System.currentTimeMillis()): String = roomSubline(
+        _roomState.value, now, since = _roomStateSince.value, lastEventEnd = _lastEventEnd.value,
+        lastHeard = lastAudio, level = roomLevel.value, camera = Settings.source.value == Settings.Source.CAMERA,
+    )
 
     /** "Ozývá se": a sound above the level of fussing for 1 s, until 4 s of quiet. */
     private fun detectSound(level: Float, now: Long) {
@@ -612,11 +638,6 @@ object Monitor {
                     soundNow.value = true
                     eventStart = aboveSince
                     eventPeak = level
-                    // Warn when the parent may not hear it: the sound muted, or the phone volume low.
-                    // With "every sound" on, warn also then, but not while the app is on the screen and heard.
-                    val unheard = mode.value == SoundMode.OFF || volume.value < 0.2f
-                    val wanted = unheard || Settings.alertOnSound.value
-                    if (wanted && !(foreground.value && !unheard)) Alerts.sound(context)
                 }
             }
             if (soundNow.value) {
