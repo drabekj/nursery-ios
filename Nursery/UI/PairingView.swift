@@ -1,6 +1,6 @@
 import SwiftUI
 
-/// On the parent: find the iPhone at the baby, and pair with its code.
+/// On the parent: find the phone at the baby, and pair with its code.
 struct PairingView: View {
     @EnvironmentObject private var settings: Settings
     @StateObject private var browser = BabyBrowser()
@@ -48,7 +48,7 @@ struct PairingView: View {
             }
 
             Section("Jak na to") {
-                step(1, "Na druhém telefonu (iPhonu nebo Androidu) nainstalujte Chůvičku a otevřete Nastavení → Použít jako telefon u miminka.")
+                step(1, "Na druhém telefonu nainstalujte Chůvičku a zvolte Být u miminka. Může to být iPhone i Android.")
                 step(2, "Položte ho k postýlce, nejlépe naležato a 1–2 metry od miminka, a připojte nabíječku.")
                 step(3, "Klepněte tady na jeho název a zadejte šestimístný kód, který ukazuje.")
             }
@@ -76,7 +76,7 @@ struct PairingView: View {
             }
             Button("Zrušit", role: .cancel) { picking = nil }
         } message: {
-            Text("Zadejte kód, který ukazuje iPhone „\(picking ?? "")“.")
+            Text("Zadejte kód, který ukazuje telefon „\(picking ?? "")“.")
         }
     }
 

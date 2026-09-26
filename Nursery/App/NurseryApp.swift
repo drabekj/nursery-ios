@@ -40,7 +40,7 @@ struct NurseryApp: App {
         _babyUnit = StateObject(wrappedValue: BabyUnit(settings: s))
     }
 
-    /// Light is the default. Night mode and the picture are always dark.
+    /// Automatic is the default. Night mode and the picture are always dark.
     private var scheme: ColorScheme? {
         switch settings.appearance {
         case .light: .light

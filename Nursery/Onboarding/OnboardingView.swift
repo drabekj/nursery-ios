@@ -4,7 +4,7 @@ import UIKit
 
 /// The first-run guide. The benchmark: a mother with a newborn in one arm sets it up with the other.
 /// So: one question per screen, one big button, everyday words, and a live check at each step.
-/// Technical words (RTSP, go2rtc) appear only behind "Pokročilé".
+/// Technical words (RTSP, go2rtc) appear only behind "Jiná kamera" and "Mám vlastní server".
 struct OnboardingView: View {
     @EnvironmentObject private var settings: Settings
     @EnvironmentObject private var unit: BabyUnit
@@ -13,7 +13,7 @@ struct OnboardingView: View {
     enum Step: Hashable {
         case welcome, role
         case babySetup, babyReady
-        case source, pair, cameraBrand, cameraDetails, go2rtc, test, remote, alerts
+        case source, pair, cameraBrand, cameraDetails, go2rtc, test
     }
 
     @State private var path: [Step] = []
@@ -28,7 +28,7 @@ struct OnboardingView: View {
                                         removal: .move(edge: .leading).combined(with: .opacity)))
         }
         .animation(.spring(response: 0.45, dampingFraction: 0.9), value: current)
-        .onAppear(perform: applyDemo)
+        .onAppear(perform: start)
     }
 
     private func go(_ next: Step) {
@@ -63,14 +63,22 @@ struct OnboardingView: View {
         case .cameraBrand: CameraBrandPage(back: back) { go(.cameraDetails) }
         case .cameraDetails: CameraDetailsPage(back: back) { go(.test) }
         case .go2rtc: Go2rtcPage(back: back) { go(.test) }
-        case .test: TestPage(back: back) { go(.remote) }
-        case .remote: RemotePage(back: back) { go(.alerts) }
-        case .alerts: AlertsPage(back: back) {
+        case .test: TestPage(back: back) {
             settings.role = .parent
             settings.onboarded = true
             finish()
         }
         }
+    }
+
+    /// From Settings → Kamera the guide starts at the source step. Zpět still reaches the role.
+    private func start() {
+        if UserDefaults.standard.string(forKey: "wizardStart") == "source" {
+            path = [.welcome, .role]
+            current = .source
+        }
+        UserDefaults.standard.removeObject(forKey: "wizardStart")
+        applyDemo()
     }
 
     /// `-demoScreen wizard-…` opens a step, for the screenshots.
@@ -82,7 +90,6 @@ struct OnboardingView: View {
         case "wizard-pair": current = .pair
         case "wizard-camera": current = .cameraDetails
         case "wizard-test": current = .test
-        case "wizard-remote": current = .remote
         case "wizard-baby": current = .babyReady
         default: break
         }
@@ -339,7 +346,7 @@ private struct SourcePage: View {
     let back: () -> Void
     let choose: (SourceChoice) -> Void
     var body: some View {
-        Page(back: back, title: "Odkud bude obraz a zvuk?", secondary: "Pokročilé: server go2rtc",
+        Page(back: back, title: "Odkud bude obraz a zvuk?", secondary: "Mám vlastní server",
              secondaryAction: { choose(.go2rtc) }) {
             ChoiceCard(symbol: "iphone.gen3", title: "Druhý telefon", subtitle: "Starý telefon postavíte k postýlce. Nejjednodušší.",
                        badge: "Doporučeno") { choose(.phone) }
@@ -366,7 +373,7 @@ private struct PairPage: View {
                 "Telefon ukáže QR kód. Naskenujte ho tady.",
             ])
             if cameraDenied {
-                Label("Chůvička nemá přístup k fotoaparátu. Povolte ho v Nastavení iPhonu, nebo zadejte kód ručně.",
+                Label("Chůvička nemá přístup k fotoaparátu. Povolte ho v Nastavení telefonu, nebo zadejte kód ručně.",
                       systemImage: "camera.fill").font(.subheadline).foregroundStyle(Theme.warn)
             }
         }
@@ -458,8 +465,8 @@ private struct CameraDetailsPage: View {
                 if settings.rtspBrand == .other {
                     field("Adresa RTSP", "192.168.0.50:554/live", text: $settings.rtspCustom, keyboard: .URL)
                 } else {
-                    field("IP adresa kamery", "například 192.168.0.50", text: $settings.rtspHost, keyboard: .numbersAndPunctuation)
-                    Text("Najdete ji v aplikaci kamery, v informacích o zařízení.").font(.footnote).foregroundStyle(.secondary)
+                    field("Adresa kamery", "například 192.168.0.50", text: $settings.rtspHost, keyboard: .numbersAndPunctuation)
+                    Text("Najdete ji v aplikaci kamery pod Informace o zařízení.").font(.footnote).foregroundStyle(.secondary)
                         .frame(maxWidth: .infinity, alignment: .leading)
                 }
                 field("Uživatel", "uživatel účtu kamery", text: $settings.rtspUser, keyboard: .default)
@@ -497,17 +504,27 @@ private struct Go2rtcPage: View {
     @EnvironmentObject private var settings: Settings
     let back: () -> Void
     let next: () -> Void
+    @State private var manual = false
+
     var body: some View {
-        Page(back: back, title: "Server go2rtc", subtitle: "Pro pokročilé: obraz čte počítač v síti a Chůvička ho čte z něj.",
+        Page(back: back, title: "Vlastní server", subtitle: "Počítač v domácí síti, který čte kameru (go2rtc).",
              primary: "Vyzkoušet", primaryAction: {
                 settings.cameraKind = .go2rtc
                 settings.source = .camera
                 next()
              }) {
-            VStack(spacing: 12) {
+            VStack(alignment: .leading, spacing: 12) {
                 row("Adresa serveru", text: $settings.host)
-                row("Hlavní stream", text: $settings.streamMain)
-                row("Malý stream (pro zvuk a fotky)", text: $settings.streamSmall)
+                if manual {
+                    row("Stream pro detail", text: $settings.streamMain)
+                    row("Běžný stream", text: $settings.streamSmall)
+                } else {
+                    Button("Upravit streamy ručně") { manual = true }
+                        .font(.subheadline.weight(.medium))
+                        .tint(Theme.accent)
+                }
+                Text("Chůvička si streamy najde sama při zkoušce spojení.")
+                    .font(.footnote).foregroundStyle(.secondary)
             }
         }
     }
@@ -537,9 +554,10 @@ private struct TestPage: View {
     var body: some View {
         Page(back: back, title: test.passed ? "Hotovo, funguje to!" : (test.running ? "Zkouším spojení…" : "Něco nevyšlo"),
              subtitle: test.passed ? "\(name): obraz i zvuk k vám dorazí." : nil,
-             primary: test.passed ? "Pokračovat" : (test.running ? nil : "Zkusit znovu"),
-             primaryAction: { test.passed ? next() : run() },
-             secondary: !test.passed && !test.running ? "Zpět a upravit" : nil, secondaryAction: back) {
+             primary: test.passed ? "Povolit upozornění a začít" : (test.running ? nil : "Zkusit znovu"),
+             primaryAction: { if test.passed { allowAlerts() } else { run() } },
+             secondary: test.passed ? "Bez upozornění" : (test.running ? nil : "Zpět a upravit"),
+             secondaryAction: { if test.passed { done() } else { back() } }) {
             VStack(alignment: .leading, spacing: 16) {
                 CheckRow(title: "Spojení", step: test.connection)
                 CheckRow(title: "Obraz", step: test.picture)
@@ -547,6 +565,11 @@ private struct TestPage: View {
             }
             .padding(18)
             .glass(in: RoundedRectangle(cornerRadius: 24, style: .continuous))
+            if test.passed {
+                Text("Chůvička vás upozorní, když se miminko ozve nebo když vypadne spojení. I se zamčeným telefonem.")
+                    .font(.subheadline).foregroundStyle(.secondary)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
             if slow && test.running {
                 Text(settings.source == .phone
                      ? "Trvá to dlouho? Zkontrolujte, že druhý telefon vysílá a že jsou oba na stejné Wi-Fi."
@@ -559,114 +582,23 @@ private struct TestPage: View {
 
     private var name: String { settings.source == .phone ? settings.babyName : "Kamera" }
 
+    /// The alerts are offered here, at the end: the parent has just seen it work.
+    private func allowAlerts() {
+        if !MonitorEngine.isDemo { NurseryAlerts.requestPermission() }
+        done()
+    }
+
+    private func done() {
+        UserDefaults.standard.set(true, forKey: "alertOfferShown")
+        next()
+    }
+
     private func run() {
         slow = false
         test.run(settings: settings, wantsPicture: true)
         Task {
             try? await Task.sleep(for: .seconds(10))
             slow = true
-        }
-    }
-}
-
-// MARK: - Away from home
-
-private struct RemotePage: View {
-    @EnvironmentObject private var settings: Settings
-    let back: () -> Void
-    let next: () -> Void
-    @State private var setUp = false
-    @State private var hereOK = false
-    @State private var otherOK = false
-
-    var body: some View {
-        Page(back: back, title: "Dívat se i mimo domov?", subtitle: "Třeba z práce nebo od babičky.",
-             primary: setUp ? "Pokračovat" : "Ano, nastavit", primaryAction: { if setUp { next() } else { setUp = true } },
-             secondary: setUp ? nil : "Teď ne", secondaryAction: next) {
-            Text("Stačí bezplatná aplikace Tailscale. Bezpečně a šifrovaně propojí vaše telefony, obraz nejde přes cizí server. Nastavíte ji jednou.")
-                .font(.body).fixedSize(horizontal: false, vertical: true)
-            if setUp {
-                VStack(alignment: .leading, spacing: 18) {
-                    checklistRow("Tailscale v tomto telefonu", ok: hereOK,
-                                 help: "Nainstalujte Tailscale, přihlaste se a zapněte ho.") {
-                        Link("Stáhnout Tailscale", destination: URL(string: "https://apps.apple.com/app/tailscale/id1470499037")!)
-                            .font(.subheadline.weight(.semibold)).tint(Theme.accent)
-                    }
-                    other
-                }
-                .padding(18)
-                .glass(in: RoundedRectangle(cornerRadius: 24, style: .continuous))
-                Text("Doma se Chůvička připojuje přímo. Tailscale použije sama, až budete pryč.")
-                    .font(.subheadline).foregroundStyle(.secondary)
-            }
-        }
-        .task(id: setUp) {
-            guard setUp else { return }
-            while !Task.isCancelled {
-                hereOK = MonitorEngine.isDemo || Reach.localAddresses().contains(where: Reach.isTailscale)
-                otherOK = await otherCheck()
-                try? await Task.sleep(for: .seconds(2))
-            }
-        }
-    }
-
-    @ViewBuilder private var other: some View {
-        switch (settings.source, settings.cameraKind) {
-        case (.phone, _):
-            checklistRow("Tailscale v telefonu u miminka", ok: otherOK,
-                         help: "Nainstalujte Tailscale i na telefon u miminka, přihlaste se stejným účtem a jednou se k němu připojte doma.") { EmptyView() }
-        case (.camera, .go2rtc):
-            checklistRow("Server přes Tailscale", ok: otherOK, help: "Zadejte název nebo adresu serveru v Tailscale.") {
-                TextField("například raspberrypi", text: $settings.remoteHost)
-                    .textInputAutocapitalization(.never).autocorrectionDisabled()
-                    .padding(12).glass(in: RoundedRectangle(cornerRadius: 14, style: .continuous))
-            }
-        case (.camera, .rtsp):
-            Text("Kamera sama Tailscale spustit neumí. Mimo domov ji uvidíte, jen když obraz poputuje přes druhý telefon nebo přes server go2rtc.")
-                .font(.subheadline).foregroundStyle(.secondary)
-        }
-    }
-
-    private func otherCheck() async -> Bool {
-        if MonitorEngine.isDemo { return true }
-        switch (settings.source, settings.cameraKind) {
-        case (.phone, _): return settings.babyAddresses.contains { Reach.split($0).map { Reach.isTailscale($0.host) } ?? false }
-        case (.camera, .go2rtc):
-            let host = settings.trimmedRemoteHost
-            guard !host.isEmpty else { return false }
-            return await Reach.canConnect(host: host, port: Go2rtc.rtspPort, timeout: 2)
-        case (.camera, .rtsp): return false
-        }
-    }
-
-    private func checklistRow<Extra: View>(_ title: String, ok: Bool, help: String, @ViewBuilder extra: () -> Extra) -> some View {
-        HStack(alignment: .top, spacing: 12) {
-            Image(systemName: ok ? "checkmark.circle.fill" : "circle.dashed")
-                .font(.title3).foregroundStyle(ok ? Theme.calm : Color.secondary).frame(width: 28)
-            VStack(alignment: .leading, spacing: 6) {
-                Text(title).font(.body.weight(.semibold))
-                if !ok { Text(help).font(.subheadline).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true) }
-                extra()
-            }
-        }
-    }
-}
-
-// MARK: - The alerts
-
-private struct AlertsPage: View {
-    let back: () -> Void
-    let done: () -> Void
-    var body: some View {
-        Page(back: back, title: "Upozornění", subtitle: "Chůvička vás upozorní, když se miminko ozve nebo když vypadne spojení. I se zamčeným telefonem.",
-             primary: "Povolit a dokončit", primaryAction: {
-                if !MonitorEngine.isDemo { NurseryAlerts.requestPermission() }
-                UserDefaults.standard.set(true, forKey: "alertOfferShown")
-                done()
-             }, secondary: "Dokončit bez upozornění", secondaryAction: done) {
-            Image(systemName: "bell.badge.fill")
-                .font(.system(size: 72)).foregroundStyle(Theme.accent)
-                .frame(maxWidth: .infinity).padding(.vertical, 20)
         }
     }
 }

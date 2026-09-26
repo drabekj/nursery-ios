@@ -1,7 +1,7 @@
 import SwiftUI
 import UIKit
 
-/// The screen of the iPhone at the baby. Before the start: the pairing code and a few choices.
+/// The screen of the phone at the baby. Before the start: the pairing code and a few choices.
 /// While it sends: a dark screen that gives no light in the nursery, and a tap shows the controls.
 struct BabyUnitView: View {
     @EnvironmentObject private var unit: BabyUnit
@@ -64,7 +64,7 @@ private struct BabySetupView: View {
                     }
                     .buttonStyle(PressScale())
                     .disabled(starting)
-                    Button("Tento iPhone je rodičovský") { confirmParent = true }
+                    Button("Tento telefon je rodičovský") { confirmParent = true }
                         .font(.subheadline)
                         .padding(.bottom, 12)
                 }
@@ -74,10 +74,10 @@ private struct BabySetupView: View {
                 .frame(maxWidth: .infinity)
             }
         }
-        .confirmationDialog("Používat tento iPhone jako rodičovský?", isPresented: $confirmParent, titleVisibility: .visible) {
+        .confirmationDialog("Používat tento telefon jako rodičovský?", isPresented: $confirmParent, titleVisibility: .visible) {
             Button("Ano, bude hlídat") { settings.role = .parent }
         } message: {
-            Text("Chůvička pak na tomto iPhonu ukazuje obraz a zvuk z pokojíčku.")
+            Text("Chůvička pak na tomto telefonu ukazuje obraz a zvuk z pokojíčku.")
         }
     }
 
@@ -88,7 +88,7 @@ private struct BabySetupView: View {
                 .foregroundStyle(Theme.accent)
             Text("Telefon u miminka")
                 .font(.system(.largeTitle, design: .rounded).weight(.semibold))
-            Text("Tento iPhone vysílá obraz a zvuk od postýlky do telefonů rodičů.")
+            Text("Tento telefon vysílá obraz a zvuk od postýlky do telefonů rodičů.")
                 .font(.subheadline)
                 .foregroundStyle(.secondary)
                 .multilineTextAlignment(.center)
@@ -104,7 +104,7 @@ private struct BabySetupView: View {
                 .monospacedDigit()
                 .textSelection(.enabled)
                 .accessibilityLabel("Párovací kód \(settings.unitCode.map(String.init).joined(separator: " "))")
-            Text("Na telefonu rodiče: Nastavení → Zdroj → telefon u miminka.")
+            Text("Na telefonu rodiče: Nastavení → Kamera → Druhý telefon.")
                 .font(.caption)
                 .foregroundStyle(.secondary)
                 .multilineTextAlignment(.center)
@@ -130,23 +130,29 @@ private struct BabySetupView: View {
                 Text("Jen zvuk").tag(false)
             }
             .pickerStyle(.segmented)
-            if settings.unitVideo {
-                LabeledContent("Kamera") {
-                    Picker("Kamera", selection: $settings.unitFront) {
-                        Text("Zadní").tag(false)
-                        Text("Přední").tag(true)
-                    }
-                    .labelsHidden()
-                }
-                Toggle("Otočit obraz o 180°", isOn: $settings.unitFlip)
-            }
             Divider()
-            Toggle(isOn: $settings.unitDirect) {
-                VStack(alignment: .leading, spacing: 2) {
-                    Text("Spojení i bez Wi-Fi")
-                    Text("Pro místa bez Wi-Fi routeru. Stojí víc baterie, proto je běžně vypnuté.")
-                        .font(.caption).foregroundStyle(.secondary)
+            // Rarely needed: out of sight until asked for.
+            DisclosureGroup("Další volby") {
+                VStack(alignment: .leading, spacing: 14) {
+                    if settings.unitVideo {
+                        LabeledContent("Kamera") {
+                            Picker("Kamera", selection: $settings.unitFront) {
+                                Text("Zadní").tag(false)
+                                Text("Přední").tag(true)
+                            }
+                            .labelsHidden()
+                        }
+                        Toggle("Otočit obraz o 180°", isOn: $settings.unitFlip)
+                    }
+                    Toggle(isOn: $settings.unitDirect) {
+                        VStack(alignment: .leading, spacing: 2) {
+                            Text("Spojení i bez Wi-Fi")
+                            Text("Pro místa bez Wi-Fi routeru. Stojí víc baterie, proto je běžně vypnuté.")
+                                .font(.caption).foregroundStyle(.secondary)
+                        }
+                    }
                 }
+                .padding(.top, 10)
             }
         }
         .padding(18)

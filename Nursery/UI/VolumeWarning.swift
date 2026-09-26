@@ -17,7 +17,7 @@ struct VolumeWarning: View {
                     .foregroundStyle(Theme.warn)
                     .frame(width: 28)
                 VStack(alignment: .leading, spacing: 2) {
-                    Text(off ? "Hlasitost iPhonu je vypnutá" : "Hlasitost iPhonu je nízká · \(Int((volume * 100).rounded())) %")
+                    Text(off ? "Hlasitost telefonu je vypnutá" : "Hlasitost telefonu je nízká · \(Int((volume * 100).rounded())) %")
                         .font(.subheadline.weight(.semibold))
                     Text("Pláč nemusíte slyšet. Zesilte tlačítky na boku telefonu, nebo tady.")
                         .font(.caption)
