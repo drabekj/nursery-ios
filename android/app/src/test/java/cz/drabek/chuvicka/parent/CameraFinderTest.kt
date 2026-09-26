@@ -31,4 +31,34 @@ class CameraFinderTest {
         assertEquals("Rtsp Server 3.0", CameraFinder.label(other))
         assertNull(CameraFinder.label("RTSP/1.0 200 OK\r\nCSeq: 1\r\n\r\n"))
     }
+
+    @Test fun wifiWinsOverHotspot() {
+        assertEquals("192.168.0.12" to "192.168.0", CameraFinder.pick(listOf("ap0" to "192.168.43.1", "wlan0" to "192.168.0.12")))
+    }
+
+    @Test fun hotspotWinsOverMobileData() {
+        assertEquals("192.168.43.1" to "192.168.43", CameraFinder.pick(listOf("rmnet0" to "10.12.0.3", "ap0" to "192.168.43.1")))
+    }
+
+    @Test fun anyOtherPrivateAddress() {
+        assertEquals("10.0.0.5" to "10.0.0", CameraFinder.pick(listOf("eth0" to "10.0.0.5")))
+    }
+
+    @Test fun neverMobileData() {
+        assertNull(CameraFinder.pick(listOf("rmnet0" to "10.12.0.3")))
+        assertNull(CameraFinder.pick(listOf("ccmni1" to "10.20.0.3", "pdp0" to "192.168.1.3")))
+    }
+
+    @Test fun neverTheVpn() {
+        assertEquals("10.0.0.5" to "10.0.0", CameraFinder.pick(listOf("tun0" to "100.100.1.1", "eth0" to "10.0.0.5")))
+        assertNull(CameraFinder.pick(listOf("tailscale0" to "10.1.2.3", "tun0" to "100.100.1.1")))
+    }
+
+    @Test fun anotherHostKeepsTheLogin() {
+        assertEquals("rtsp://u%40x:p%3Ass@192.168.0.44:554/stream1",
+            CameraFinder.withHost("rtsp://u%40x:p%3Ass@192.168.0.197:554/stream1", "192.168.0.44"))
+        assertEquals("rtsp://192.168.0.44/cam/realmonitor?channel=1&subtype=0",
+            CameraFinder.withHost("rtsp://192.168.0.197/cam/realmonitor?channel=1&subtype=0", "192.168.0.44"))
+        assertEquals("192.168.0.197", CameraFinder.hostOf("rtsp://u:p@192.168.0.197:554/stream1"))
+    }
 }

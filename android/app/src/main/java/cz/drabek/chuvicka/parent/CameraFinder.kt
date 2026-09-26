@@ -27,34 +27,90 @@ object CameraFinder {
 
     /** All devices that answer on [port], in about 3 s. */
     suspend fun scan(port: Int): List<Found> = withContext(Dispatchers.IO) {
-        val (own, prefix) = homeNetwork() ?: return@withContext emptyList()
-        val hosts = (1..254).map { "$prefix.$it" }.filter { it != own }
-        // At most 48 tries at a time: fast, and gentle with the router.
-        val slots = Semaphore(48)
-        val open = coroutineScope {
-            hosts.map { h -> async { slots.withPermit { if (RtspClient.canConnect(h, port, 800)) h else null } } }.awaitAll()
-        }.filterNotNull()
-        open.sortedBy { it.substringAfterLast('.').toIntOrNull() ?: 0 }.map { h ->
+        openHosts(port).map { h ->
             val answer = if (port == 554) rtspAnswer(h) else null
             Found(h, answer?.let(::brand), answer?.let(::label))
         }.also { Log.add("camera search on port $port: ${it.size} found") }
     }
 
-    /** The Wi-Fi address and its first three parts ("192.168.0"). Wi-Fi first, else any private address. */
+    /** The addresses of the home network (/24) that accept a TCP connection on [port], in order. */
+    private suspend fun openHosts(port: Int): List<String> = withContext(Dispatchers.IO) {
+        val (own, prefix) = homeNetwork() ?: return@withContext emptyList()
+        val hosts = (1..254).map { "$prefix.$it" }.filter { it != own }
+        // At most 48 tries at a time: fast, and gentle with the router.
+        val slots = Semaphore(48)
+        coroutineScope {
+            hosts.map { h -> async { slots.withPermit { if (RtspClient.canConnect(h, port, 800)) h else null } } }.awaitAll()
+        }.filterNotNull().sortedBy { it.substringAfterLast('.').toIntOrNull() ?: 0 }
+    }
+
+    /**
+     * The saved camera no longer answers: it may have a new address from the router. Each device with
+     * port 554 open gets one DESCRIBE with the saved account and the brand's main path; the first that
+     * answers is the camera. Null when none answers, and for "Jiná kamera" (its path is unknown).
+     */
+    suspend fun relocate(): String? = withContext(Dispatchers.IO) {
+        if (Settings.rtspBrand.value == Settings.CameraBrand.OTHER) return@withContext null
+        val saved = Settings.rtspUrl.value.trim()
+        if (saved.isEmpty()) return@withContext null
+        val current = hostOf(saved)
+        val url = Settings.withCredentials(saved, Settings.rtspUser.value, Settings.rtspPassword)
+        for (h in openHosts(554).filter { it != current }) {
+            val ok = try {
+                RtspClient.forUrl(withHost(url, h)).describe()
+                true
+            } catch (_: Exception) {
+                false
+            }
+            if (ok) {
+                Log.add("camera search: found at $h")
+                return@withContext h
+            }
+        }
+        Log.add("camera search: not found")
+        null
+    }
+
+    /** "rtsp://user:pass@192.168.0.5:554/stream1" with another host: "rtsp://user:pass@<host>:554/stream1". */
+    fun withHost(url: String, host: String): String =
+        Regex("^(rtsp://(?:[^@/]+@)?)[^:/]+", RegexOption.IGNORE_CASE).replace(url) { it.groupValues[1] + host }   // Anchored: one match.
+
+    /** "rtsp://user:pass@192.168.0.50:554/stream1" to "192.168.0.50". */
+    fun hostOf(url: String): String =
+        url.substringAfter("://").substringBefore('/').substringAfterLast('@').substringBefore(':')
+
+    /** The address of this phone in the home network and its first three parts ("192.168.0"). */
     fun homeNetwork(): Pair<String, String>? {
-        var wifi: String? = null
-        var other: String? = null
         val interfaces = try { NetworkInterface.getNetworkInterfaces()?.toList() } catch (_: Exception) { null } ?: return null
+        val candidates = ArrayList<Pair<String, String>>()
         for (i in interfaces) {
-            if (!i.isUp || i.isLoopback) continue
+            try {
+                if (!i.isUp || i.isLoopback) continue
+            } catch (_: Exception) {
+                continue
+            }
             for (a in i.inetAddresses.toList()) {
                 if (a !is Inet4Address) continue
                 val ip = a.hostAddress ?: continue
-                if (!isPrivate(ip)) continue
-                if (i.name.startsWith("wlan")) wifi = ip else if (other == null) other = ip
+                candidates.add(i.name to ip)
             }
         }
-        val ip = wifi ?: other ?: return null
+        return pick(candidates)
+    }
+
+    /**
+     * The home network among (interface name, IPv4 address): the Wi-Fi client first, then this phone's
+     * own hotspot, then any other private address. Never the mobile data and never a VPN (Tailscale).
+     * Returns (own address, prefix "192.168.0").
+     */
+    fun pick(candidates: List<Pair<String, String>>): Pair<String, String>? {
+        val hotspots = setOf("ap0", "swlan0", "wlan1")
+        val never = listOf("rmnet", "ccmni", "pdp", "tun", "tailscale")
+        val usable = candidates.filter { (name, ip) -> isPrivate(ip) && never.none { name.startsWith(it) } }
+        val ip = usable.firstOrNull { (name, _) -> name.startsWith("wlan") && name !in hotspots }?.second
+            ?: usable.firstOrNull { (name, ip) -> name in hotspots || ip.startsWith("192.168.43.") || ip.startsWith("172.20.10.") }?.second
+            ?: usable.firstOrNull()?.second
+            ?: return null
         return ip to ip.split(".").take(3).joinToString(".")
     }
 
