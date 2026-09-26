@@ -1,11 +1,7 @@
 package cz.drabek.chuvicka.ui
 
 import android.Manifest
-import android.content.ActivityNotFoundException
-import android.content.Context
-import android.content.Intent
 import android.content.pm.PackageManager
-import android.net.Uri
 import android.os.Build
 import androidx.activity.compose.BackHandler
 import androidx.activity.compose.rememberLauncherForActivityResult
@@ -23,14 +19,11 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.automirrored.filled.KeyboardArrowRight
 import androidx.compose.material.icons.filled.Bedtime
-import androidx.compose.material.icons.filled.CheckCircle
 import androidx.compose.material.icons.filled.ChildCare
 import androidx.compose.material.icons.filled.GraphicEq
 import androidx.compose.material.icons.filled.Lock
 import androidx.compose.material.icons.filled.NotificationsActive
 import androidx.compose.material.icons.filled.PhoneAndroid
-import androidx.compose.material.icons.filled.Public
-import androidx.compose.material.icons.filled.RadioButtonUnchecked
 import androidx.compose.material.icons.filled.Videocam
 import androidx.compose.material.icons.filled.Visibility
 import androidx.compose.material3.*
@@ -49,24 +42,19 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.core.content.ContextCompat
 import cz.drabek.chuvicka.App
-import cz.drabek.chuvicka.Go2rtc
 import cz.drabek.chuvicka.HomeDefaults
-import cz.drabek.chuvicka.Net
 import cz.drabek.chuvicka.PairLink
 import cz.drabek.chuvicka.Settings
 import cz.drabek.chuvicka.WizardEvents
 import cz.drabek.chuvicka.baby.BabyState
 import cz.drabek.chuvicka.parent.BabyFinder
-import cz.drabek.chuvicka.proto.RtspClient
-import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.delay
-import kotlinx.coroutines.withContext
 import java.net.URI
 
 enum class WizardStep {
     WELCOME, ROLE,
     BABY_ROOM, BABY_PERMISSIONS, BABY_DONE,
-    SOURCE, PAIR, SCAN, CAMERA_BRAND, CAMERA, SERVER, TEST, REMOTE, ALERTS,
+    SOURCE, PAIR, SCAN, CAMERA_BRAND, CAMERA, SERVER, TEST,
 }
 
 /** The steps before [step] on its usual path, for the demo screens and the pairing link. */
@@ -76,16 +64,15 @@ private fun pathTo(step: WizardStep): List<WizardStep> = when (step) {
     WizardStep.SOURCE -> listOf(WizardStep.WELCOME, WizardStep.ROLE, WizardStep.SOURCE)
     WizardStep.CAMERA -> listOf(WizardStep.WELCOME, WizardStep.ROLE, WizardStep.SOURCE, WizardStep.CAMERA_BRAND, WizardStep.CAMERA)
     WizardStep.TEST -> listOf(WizardStep.WELCOME, WizardStep.ROLE, WizardStep.SOURCE, WizardStep.PAIR, WizardStep.TEST)
-    WizardStep.REMOTE -> listOf(WizardStep.WELCOME, WizardStep.ROLE, WizardStep.SOURCE, WizardStep.PAIR, WizardStep.TEST, WizardStep.REMOTE)
     else -> listOf(WizardStep.WELCOME, step)
 }
 
-/** The demo screens: "wizard", "wizard-role", "wizard-source", "wizard-camera", "wizard-remote". */
+/** The demo screens: "wizard", "wizard-role", "wizard-source", "wizard-camera", "wizard-test". */
 fun wizardDemoStep(screen: String): WizardStep = when (screen) {
     "wizard-role" -> WizardStep.ROLE
     "wizard-source" -> WizardStep.SOURCE
     "wizard-camera" -> WizardStep.CAMERA
-    "wizard-remote" -> WizardStep.REMOTE
+    "wizard-test" -> WizardStep.TEST
     else -> WizardStep.WELCOME
 }
 
@@ -117,7 +104,7 @@ fun Wizard(startAt: WizardStep, cancel: (() -> Unit)?, startBaby: () -> Unit, do
         }
     }
 
-    val parentDots = listOf(WizardStep.WELCOME, WizardStep.ROLE, WizardStep.SOURCE, WizardStep.PAIR, WizardStep.TEST, WizardStep.REMOTE, WizardStep.ALERTS)
+    val parentDots = listOf(WizardStep.WELCOME, WizardStep.ROLE, WizardStep.SOURCE, WizardStep.PAIR, WizardStep.TEST)
     val babyDots = listOf(WizardStep.WELCOME, WizardStep.ROLE, WizardStep.BABY_ROOM, WizardStep.BABY_PERMISSIONS, WizardStep.BABY_DONE)
     val dotStep = when (step) { WizardStep.SCAN, WizardStep.CAMERA_BRAND, WizardStep.CAMERA, WizardStep.SERVER -> WizardStep.PAIR; else -> step }
     val dots = if (parent) parentDots else babyDots
@@ -154,9 +141,7 @@ fun Wizard(startAt: WizardStep, cancel: (() -> Unit)?, startBaby: () -> Unit, do
         }
         WizardStep.CAMERA -> CameraStep(frame) { go(WizardStep.TEST) }
         WizardStep.SERVER -> ServerStep(frame) { go(WizardStep.TEST) }
-        WizardStep.TEST -> TestStep(frame, fix = ::back) { go(WizardStep.REMOTE) }
-        WizardStep.REMOTE -> RemoteStep(frame, startOpen = App.demo && startAt == WizardStep.REMOTE) { go(WizardStep.ALERTS) }
-        WizardStep.ALERTS -> AlertsStep(frame) { finishParent() }
+        WizardStep.TEST -> TestStep(frame, fix = ::back) { finishParent() }
     }
 }
 
@@ -394,7 +379,7 @@ private fun BabyDoneStep(frame: Frame, startBaby: () -> Unit, done: () -> Unit) 
 
 @Composable
 private fun SourceStep(frame: Frame, phone: () -> Unit, camera: () -> Unit, server: () -> Unit) {
-    StepPage(frame, "Odkud bude obraz a zvuk?", below = { SmallButton("Pokročilé: server go2rtc", server) }) {
+    StepPage(frame, "Odkud bude obraz a zvuk?", below = { SmallButton("Mám vlastní server", server) }) {
         BigCard(Icons.Filled.PhoneAndroid, "Druhý telefon", "Starý telefon postavíte k postýlce. Nejjednodušší.",
             badge = "Doporučeno", big = true, onClick = phone)
         Spacer(Modifier.height(14.dp))
@@ -508,7 +493,7 @@ private fun CameraStep(frame: Frame, next: () -> Unit) {
         if (other) {
             Field(url, { url = it }, "Adresa streamu", "Začíná rtsp://, najdete ji v návodu ke kameře.", KeyboardType.Uri)
         } else {
-            Field(ip, { ip = it }, "IP adresa kamery", "Například 192.168.0.50. Najdete ji v aplikaci kamery.", KeyboardType.Uri)
+            Field(ip, { ip = it }, "Adresa kamery", "Například 192.168.0.50. Najdete ji v aplikaci kamery pod Informace o zařízení.", KeyboardType.Uri)
         }
         Field(user, { user = it }, "Uživatelské jméno")
         Field(password, { password = it }, "Heslo", password = true)
@@ -521,35 +506,46 @@ private fun CameraStep(frame: Frame, next: () -> Unit) {
     }
 }
 
-// MARK: The go2rtc server (for the advanced)
+// MARK: The own server (go2rtc)
 
 @Composable
 private fun ServerStep(frame: Frame, next: () -> Unit) {
     var host by remember { mutableStateOf(Settings.host.value) }
     var main by remember { mutableStateOf(Settings.streamMain.value) }
     var small by remember { mutableStateOf(Settings.streamSmall.value) }
-    StepPage(frame, "Server go2rtc", "Počítač v domácí síti, který čte kameru.", primary = "Vyzkoušet",
-        primaryEnabled = host.isNotBlank() && main.isNotBlank(), onPrimary = {
+    // The test finds the streams itself: the names only by hand, on request.
+    var manual by remember { mutableStateOf(false) }
+    StepPage(frame, "Vlastní server", "Počítač v domácí síti, který čte kameru (go2rtc).", primary = "Vyzkoušet",
+        primaryEnabled = host.isNotBlank() && (!manual || main.isNotBlank()), onPrimary = {
             Settings.set(Settings.host, "host", host.trim())
             Settings.set(Settings.streamMain, "streamMain", main.trim())
             Settings.set(Settings.streamSmall, "streamSmall", small.trim().ifEmpty { main.trim() })
             Settings.set(Settings.cameraKind, "cameraKind", Settings.KIND_GO2RTC)
             Settings.set(Settings.source, "source", Settings.Source.CAMERA)
             next()
-        }) {
+        }, below = { if (!manual) SmallButton("Upravit streamy ručně") { manual = true } }) {
         Field(host, { host = it }, "Adresa serveru", "Například ${HomeDefaults.SERVER_HOST.ifEmpty { "192.168.0.10" }}", KeyboardType.Uri)
-        Field(main, { main = it }, "Hlavní stream", "Obraz ve vysoké kvalitě")
-        Field(small, { small = it }, "Malý stream", "Pro režim Jen zvuk a pro fotku")
+        if (manual) {
+            Field(main, { main = it }, "Stream pro detail", "Obraz ve vysoké kvalitě")
+            Field(small, { small = it }, "Běžný stream", "Pro běžné sledování, režim Jen zvuk a fotku")
+        }
+        Note("Chůvička si streamy najde sama při zkoušce spojení.")
     }
 }
 
 // MARK: The test
 
 @Composable
-private fun TestStep(frame: Frame, fix: () -> Unit, next: () -> Unit) {
+private fun TestStep(frame: Frame, fix: () -> Unit, finish: () -> Unit) {
+    val context = LocalContext.current
     var result by remember { mutableStateOf<TestState?>(null) }
     val phone = Settings.source.collectAsState().value == Settings.Source.PHONE
     val name by Settings.babyName.collectAsState()
+    // The alerts are asked for here, when it works: one screen less.
+    val ask = rememberLauncherForActivityResult(ActivityResultContracts.RequestPermission()) { finish() }
+    val needed = Build.VERSION.SDK_INT >= 33 && !App.demo &&
+        ContextCompat.checkSelfPermission(context, Manifest.permission.POST_NOTIFICATIONS) != PackageManager.PERMISSION_GRANTED
+    val offer = needed || App.demo          // The screenshot shows the question.
     val r = result
     val title = when {
         r == null -> "Zkouším spojení…"
@@ -564,147 +560,24 @@ private fun TestStep(frame: Frame, fix: () -> Unit, next: () -> Unit) {
         else -> "Podívejte se níže, co nefunguje."
     }
     StepPage(frame, title, subtitle,
-        primary = when { r == null -> "Pokračovat"; r.ok -> "Pokračovat"; else -> "Zpět a opravit" },
+        primary = when { r == null -> "Pokračovat"; r.ok && offer -> "Povolit upozornění a začít"; r.ok -> "Začít"; else -> "Zpět a opravit" },
         primaryEnabled = r != null,
-        onPrimary = { if (r != null && !r.ok) fix() else next() },
-        below = { if (r != null && !r.ok) SmallButton("Přesto pokračovat", next) }) {
+        onPrimary = {
+            when {
+                r == null -> {}
+                !r.ok -> fix()
+                needed -> ask.launch(Manifest.permission.POST_NOTIFICATIONS)
+                else -> finish()
+            }
+        },
+        below = {
+            if (r != null && r.ok && offer) SmallButton("Bez upozornění", finish)
+            if (r != null && !r.ok) SmallButton("Přesto pokračovat", finish)
+        }) {
         ConnectionTest(onResult = { result = it })
-    }
-}
-
-// MARK: Away from home
-
-@Composable
-private fun RemoteStep(frame: Frame, startOpen: Boolean, next: () -> Unit) {
-    val context = LocalContext.current
-    val source by Settings.source.collectAsState()
-    val kind by Settings.cameraKind.collectAsState()
-    val ipCamera = source == Settings.Source.CAMERA && kind == Settings.KIND_RTSP
-    var setup by remember { mutableStateOf(startOpen) }
-
-    if (ipCamera) {
-        StepPage(frame, "Dívat se i mimo domov?", "Třeba z práce nebo od babičky.", primary = "Pokračovat", onPrimary = next) {
-            Note("IP kameru Chůvička ukáže jen doma, na stejné Wi-Fi. Do kamery totiž nejde nainstalovat aplikaci, která by ji bezpečně propojila s vaším telefonem.")
+        if (r != null && r.ok) {
             Spacer(Modifier.height(12.dp))
-            Note("Chcete hlídat i na dálku? Použijte místo kamery starý telefon u postýlky. Změníte to kdykoli v Nastavení → Průvodce nastavením.")
+            Bullet(Icons.Filled.NotificationsActive, "Chůvička vás upozorní, když se miminko ozve nebo když vypadne spojení. I se zhasnutým displejem.")
         }
-        return
-    }
-    if (!setup) {
-        StepPage(frame, "Dívat se i mimo domov?", "Třeba z práce nebo od babičky.", primary = "Ano, nastavit", onPrimary = { setup = true },
-            below = {
-                OutlinedButton(onClick = next, Modifier.fillMaxWidth().padding(top = 10.dp).height(56.dp), shape = RoundedCornerShape(20.dp)) {
-                    Text("Teď ne", fontSize = 17.sp, color = colors.ink)
-                }
-            }) {
-            Bullet(Icons.Filled.Public, "Stačí k tomu Tailscale: bezplatná aplikace, která vaše telefony bezpečně propojí.")
-            Bullet(Icons.Filled.Lock, "Vytvoří soukromou šifrovanou síť jen pro vaše zařízení. Obraz nejde přes žádný cizí server.")
-            Spacer(Modifier.height(8.dp))
-            Note("Doma Chůvička funguje i bez toho. Nastavit to můžete kdykoli později.")
-        }
-        return
-    }
-
-    // The checklist, read again every 2 s.
-    var here by remember { mutableStateOf(false) }
-    var serverOk by remember { mutableStateOf(false) }
-    var remoteField by remember { mutableStateOf(Settings.remoteHost.value) }
-    val babyAddresses by Settings.babyAddresses.collectAsState()
-    val babyTailscale = App.demo || babyAddresses.any { RtspClient.isTailscale(it.substringBeforeLast(":")) }
-    LaunchedEffect(Unit) {
-        var n = 0
-        while (true) {
-            if (App.demo) { here = true; serverOk = true }
-            else {
-                here = withContext(Dispatchers.IO) { Net.hasTailscale() }
-                if (Settings.source.value == Settings.Source.CAMERA) {
-                    val h = Settings.remoteHost.value.trim()
-                    serverOk = h.isNotEmpty() && withContext(Dispatchers.IO) { RtspClient.canConnect(h, Go2rtc.RTSP_PORT) }
-                } else if (n % 5 == 0 && !Settings.babyAddresses.value.any { RtspClient.isTailscale(it.substringBeforeLast(":")) }) {
-                    // The phone at the baby tells its new addresses when we connect: ask it now and then.
-                    withContext(Dispatchers.IO) { refreshBabyAddresses(context) }
-                }
-            }
-            n++
-            delay(2000)
-        }
-    }
-    StepPage(frame, "Mimo domov přes Tailscale", "Každý bod se zaškrtne sám, jakmile je hotový.", primary = "Pokračovat", onPrimary = next) {
-        CheckItem(here, "Tailscale v tomto telefonu", if (here) null else "Nainstalujte Tailscale a přihlaste se.") {
-            if (!here) OutlinedButton(onClick = { openTailscaleStore(context) }, Modifier.heightIn(min = 48.dp)) { Text("Stáhnout Tailscale", color = colors.accent) }
-        }
-        Spacer(Modifier.height(12.dp))
-        if (source == Settings.Source.PHONE) {
-            CheckItem(babyTailscale, "Tailscale v telefonu u miminka",
-                if (babyTailscale) null else "Nainstalujte Tailscale i na telefon u miminka, přihlaste se stejným účtem a jednou se k němu připojte doma.")
-        } else {
-            CheckItem(serverOk, "Server přes Tailscale", if (serverOk) null else "Server musí mít Tailscale zapnutý.") {
-                OutlinedTextField(remoteField, { remoteField = it; Settings.set(Settings.remoteHost, "remoteHost", it.trim()) },
-                    Modifier.fillMaxWidth().padding(top = 8.dp), label = { Text("Adresa serveru v Tailscale") },
-                    supportingText = { Text("název zařízení v Tailscale nebo adresa 100.x.y.z") }, singleLine = true,
-                    keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Uri))
-            }
-        }
-        Spacer(Modifier.height(12.dp))
-        Text("Pokračovat můžete i teď. Chůvička mimo domov použije Tailscale sama, jakmile bude všechno zaškrtnuté.",
-            fontSize = 15.sp, color = colors.muted)
-    }
-}
-
-@Composable
-private fun CheckItem(ok: Boolean, title: String, hint: String?, extra: @Composable ColumnScope.() -> Unit = {}) {
-    Row(Modifier.fillMaxWidth().clip(RoundedCornerShape(24.dp)).background(colors.card).padding(16.dp), verticalAlignment = Alignment.Top) {
-        Icon(if (ok) Icons.Filled.CheckCircle else Icons.Filled.RadioButtonUnchecked, if (ok) "Hotovo" else "Zatím ne",
-            Modifier.size(28.dp), tint = if (ok) colors.calm else colors.neutral)
-        Spacer(Modifier.width(14.dp))
-        Column(Modifier.weight(1f)) {
-            Text(title, fontSize = 17.sp, fontWeight = FontWeight.SemiBold, color = colors.ink)
-            if (hint != null) Text(hint, fontSize = 15.sp, lineHeight = 21.sp, color = colors.muted)
-            extra()
-        }
-    }
-}
-
-private fun openTailscaleStore(context: Context) {
-    val market = Intent(Intent.ACTION_VIEW, Uri.parse("market://details?id=com.tailscale.ipn")).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
-    try {
-        context.startActivity(market)
-    } catch (e: ActivityNotFoundException) {
-        try {
-            context.startActivity(Intent(Intent.ACTION_VIEW, Uri.parse("https://play.google.com/store/apps/details?id=com.tailscale.ipn"))
-                .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK))
-        } catch (_: ActivityNotFoundException) {}
-    }
-}
-
-/** A short DESCRIBE to the phone at the baby: it reports its addresses, maybe a new Tailscale one. */
-private fun refreshBabyAddresses(context: Context) {
-    try {
-        val c = testClient(context)
-        try {
-            c.start()
-            if (c.serverAddresses.isNotEmpty()) Settings.setBabyAddresses(c.serverAddresses)
-        } finally {
-            c.close()
-        }
-    } catch (_: Exception) {
-    }
-}
-
-// MARK: The alerts
-
-@Composable
-private fun AlertsStep(frame: Frame, finish: () -> Unit) {
-    val context = LocalContext.current
-    val ask = rememberLauncherForActivityResult(ActivityResultContracts.RequestPermission()) { finish() }
-    val needed = Build.VERSION.SDK_INT >= 33 && !App.demo &&
-        ContextCompat.checkSelfPermission(context, Manifest.permission.POST_NOTIFICATIONS) != PackageManager.PERMISSION_GRANTED
-    StepPage(frame, "Upozornění", "Chůvička vás upozorní, i když bude telefon v kapse nebo se zhasnutým displejem.",
-        primary = if (needed) "Povolit upozornění" else "Hotovo",
-        onPrimary = { if (needed) ask.launch(Manifest.permission.POST_NOTIFICATIONS) else finish() }) {
-        Bullet(Icons.Filled.ChildCare, "Když se miminko ozve a vy máte zvuk ztlumený.")
-        Bullet(Icons.Filled.NotificationsActive, "Když se spojení s pokojíčkem přeruší.")
-        Spacer(Modifier.height(8.dp))
-        if (needed) Note("Telefon se teď zeptá na povolení. Klepněte na Povolit.")
     }
 }

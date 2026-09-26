@@ -16,6 +16,8 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.BatteryChargingFull
+import androidx.compose.material.icons.filled.ExpandLess
+import androidx.compose.material.icons.filled.ExpandMore
 import androidx.compose.material.icons.filled.PhoneAndroid
 import androidx.compose.material.icons.filled.ScreenLockPortrait
 import androidx.compose.material.icons.filled.StayCurrentLandscape
@@ -61,6 +63,7 @@ private fun BabySetup(start: () -> Unit, becomeParent: () -> Unit, openWizard: (
     val front by Settings.unitFront.collectAsState()
     val error by BabyState.error.collectAsState()
     var confirmParent by remember { mutableStateOf(false) }
+    var more by remember { mutableStateOf(false) }
     Column(Modifier.fillMaxSize().background(colors.sky).systemBarsPadding().verticalScroll(rememberScrollState()).padding(20.dp),
         horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.spacedBy(20.dp)) {
         Icon(Icons.Filled.PhoneAndroid, null, Modifier.size(48.dp).padding(top = 8.dp), tint = colors.accent)
@@ -74,7 +77,7 @@ private fun BabySetup(start: () -> Unit, becomeParent: () -> Unit, openWizard: (
             Spacer(Modifier.height(16.dp))
             Text("Nebo zadejte párovací kód", fontWeight = FontWeight.SemiBold, color = colors.muted)
             Text(spaced(code), fontSize = 44.sp, fontWeight = FontWeight.SemiBold, color = colors.ink)
-            Text("Na telefonu rodiče: Nastavení → Zdroj → Telefon u miminka.", fontSize = 12.sp, color = colors.muted, textAlign = TextAlign.Center)
+            Text("Na telefonu rodiče: Nastavení → Kamera → Druhý telefon.", fontSize = 12.sp, color = colors.muted, textAlign = TextAlign.Center)
             TextButton(onClick = { Settings.set(Settings.unitCode, "unitCode", Settings.newCode()) }) { Text("Nový kód") }
         }
 
@@ -89,7 +92,14 @@ private fun BabySetup(start: () -> Unit, becomeParent: () -> Unit, openWizard: (
                     SegmentedButton(!video, { Settings.set(Settings.unitVideo, "unitVideo", false) }, SegmentedButtonDefaults.itemShape(1, 2), colors = segment) { Text("Jen zvuk") }
                 }
             }
-            if (video) Choice("Kamera", listOf(false to "Zadní", true to "Přední"), front) { Settings.set(Settings.unitFront, "unitFront", it) }
+            // The rare choices, folded away.
+            if (video) {
+                Row(Modifier.fillMaxWidth().clickable { more = !more }.padding(16.dp), verticalAlignment = Alignment.CenterVertically) {
+                    Text("Další volby", Modifier.weight(1f), color = colors.ink)
+                    Icon(if (more) Icons.Filled.ExpandLess else Icons.Filled.ExpandMore, if (more) "Skrýt" else "Zobrazit", tint = colors.muted)
+                }
+                if (more) Choice("Kamera", listOf(false to "Zadní", true to "Přední"), front) { Settings.set(Settings.unitFront, "unitFront", it) }
+            }
         }
 
         Column(Modifier.fillMaxWidth(), verticalArrangement = Arrangement.spacedBy(12.dp)) {

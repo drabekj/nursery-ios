@@ -1,8 +1,12 @@
 package cz.drabek.chuvicka.ui
 
 import androidx.compose.ui.platform.LocalConfiguration
+import android.content.Context
+import android.content.Intent
+import android.content.IntentFilter
 import android.content.res.Configuration
 import android.graphics.BitmapFactory
+import android.os.BatteryManager
 import android.view.SurfaceHolder
 import android.view.SurfaceView
 import androidx.compose.animation.AnimatedContent
@@ -17,23 +21,24 @@ import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
 import androidx.compose.animation.togetherWith
 import androidx.compose.foundation.Canvas
-import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
-import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.VolumeOff
 import androidx.compose.material.icons.automirrored.filled.VolumeUp
+import androidx.compose.material.icons.filled.BatteryChargingFull
 import androidx.compose.material.icons.filled.Bedtime
+import androidx.compose.material.icons.filled.BrightnessLow
 import androidx.compose.material.icons.filled.GraphicEq
-import androidx.compose.material.icons.filled.Notifications
+import androidx.compose.material.icons.filled.Info
+import androidx.compose.material.icons.filled.Lock
+import androidx.compose.material.icons.filled.MoreVert
 import androidx.compose.material.icons.filled.PictureInPictureAlt
-import androidx.compose.material.icons.filled.PowerSettingsNew
-import androidx.compose.material.icons.filled.Settings
+import androidx.compose.material.icons.filled.StopCircle
 import androidx.compose.material.icons.filled.Videocam
 import androidx.compose.material.icons.filled.Visibility
 import androidx.compose.material.icons.filled.WifiOff
@@ -72,7 +77,7 @@ import java.util.Date
 import java.util.Locale
 
 @Composable
-fun ParentScreen(openSettings: () -> Unit, pip: Boolean, enterPip: () -> Unit) {
+fun ParentScreen(openSettings: () -> Unit, openHelp: () -> Unit, pip: Boolean, enterPip: () -> Unit) {
     val soundView by Settings.soundView.collectAsState()
     val night by Monitor.night.collectAsState()
     val view = LocalView.current
@@ -93,7 +98,7 @@ fun ParentScreen(openSettings: () -> Unit, pip: Boolean, enterPip: () -> Unit) {
     }
     Box(Modifier.fillMaxSize().background(colors.sky)) {
         Column(Modifier.fillMaxSize().systemBarsPadding().padding(horizontal = 16.dp)) {
-            TopRow(openSettings)
+            TopRow(openSettings, openHelp)
             ViewSwitch(soundView) { on ->
                 Settings.set(Settings.soundView, "soundView", on)
                 Monitor.reconnect(if (on) "sound view" else "picture view")
@@ -114,12 +119,12 @@ fun ParentScreen(openSettings: () -> Unit, pip: Boolean, enterPip: () -> Unit) {
 }
 
 @Composable
-private fun TopRow(openSettings: () -> Unit) {
+private fun TopRow(openSettings: () -> Unit, openHelp: () -> Unit) {
     val connection by Monitor.connection.collectAsState()
     val pictureLive by Monitor.pictureLive.collectAsState()
     val soundView by Settings.soundView.collectAsState()
     val (text, color) = when (val c = connection) {
-        Connection.Live -> (if (pictureLive || soundView) "Živě" else "Čekání na obraz") to (if (pictureLive || soundView) colors.alarm else colors.warn)
+        Connection.Live -> (if (pictureLive || soundView) "Živě" else "Čekání na obraz") to (if (pictureLive || soundView) colors.calm else colors.warn)
         Connection.Connecting, Connection.Idle -> "Připojování" to colors.warn
         is Connection.Retrying -> (if (c.failures >= 2) "Nedostupné" else "Obnovování spojení") to (if (c.failures >= 2) colors.neutral else colors.warn)
     }
@@ -132,19 +137,26 @@ private fun TopRow(openSettings: () -> Unit) {
         }
         Text("Chůvička", Modifier.weight(1f), textAlign = TextAlign.Center, fontWeight = FontWeight.SemiBold, fontSize = 18.sp, color = colors.ink)
         val context = androidx.compose.ui.platform.LocalContext.current
-        // The clear way to stop: no sound, no stream, no notification.
-        IconButton(onClick = {
-            Monitor.night.value = false
-            Monitor.paused.value = true
-            cz.drabek.chuvicka.parent.ParentService.stop(context)
-        }, Modifier.clip(CircleShape).background(colors.card)) {
-            Icon(Icons.Filled.PowerSettingsNew, "Ukončit hlídání", tint = colors.alarm)
-        }
-        Spacer(Modifier.width(8.dp))
-        IconButton(onClick = openSettings, Modifier.clip(CircleShape).background(colors.card)) {
-            Icon(Icons.Filled.Settings, "Nastavení", tint = colors.accent)
+        var menu by remember { mutableStateOf(false) }
+        Box {
+            IconButton(onClick = { menu = true }, Modifier.clip(CircleShape).background(colors.card)) {
+                Icon(Icons.Filled.MoreVert, "Další volby", tint = colors.accent)
+            }
+            DropdownMenu(menu, onDismissRequest = { menu = false }, Modifier.background(colors.card)) {
+                DropdownMenuItem(text = { Text("Nastavení") }, onClick = { menu = false; openSettings() })
+                DropdownMenuItem(text = { Text("Nápověda") }, onClick = { menu = false; openHelp() })
+                HorizontalDivider()
+                DropdownMenuItem(text = { Text("Ukončit hlídání", color = colors.alarm) }, onClick = { menu = false; stopWatching(context) })
+            }
         }
     }
+}
+
+/** Stop the monitor: no sound, no stream, no notification. The paused screen says so. */
+private fun stopWatching(context: Context) {
+    Monitor.night.value = false
+    Monitor.paused.value = true
+    cz.drabek.chuvicka.parent.ParentService.stop(context)
 }
 
 /** "Obraz | Jen zvuk". The chosen side is filled with the moon colour. */
@@ -229,7 +241,10 @@ private fun VideoPlaceholder() {
             Spacer(Modifier.height(8.dp))
             Text(if (source == Settings.Source.PHONE) "Telefon u miminka je nedostupný" else "Kamera je nedostupná",
                 color = Color.White, fontWeight = FontWeight.SemiBold)
-            Text(c.why, color = Color.White.copy(alpha = 0.6f), fontSize = 12.sp, textAlign = TextAlign.Center)
+            // The raw reason is in the technical log.
+            Text(if (source == Settings.Source.PHONE) "Zkontrolujte, že je telefon u miminka zapnutý a na stejné Wi-Fi."
+                 else "Zkontrolujte, že je kamera zapnutá a na stejné Wi-Fi.",
+                color = Color.White.copy(alpha = 0.7f), fontSize = 13.sp, textAlign = TextAlign.Center)
             Spacer(Modifier.height(8.dp))
             Button(onClick = { Monitor.reconnect("user asked") }) { Text("Zkusit znovu") }
         } else {
@@ -253,7 +268,7 @@ private fun SoundStage() {
     Column(horizontalAlignment = Alignment.CenterHorizontally) {
         Box(Modifier.weight(1f).fillMaxWidth(), contentAlignment = Alignment.Center) {
             Orb(Modifier.fillMaxHeight().aspectRatio(1f).widthIn(max = 280.dp)
-                .clickable(enabled = mode == SoundMode.OFF, onClickLabel = "Zapnout zvuk") { Monitor.setMode(SoundMode.LIVE) })
+                .clickable(onClickLabel = "Zvuk") { Monitor.setMode(if (mode == SoundMode.OFF) SoundMode.LIVE else SoundMode.OFF) })
         }
         Spacer(Modifier.height(12.dp))
         RoomWords(center = true)
@@ -332,19 +347,15 @@ private fun PeekCard() {
         }
         Spacer(Modifier.width(14.dp))
         Column(Modifier.weight(1f)) {
-            Text(if (taken > 0) "Fotka z kamery" else "Nahlédnout do postýlky", fontWeight = FontWeight.SemiBold, color = colors.ink)
+            Text("Fotka z postýlky", fontWeight = FontWeight.SemiBold, color = colors.ink)
             val sub = when {
-                unavailable -> "Fotka není k dispozici. Klepněte na živý obraz."
+                unavailable -> "Fotka není k dispozici. Přepněte na Obraz."
                 failed -> "Kamera neodpověděla. Zkuste to znovu."
                 loading -> "Fotím…"
                 taken > 0 -> "${ago(taken)} · klepnutím obnovíte"
                 else -> "Jedna fotka, bez živého obrazu"
             }
             Text(sub, fontSize = 13.sp, color = if (failed) colors.alarm else colors.muted)
-        }
-        IconButton(onClick = { Settings.set(Settings.soundView, "soundView", false); Monitor.reconnect("picture view") },
-            Modifier.clip(CircleShape).background(colors.sky)) {
-            Icon(Icons.Filled.Videocam, "Živý obraz", tint = colors.ink)
         }
     }
 }
@@ -359,35 +370,38 @@ private fun RoomWords(center: Boolean) {
     val soundNow by Monitor.soundNow.collectAsState()
     val lastSound by Monitor.lastSound.collectAsState()
     val loudness by Settings.loudness.collectAsState()
-    val soundView by Settings.soundView.collectAsState()
     val headline = when (status) {
-        SoundStatus.LISTENING, SoundStatus.SILENT -> room.title
+        SoundStatus.LISTENING, SoundStatus.SILENT, SoundStatus.MUTED -> room.title
         SoundStatus.CONNECTING -> "Připojování"
         SoundStatus.LOST -> "Zvuk vypadl"
-        SoundStatus.MUTED -> "Zvuk vypnut"
     }
+    // Only a state that is not the usual one gets a line.
     val sub = when (status) {
-        SoundStatus.LISTENING -> if (loudness == Settings.Loudness.NORMAL) "Živý zvuk" else "Živý zvuk · ${loudness.title} +${loudness.decibels.toInt()} dB"
-        SoundStatus.SILENT -> if (soundView) "Ztlumeno · při pláči přijde upozornění\nZvuk zapnete klepnutím na kruh" else "Ztlumeno · při pláči přijde upozornění"
+        SoundStatus.LISTENING -> if (loudness == Settings.Loudness.NORMAL) "" else "Zesílený zvuk"
+        SoundStatus.SILENT, SoundStatus.MUTED -> "Ztlumeno · při pláči přijde upozornění"
         SoundStatus.CONNECTING -> "Spouštění živého zvuku…"
         SoundStatus.LOST -> "Obnovování spojení…"
-        SoundStatus.MUTED -> if (soundView) "Zapnete ho klepnutím na kruh" else "Zapnete ho tlačítkem Zvuk"
     }
     var now by remember { mutableStateOf(System.currentTimeMillis()) }
     LaunchedEffect(Unit) { while (true) { delay(1000); now = System.currentTimeMillis() } }
-    val last = when {
-        soundNow -> "Ozývá se"
-        lastSound != null -> "Poslední zvuk ${ago(lastSound!!, now)}"
-        else -> "Zatím žádný zvuk"
-    }
-    val headColor = when (status) { SoundStatus.LOST -> colors.alarm; SoundStatus.MUTED, SoundStatus.CONNECTING -> colors.muted; else -> colors.ink }
+    val headColor = when (status) { SoundStatus.LOST -> colors.alarm; SoundStatus.CONNECTING -> colors.muted; else -> colors.ink }
     Column(Modifier.fillMaxWidth(), horizontalAlignment = if (center) Alignment.CenterHorizontally else Alignment.Start) {
         AnimatedContent(headline, transitionSpec = { fadeIn(tween(350)) togetherWith fadeOut(tween(350)) }, label = "headline") {
             Text(it, fontSize = 32.sp, fontWeight = FontWeight.SemiBold, color = headColor, textAlign = if (center) TextAlign.Center else TextAlign.Start)
         }
-        Text(sub, color = colors.muted, textAlign = if (center) TextAlign.Center else TextAlign.Start)
+        if (sub.isNotEmpty()) Text(sub, color = colors.muted, textAlign = if (center) TextAlign.Center else TextAlign.Start)
         Spacer(Modifier.height(6.dp))
-        Text(last, fontSize = 14.sp, fontWeight = FontWeight.SemiBold, color = if (soundNow) colors.warn else colors.ink.copy(alpha = if (mode == SoundMode.OFF) 0.4f else 0.8f))
+        // The one line about the last sound: there is no hour strip on Android.
+        if (soundNow) {
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Box(Modifier.size(8.dp).clip(CircleShape).background(colors.warn))
+                Spacer(Modifier.width(6.dp))
+                Text("Právě se ozývá", fontSize = 14.sp, fontWeight = FontWeight.SemiBold, color = colors.warn)
+            }
+        } else {
+            Text(lastSound?.let { "Poslední zvuk ${ago(it, now)}" } ?: "Zatím žádný zvuk", fontSize = 14.sp, fontWeight = FontWeight.SemiBold,
+                color = colors.ink.copy(alpha = if (mode == SoundMode.OFF) 0.4f else 0.8f))
+        }
     }
 }
 
@@ -411,11 +425,9 @@ private fun VolumeWarning() {
     }
 }
 
-@OptIn(ExperimentalFoundationApi::class)
 @Composable
 private fun ControlBar() {
     val mode by Monitor.mode.collectAsState()
-    var menu by remember { mutableStateOf(false) }
     Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(10.dp)) {
         Box(Modifier.weight(1f)) {
             BarButton(
@@ -424,13 +436,7 @@ private fun ControlBar() {
                 fill = if (mode == SoundMode.OFF) colors.alarm else colors.moon,     // Off is red: nothing plays.
                 ink = if (mode == SoundMode.OFF) Color.White else Color.Black,
                 onClick = { Monitor.setMode(if (mode == SoundMode.OFF) SoundMode.LIVE else SoundMode.OFF) },
-                onLongClick = { menu = true },
             )
-            DropdownMenu(menu, onDismissRequest = { menu = false }) {
-                SoundMode.entries.forEach { m ->
-                    DropdownMenuItem(text = { Text(m.title) }, onClick = { Monitor.setMode(m); menu = false })
-                }
-            }
         }
         Box(Modifier.weight(1f)) {
             BarButton("Noční", Icons.Filled.Bedtime, colors.card, colors.ink,
@@ -439,11 +445,10 @@ private fun ControlBar() {
     }
 }
 
-@OptIn(ExperimentalFoundationApi::class)
 @Composable
-private fun BarButton(title: String, icon: ImageVector, fill: Color, ink: Color, onClick: () -> Unit, onLongClick: (() -> Unit)? = null) {
+private fun BarButton(title: String, icon: ImageVector, fill: Color, ink: Color, onClick: () -> Unit) {
     Column(Modifier.fillMaxWidth().height(68.dp).clip(RoundedCornerShape(24.dp)).background(fill)
-        .combinedClickable(onClick = onClick, onLongClick = onLongClick),
+        .clickable(onClick = onClick),
         horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.Center) {
         Icon(icon, null, tint = ink)
         Spacer(Modifier.height(4.dp))
@@ -453,14 +458,19 @@ private fun BarButton(title: String, icon: ImageVector, fill: Color, ink: Color,
 
 // MARK: Night mode
 
-/** Almost black, at the lowest brightness: the time, the sound, and the state. A tap wakes it. */
+/**
+ * Almost black, at the lowest brightness: the time, the sound, and the state. The first tap shows
+ * the controls for 5 s, the next tap ends Night mode. The explainer shows once, and from the (i) button.
+ */
 @Composable
 fun NightScreen(close: () -> Unit) {
     val history by Monitor.history.collectAsState()
     val status by Monitor.status.collectAsState()
     val soundNow by Monitor.soundNow.collectAsState()
     val volume by Monitor.volume.collectAsState()
+    val mode by Monitor.mode.collectAsState()
     val view = LocalView.current
+    val context = androidx.compose.ui.platform.LocalContext.current
     DisposableEffect(Unit) {
         // The brightness of this window only: the phone's own setting stays as it is.
         val window = (view.context as? android.app.Activity)?.window
@@ -475,19 +485,114 @@ fun NightScreen(close: () -> Unit) {
     }
     var time by remember { mutableStateOf(Date()) }
     LaunchedEffect(Unit) { while (true) { delay(10_000); time = Date() } }
-    Column(Modifier.fillMaxSize().background(Color.Black).clickable { close() }.systemBarsPadding().padding(24.dp),
-        horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.Center) {
-        Text(SimpleDateFormat("H:mm", Locale("cs")).format(time), fontSize = 72.sp, fontWeight = FontWeight.Thin, color = DarkPalette.moon.copy(alpha = 0.22f))
-        Spacer(Modifier.height(24.dp))
-        Box(Modifier.alpha(if (soundNow) 0.95f else 0.55f)) { Waveform(history, Modifier.height(90.dp).padding(horizontal = 16.dp), dim = !soundNow) }
-        Spacer(Modifier.height(24.dp))
-        val low = volume < 0.2f && status == SoundStatus.LISTENING
-        Text(when { low -> "Hlasitost telefonu je nízká"; soundNow -> "Ozývá se"; else -> status.title },
-            color = when { status == SoundStatus.LOST -> DarkPalette.alarm; low -> DarkPalette.warn.copy(alpha = 0.8f); else -> Color.White.copy(alpha = if (soundNow) 0.6f else 0.28f) })
-        Spacer(Modifier.height(60.dp))
-        Text("Můžete zhasnout displej. Zvuk poběží dál. Klepnutím Noční režim ukončíte.", fontSize = 12.sp,
-            color = Color.White.copy(alpha = 0.2f), textAlign = TextAlign.Center)
+    val battery = remember(time) { batteryNow(context) }
+    val prefs = remember { context.getSharedPreferences("settings", Context.MODE_PRIVATE) }
+    // Not in the screenshots: they show the screen itself.
+    var explain by remember { mutableStateOf(!App.demo && !prefs.getBoolean("nightExplained", false)) }
+    // The demo screen "night-controls" shows the controls and keeps them.
+    val demoControls = App.demoScreen == "night-controls"
+    var controls by remember { mutableStateOf(demoControls) }
+    var shown by remember { mutableIntStateOf(0) }
+    LaunchedEffect(shown) { if (shown > 0 && !demoControls) { delay(5_000); controls = false } }
+
+    Box(Modifier.fillMaxSize().background(Color.Black).clickable(enabled = !explain) {
+        if (controls) close() else { controls = true; shown++ }
+    }) {
+        Column(Modifier.fillMaxSize().alpha(if (explain) 0f else 1f).systemBarsPadding().padding(24.dp),
+            horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.Center) {
+            Text(SimpleDateFormat("H:mm", Locale("cs")).format(time), fontSize = 72.sp, fontWeight = FontWeight.Thin, color = DarkPalette.moon.copy(alpha = 0.22f))
+            Spacer(Modifier.height(24.dp))
+            Box(Modifier.alpha(if (soundNow) 0.95f else 0.55f)) { Waveform(history, Modifier.height(90.dp).padding(horizontal = 16.dp), dim = !soundNow) }
+            Spacer(Modifier.height(24.dp))
+            val low = volume < 0.2f && status == SoundStatus.LISTENING
+            Text(when { low -> "Hlasitost telefonu je nízká"; soundNow -> "Ozývá se"; else -> status.title },
+                color = when { status == SoundStatus.LOST -> DarkPalette.alarm; low -> DarkPalette.warn.copy(alpha = 0.8f); else -> Color.White.copy(alpha = if (soundNow) 0.6f else 0.28f) })
+            Spacer(Modifier.height(60.dp))
+            Text(if (controls) "Dalším klepnutím noční režim ukončíte" else "Klepnutím zobrazíte ovládání", fontSize = 12.sp,
+                color = Color.White.copy(alpha = 0.2f), textAlign = TextAlign.Center)
+            val (percent, charging) = battery
+            if (percent >= 0) {
+                Spacer(Modifier.height(10.dp))
+                val lowBattery = percent < 20 && !charging
+                Text(when { charging -> "$percent % · nabíjí se"; lowBattery -> "$percent % · připojte nabíječku"; else -> "$percent %" },
+                    fontSize = 12.sp, color = if (lowBattery) DarkPalette.alarm.copy(alpha = 0.8f) else Color.White.copy(alpha = 0.22f))
+            }
+        }
+        if (!explain) {
+            IconButton(onClick = { explain = true }, Modifier.align(Alignment.TopEnd).systemBarsPadding().padding(8.dp)) {
+                Icon(Icons.Filled.Info, "Jak funguje noční režim", tint = Color.White.copy(alpha = 0.25f))
+            }
+        }
+        AnimatedVisibility(controls && !explain, Modifier.align(Alignment.BottomCenter), enter = fadeIn(), exit = fadeOut()) {
+            Row(Modifier.fillMaxWidth().systemBarsPadding().padding(16.dp), horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+                val muted = mode == SoundMode.OFF
+                NightButton(if (muted) "Ztlumeno" else "Zvuk", if (muted) Icons.AutoMirrored.Filled.VolumeOff else Icons.AutoMirrored.Filled.VolumeUp,
+                    if (muted) DarkPalette.alarm.copy(alpha = 0.85f) else Color.White.copy(alpha = 0.12f), Modifier.weight(1f)) {
+                    Monitor.setMode(if (muted) SoundMode.LIVE else SoundMode.OFF)
+                    shown++                  // The controls stay 5 s more.
+                }
+                NightButton("Ukončit hlídání", Icons.Filled.StopCircle, DarkPalette.alarm.copy(alpha = 0.85f), Modifier.weight(1f)) {
+                    stopWatching(context)
+                }
+            }
+        }
+        if (explain) {
+            NightExplainer(Modifier.align(Alignment.Center)) {
+                prefs.edit().putBoolean("nightExplained", true).apply()
+                explain = false
+            }
+        }
     }
+}
+
+@Composable
+private fun NightButton(title: String, icon: ImageVector, fill: Color, modifier: Modifier, onClick: () -> Unit) {
+    Button(onClick = onClick, modifier.height(56.dp), shape = RoundedCornerShape(18.dp),
+        colors = ButtonDefaults.buttonColors(containerColor = fill, contentColor = Color.White.copy(alpha = 0.85f))) {
+        Icon(icon, null, Modifier.size(20.dp))
+        Spacer(Modifier.width(8.dp))
+        Text(title, fontWeight = FontWeight.SemiBold)
+    }
+}
+
+/** The short explainer of Night mode, the same points as on the iPhone. */
+@Composable
+private fun NightExplainer(modifier: Modifier, done: () -> Unit) {
+    Column(modifier.systemBarsPadding().padding(24.dp).clip(RoundedCornerShape(26.dp)).background(Color(0xFF1C1C1C)).padding(22.dp),
+        verticalArrangement = Arrangement.spacedBy(16.dp)) {
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            Icon(Icons.Filled.Bedtime, null, tint = DarkPalette.moon)
+            Spacer(Modifier.width(10.dp))
+            Text("Noční režim", fontSize = 20.sp, fontWeight = FontWeight.SemiBold, color = DarkPalette.moon)
+        }
+        NightPoint(Icons.Filled.BrightnessLow, "Displej zůstane zapnutý, ale téměř černý a na nejnižším jasu. Telefon se sám nezamkne.")
+        NightPoint(Icons.Filled.GraphicEq, "Zvuk i upozornění běží dál. Obraz se zastaví, aby šetřil baterii.")
+        NightPoint(Icons.Filled.BatteryChargingFull, "Na celou noc připojte nabíječku. Stav baterie vidíte dole.")
+        NightPoint(Icons.Filled.Lock, "Chcete šetřit ještě víc? Telefon klidně zamkněte. Zvuk poběží dál i se zamčenou obrazovkou.")
+        Button(onClick = done, Modifier.fillMaxWidth().height(50.dp), shape = RoundedCornerShape(14.dp),
+            colors = ButtonDefaults.buttonColors(containerColor = DarkPalette.moon, contentColor = Color.Black)) {
+            Text("Rozumím", fontWeight = FontWeight.SemiBold)
+        }
+    }
+}
+
+@Composable
+private fun NightPoint(icon: ImageVector, text: String) {
+    Row(verticalAlignment = Alignment.Top) {
+        Icon(icon, null, Modifier.size(24.dp), tint = Color.White.copy(alpha = 0.7f))
+        Spacer(Modifier.width(12.dp))
+        Text(text, fontSize = 15.sp, color = Color.White.copy(alpha = 0.85f))
+    }
+}
+
+/** The battery in percent (-1 when unknown), and whether it charges. */
+private fun batteryNow(context: Context): Pair<Int, Boolean> {
+    val i = context.registerReceiver(null, IntentFilter(Intent.ACTION_BATTERY_CHANGED))
+    val level = i?.getIntExtra(BatteryManager.EXTRA_LEVEL, -1) ?: -1
+    val scale = i?.getIntExtra(BatteryManager.EXTRA_SCALE, 100) ?: 100
+    val status = i?.getIntExtra(BatteryManager.EXTRA_STATUS, -1) ?: -1
+    val charging = status == BatteryManager.BATTERY_STATUS_CHARGING || status == BatteryManager.BATTERY_STATUS_FULL
+    return (if (level >= 0) level * 100 / maxOf(scale, 1) else -1) to charging
 }
 
 /** The monitor is off. It says so plainly, and one button starts it again. */

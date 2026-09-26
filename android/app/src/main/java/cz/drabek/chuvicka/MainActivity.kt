@@ -21,9 +21,11 @@ import cz.drabek.chuvicka.parent.Monitor
 import cz.drabek.chuvicka.parent.ParentService
 import cz.drabek.chuvicka.ui.BabyScreen
 import cz.drabek.chuvicka.ui.ChuvickaTheme
+import cz.drabek.chuvicka.ui.HelpScreen
 import cz.drabek.chuvicka.ui.LogScreen
 import cz.drabek.chuvicka.ui.PairingScreen
 import cz.drabek.chuvicka.ui.ParentScreen
+import cz.drabek.chuvicka.ui.RemoteScreen
 import cz.drabek.chuvicka.ui.ScannerPage
 import cz.drabek.chuvicka.ui.SettingsScreen
 import cz.drabek.chuvicka.ui.Wizard
@@ -34,6 +36,8 @@ class MainActivity : ComponentActivity() {
     private var pip by mutableStateOf(false)
     /** The first-run wizard, or the wizard again from the settings. */
     private var wizardOpen by mutableStateOf(false)
+    /** Where the wizard starts: the welcome, or the source when the settings change the camera. */
+    private var wizardStart by mutableStateOf(WizardStep.WELCOME)
     private var onPermissions: (() -> Unit)? = null
     private val permissions = registerForActivityResult(ActivityResultContracts.RequestMultiplePermissions()) { result ->
         val then = onPermissions ?: return@registerForActivityResult     // Only the notifications: nothing to do.
@@ -54,7 +58,7 @@ class MainActivity : ComponentActivity() {
             Settings.soundView.value = App.demoScreen == "sound" || App.demoScreen == "sound-dark"
             Settings.appearance.value = if (App.demoScreen.endsWith("dark")) Settings.Appearance.DARK else Settings.Appearance.LIGHT
             Settings.unitCode.value = "482913"
-            if (App.demoScreen == "wizard-remote") Settings.source.value = Settings.Source.PHONE
+            if (App.demoScreen == "wizard-test") Settings.source.value = Settings.Source.PHONE
             if (App.demoScreen == "wizard-camera") Settings.rtspBrand.value = Settings.CameraBrand.TAPO
             if (App.demoScreen == "paused") Monitor.paused.value = true
         }
@@ -70,9 +74,18 @@ class MainActivity : ComponentActivity() {
         setContent {
             val role by Settings.role.collectAsState()
             val appearance by Settings.appearance.collectAsState()
-            var page by remember { mutableStateOf(if (App.demoScreen == "settings") "settings" else "main") }
+            var page by remember {
+                mutableStateOf(when (App.demoScreen) {
+                    "settings", "settings-advanced" -> "settings"
+                    "help" -> "help"
+                    "remote" -> "remote"
+                    else -> "main"
+                })
+            }
+            // The help opens from the monitor (the ⋯ menu) or from the settings: back goes there.
+            var helpFrom by remember { mutableStateOf("settings") }
             BackHandler(!wizardOpen && page != "main") {
-                page = when (page) { "settings" -> "main"; "scan" -> "pairing"; else -> "settings" }
+                page = when (page) { "settings" -> "main"; "scan" -> "pairing"; "help" -> helpFrom; else -> "settings" }
             }
             // The monitor waits while the wizard runs: its connection test needs the camera to itself.
             LaunchedEffect(role, wizardOpen) {
@@ -80,7 +93,7 @@ class MainActivity : ComponentActivity() {
                 else ParentService.stop(this@MainActivity)
             }
             LaunchedEffect(Unit) {
-                if (App.demoScreen == "night") Monitor.night.value = true
+                if (App.demoScreen == "night" || App.demoScreen == "night-controls") Monitor.night.value = true
                 if (App.demoScreen == "baby-live") BabyService.start(this@MainActivity)
             }
             // The status bar icons follow the app's appearance, not the system's.
@@ -94,7 +107,7 @@ class MainActivity : ComponentActivity() {
             ChuvickaTheme(appearance) {
                 when {
                     wizardOpen -> Wizard(
-                        startAt = if (App.demo) wizardDemoStep(App.demoScreen) else WizardStep.WELCOME,
+                        startAt = if (App.demo) wizardDemoStep(App.demoScreen) else wizardStart,
                         cancel = if (Settings.onboarded.value) ({ wizardOpen = false }) else null,
                         startBaby = ::startBaby,
                         done = { page = "main"; wizardOpen = false },
@@ -103,19 +116,23 @@ class MainActivity : ComponentActivity() {
                         start = ::startBaby,
                         stop = { BabyService.stop(this) },
                         becomeParent = { Settings.set(Settings.role, "role", Settings.Role.PARENT) },
-                        openWizard = { wizardOpen = true },
+                        openWizard = { wizardStart = WizardStep.WELCOME; wizardOpen = true },
                     )
                     page == "settings" -> SettingsScreen(
                         back = { page = "main" },
-                        openPairing = { page = "pairing" },
                         openLog = { page = "log" },
                         becomeBaby = { page = "main"; Settings.set(Settings.role, "role", Settings.Role.BABY) },
-                        openWizard = { page = "main"; wizardOpen = true },
+                        // Back out of the wizard returns to the settings; done goes to the monitor.
+                        openWizard = { step -> wizardStart = step; wizardOpen = true },
+                        openHelp = { helpFrom = "settings"; page = "help" },
+                        openRemote = { page = "remote" },
                     )
+                    page == "help" -> HelpScreen(back = { page = helpFrom })
+                    page == "remote" -> RemoteScreen(back = { page = "settings" })
                     page == "pairing" -> PairingScreen(back = { page = "settings" }, openScanner = { page = "scan" })
                     page == "scan" -> ScannerPage(back = { page = "pairing" }, paired = { Monitor.reconnect("paired"); page = "pairing" })
                     page == "log" -> LogScreen(back = { page = "settings" })
-                    else -> ParentScreen(openSettings = { page = "settings" }, pip = pip, enterPip = ::enterPip)
+                    else -> ParentScreen(openSettings = { page = "settings" }, openHelp = { helpFrom = "main"; page = "help" }, pip = pip, enterPip = ::enterPip)
                 }
             }
         }
@@ -147,6 +164,17 @@ class MainActivity : ComponentActivity() {
     private fun enterPip() {
         val (w, h) = Monitor.videoSize.value
         enterPictureInPictureMode(PictureInPictureParams.Builder().setAspectRatio(Rational(w, maxOf(h, 1))).build())
+    }
+
+    /** The monitor knows whether the parent sees the app. */
+    override fun onStart() {
+        super.onStart()
+        Monitor.foreground.value = true
+    }
+
+    override fun onStop() {
+        Monitor.foreground.value = false
+        super.onStop()
     }
 
     /** Home with the picture on: the small window opens, as on the iPhone. */

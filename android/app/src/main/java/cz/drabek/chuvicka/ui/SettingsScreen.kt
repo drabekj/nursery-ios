@@ -13,7 +13,10 @@ import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
+import androidx.compose.material.icons.automirrored.filled.KeyboardArrowRight
 import androidx.compose.material.icons.filled.Check
+import androidx.compose.material.icons.filled.ExpandLess
+import androidx.compose.material.icons.filled.ExpandMore
 import androidx.compose.material.icons.filled.PhoneAndroid
 import androidx.compose.material.icons.filled.QrCodeScanner
 import androidx.compose.material.icons.filled.Share
@@ -26,16 +29,23 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.KeyboardType
+import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import cz.drabek.chuvicka.App
 import cz.drabek.chuvicka.Log
 import cz.drabek.chuvicka.PairLink
 import cz.drabek.chuvicka.Settings
 import cz.drabek.chuvicka.parent.BabyFinder
 import cz.drabek.chuvicka.parent.Monitor
 
+/**
+ * The settings: five rows for everyone, the rest under "Pro pokročilé" (collapsed).
+ * The word Tailscale is only on the "Mimo domov" page.
+ */
 @Composable
-fun SettingsScreen(back: () -> Unit, openPairing: () -> Unit, openLog: () -> Unit, becomeBaby: () -> Unit, openWizard: () -> Unit) {
+fun SettingsScreen(back: () -> Unit, openLog: () -> Unit, becomeBaby: () -> Unit, openWizard: (WizardStep) -> Unit,
+                   openHelp: () -> Unit, openRemote: () -> Unit) {
     val source by Settings.source.collectAsState()
     val cameraKind by Settings.cameraKind.collectAsState()
     val rtspBrand by Settings.rtspBrand.collectAsState()
@@ -44,82 +54,73 @@ fun SettingsScreen(back: () -> Unit, openPairing: () -> Unit, openLog: () -> Uni
     val babyName by Settings.babyName.collectAsState()
     val loudness by Settings.loudness.collectAsState()
     val appearance by Settings.appearance.collectAsState()
-    val alertOnLoss by Settings.alertOnLoss.collectAsState()
-    val remoteHost by Settings.remoteHost.collectAsState()
-    val babyAddresses by Settings.babyAddresses.collectAsState()
+    val alertOnSound by Settings.alertOnSound.collectAsState()
     val viaTailscale by Monitor.viaTailscale.collectAsState()
+    val detailActive by Monitor.detailActive.collectAsState()
     var hostField by remember { mutableStateOf(host) }
-    var remoteField by remember { mutableStateOf(remoteHost) }
     var confirmBaby by remember { mutableStateOf(false) }
+    // The demo screen "settings-advanced" shows the group open.
+    var advanced by remember { mutableStateOf(App.demoScreen == "settings-advanced") }
 
     Page("Nastavení", back) {
-        val babyTailscale = babyAddresses.firstOrNull { cz.drabek.chuvicka.proto.RtspClient.isTailscale(it.substringBeforeLast(":")) }
-        val ipCamera = source == Settings.Source.CAMERA && cameraKind == Settings.KIND_RTSP
-        Section("Zdroj", footer = if (ipCamera)
-            "IP kamera v domácí síti. Mimo domov ji Chůvička neukáže: do kamery nejde nainstalovat Tailscale. Na dálku pomůže druhý telefon u postýlky nebo server go2rtc."
-        else if (source == Settings.Source.CAMERA)
-            "Počítač, na kterém běží go2rtc. Doma se Chůvička připojí na jeho adresu v síti. Mimo domov použije adresu přes Tailscale, když je v telefonu Tailscale zapnutý."
-        else "Druhý telefon s Chůvičkou u postýlky, iPhone nebo Android, posílá obraz a zvuk přímo do tohoto telefonu. " +
-            (if (babyTailscale != null) "Mimo domov přes Tailscale: $babyTailscale."
-             else "Pro hlídání mimo domov nainstalujte Tailscale i na telefon u miminka a jednou se k němu připojte doma.")) {
-            Choice("Obraz a zvuk z", listOf(Settings.Source.CAMERA to "Kamera v pokojíčku", Settings.Source.PHONE to "Telefon u miminka"), source) {
-                Settings.set(Settings.source, "source", it); Monitor.reconnect("source changed")
-            }
-            if (ipCamera) {
-                Row(Modifier.fillMaxWidth().clickable(onClick = openWizard).padding(16.dp), verticalAlignment = Alignment.CenterVertically) {
-                    Column(Modifier.weight(1f)) {
-                        Text("IP kamera ${rtspBrand.title}", color = colors.ink)
-                        Text(rtspUrl, fontSize = 13.sp, color = colors.muted)
-                    }
-                    Text("Změnit", color = colors.accent)
-                }
-            } else if (source == Settings.Source.CAMERA) {
-                OutlinedTextField(hostField, { hostField = it }, Modifier.fillMaxWidth().padding(16.dp), label = { Text("Adresa serveru") },
-                    singleLine = true, keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Uri))
-                OutlinedTextField(remoteField, { remoteField = it }, Modifier.fillMaxWidth().padding(horizontal = 16.dp).padding(bottom = 16.dp),
-                    label = { Text("Mimo domov (Tailscale)") }, singleLine = true, keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Uri))
-                if (hostField.trim() != host || remoteField.trim() != remoteHost) {
-                    TextButton(onClick = {
-                        Settings.set(Settings.host, "host", hostField.trim())
-                        Settings.set(Settings.remoteHost, "remoteHost", remoteField.trim())
-                        Monitor.reconnect("new server address")
-                    }, Modifier.padding(horizontal = 8.dp)) { Text("Použít tyto adresy") }
-                }
-            } else {
-                Row(Modifier.fillMaxWidth().clickable(onClick = openPairing).padding(16.dp), verticalAlignment = Alignment.CenterVertically) {
-                    Text("Telefon u miminka", Modifier.weight(1f), color = colors.ink)
-                    Text(babyName.ifEmpty { "Nespárováno" }, color = colors.accent)
-                }
-            }
+        val go2rtc = source == Settings.Source.CAMERA && cameraKind == Settings.KIND_GO2RTC
+        val camera = when {
+            source == Settings.Source.PHONE -> if (babyName.isEmpty()) "Nespárováno" else "Telefon u miminka „$babyName“"
+            cameraKind == Settings.KIND_RTSP -> "${rtspBrand.title} · ${hostOf(rtspUrl)}"
+            else -> "Server · $host"
         }
-        Section("Stav") {
-            Row(Modifier.fillMaxWidth().padding(16.dp)) {
-                Text("Cesta", Modifier.weight(1f), color = colors.ink)
-                Text(if (viaTailscale) "Přes Tailscale" else "Doma", color = colors.muted)
-            }
+        Section(null) {
+            NavRow("Kamera", camera) { openWizard(WizardStep.SOURCE) }
         }
-        Section("Zvuk", footer = "Zesílená hlasitost přidá 12 dB, maximální 20 dB. Podržením tlačítka Zvuk zvolíte tichý režim: Chůvička nic nehraje, ale při zvuku upozorní.") {
+        Section("Zvuk", footer = "Zesílená se hodí do tichého pokoje. Celkovou hlasitost dál ovládáte tlačítky na boku telefonu.") {
             Choice("Hlasitost", Settings.Loudness.entries.map { it to it.title }, loudness) {
                 Settings.set(Settings.loudness, "loudness", it); Monitor.setGain(it.decibels)
             }
         }
-        Section("Upozornění") {
-            Switchy("Upozornit na výpadek zvuku", alertOnLoss) { Settings.set(Settings.alertOnLoss, "alertOnLoss", it) }
-        }
-        Section("Displej") {
-            Choice("Vzhled", Settings.Appearance.entries.map { it to it.title }, appearance) { Settings.set(Settings.appearance, "appearance", it) }
-        }
-        Section("Průvodce", footer = "Provede vás nastavením krok za krokem, jako při prvním spuštění.") {
-            Row(Modifier.fillMaxWidth().clickable(onClick = openWizard).padding(16.dp)) { Text("Průvodce nastavením", color = colors.ink) }
+        Section("Upozornění", footer = "Na výpadek spojení a na pláč při ztlumeném nebo tichém zvuku Chůvička upozorní vždy. Nejvýš jednou za minutu.") {
+            Switchy("Upozornit na pláč i když zvuk hraje", alertOnSound) { Settings.set(Settings.alertOnSound, "alertOnSound", it) }
         }
         Section("Tento telefon", footer = "Tento telefon pak nehlídá, ale vysílá: jeho kamera a mikrofon budou u postýlky.") {
-            TextButton(onClick = { confirmBaby = true }, Modifier.padding(horizontal = 8.dp)) { Text("Použít jako telefon u miminka") }
+            TextButton(onClick = { confirmBaby = true }, Modifier.padding(horizontal = 8.dp)) { Text("Použít tento telefon u miminka") }
         }
-        Section("Diagnostika") {
-            Row(Modifier.fillMaxWidth().clickable(onClick = openLog).padding(16.dp)) { Text("Technický záznam", color = colors.ink) }
+        Section(null) {
+            NavRow("Nápověda", null, openHelp)
         }
-        Text("Doma jde obraz v domácí síti, mimo domov šifrovaně přes váš Tailscale. Obraz ani zvuk nikdy nejdou přes cizí server.",
-            Modifier.padding(horizontal = 20.dp, vertical = 8.dp), fontSize = 13.sp, color = colors.muted)
+        Section(null) {
+            Row(Modifier.fillMaxWidth().clickable { advanced = !advanced }.padding(16.dp), verticalAlignment = Alignment.CenterVertically) {
+                Text("Pro pokročilé", Modifier.weight(1f), color = colors.ink)
+                Icon(if (advanced) Icons.Filled.ExpandLess else Icons.Filled.ExpandMore, if (advanced) "Skrýt" else "Zobrazit", tint = colors.muted)
+            }
+        }
+        if (advanced) {
+            Section("Displej") {
+                Choice("Vzhled", Settings.Appearance.entries.map { it to it.title }, appearance) { Settings.set(Settings.appearance, "appearance", it) }
+            }
+            Section("Připojení") {
+                if (go2rtc) {
+                    OutlinedTextField(hostField, { hostField = it }, Modifier.fillMaxWidth().padding(16.dp), label = { Text("Adresa doma") },
+                        singleLine = true, keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Uri))
+                    if (hostField.trim() != host) {
+                        TextButton(onClick = {
+                            Settings.set(Settings.host, "host", hostField.trim())
+                            Monitor.reconnect("new server address")
+                        }, Modifier.padding(horizontal = 8.dp)) { Text("Použít tuto adresu") }
+                    }
+                }
+                NavRow("Mimo domov", null, openRemote)
+            }
+            Section("Stav") {
+                StateRow("Cesta", if (viaTailscale) "Mimo domov" else "Doma")
+                StateRow("Obraz", if (detailActive) "detail" else "běžný")
+                TextButton(onClick = { Monitor.reconnect("settings") }, Modifier.padding(horizontal = 8.dp)) { Text("Znovu připojit") }
+            }
+            Section("Diagnostika") {
+                NavRow("Technický záznam", null, openLog)
+                NavRow("Spustit průvodce znovu", null) { openWizard(WizardStep.WELCOME) }
+            }
+        }
+        Text("Doma jde obraz v domácí síti, mimo domov šifrovaně přes vaši soukromou síť. Obraz ani zvuk nikdy nejdou přes cizí server.",
+            Modifier.padding(horizontal = 20.dp, vertical = 12.dp), fontSize = 13.sp, color = colors.muted)
     }
     if (confirmBaby) AlertDialog(
         onDismissRequest = { confirmBaby = false },
@@ -129,6 +130,10 @@ fun SettingsScreen(back: () -> Unit, openPairing: () -> Unit, openLog: () -> Uni
         dismissButton = { TextButton(onClick = { confirmBaby = false }) { Text("Zrušit") } },
     )
 }
+
+/** "rtsp://192.168.0.50:554/stream1" to "192.168.0.50". */
+private fun hostOf(url: String): String =
+    url.substringAfter("://").substringBefore('/').substringAfterLast('@').substringBefore(':').ifEmpty { url }
 
 /** On the parent: find the phone at the baby with mDNS, and pair with its code. */
 @Composable
@@ -253,8 +258,9 @@ private fun Header(title: String, back: () -> Unit, actions: @Composable () -> U
 }
 
 @Composable
-fun Section(title: String, footer: String? = null, content: @Composable ColumnScope.() -> Unit) {
-    Text(title, Modifier.padding(start = 20.dp, top = 18.dp, bottom = 6.dp), fontWeight = FontWeight.SemiBold, color = colors.muted)
+fun Section(title: String?, footer: String? = null, content: @Composable ColumnScope.() -> Unit) {
+    if (title != null) Text(title, Modifier.padding(start = 20.dp, top = 18.dp, bottom = 6.dp), fontWeight = FontWeight.SemiBold, color = colors.muted)
+    else Spacer(Modifier.height(18.dp))
     Column(Modifier.padding(horizontal = 16.dp).fillMaxWidth().clip(RoundedCornerShape(20.dp)).background(colors.card), content = content)
     if (footer != null) Text(footer, Modifier.padding(horizontal = 20.dp, vertical = 6.dp), fontSize = 13.sp, color = colors.muted)
 }
@@ -278,6 +284,25 @@ fun Switchy(label: String, on: Boolean, set: (Boolean) -> Unit) {
     Row(Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 8.dp), verticalAlignment = Alignment.CenterVertically) {
         Text(label, Modifier.weight(1f), color = colors.ink)
         Switch(on, set, colors = SwitchDefaults.colors(checkedTrackColor = colors.accent))
+    }
+}
+
+/** A row that opens a page: the label, the value, and an arrow. */
+@Composable
+private fun NavRow(label: String, value: String?, onClick: () -> Unit) {
+    Row(Modifier.fillMaxWidth().clickable(onClick = onClick).padding(16.dp), verticalAlignment = Alignment.CenterVertically) {
+        Text(label, color = colors.ink)
+        Spacer(Modifier.width(12.dp))
+        Text(value ?: "", Modifier.weight(1f), color = colors.muted, textAlign = TextAlign.End)
+        Icon(Icons.AutoMirrored.Filled.KeyboardArrowRight, null, tint = colors.muted)
+    }
+}
+
+@Composable
+private fun StateRow(label: String, value: String) {
+    Row(Modifier.fillMaxWidth().padding(16.dp)) {
+        Text(label, Modifier.weight(1f), color = colors.ink)
+        Text(value, color = colors.muted)
     }
 }
 
