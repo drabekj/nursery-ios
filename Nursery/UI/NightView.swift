@@ -11,6 +11,9 @@ private let demoControls = MonitorEngine.isDemo && UserDefaults.standard.string(
 /// - The screen stays on at the minimum brightness, almost black. The phone does not lock by itself.
 /// - The picture stops (sound only), which saves the battery. The sound and the alerts continue.
 /// - A sound makes the waveform brighter for its length.
+/// - The state of the room as a tint, not as paint: the glyph at 45 % and the word at 60 % of the
+///   state colour, on black. Black stays black. "Pláče": the glyph at 65 %, the disc pulses, and the
+///   screen lifts from 0.01 to 0.08 brightness (unless the parent moved the slider in this session).
 /// - A tap shows Zvuk, Rozsvítit and Ukončit hlídání for 5 s. A tap beside them hides them again:
 ///   a missed button must never light the screen. Only Rozsvítit leaves Night mode.
 ///   Locking the phone is still fine: the sound continues.
@@ -27,6 +30,11 @@ struct NightView: View {
     /// The row with Zvuk, Rozsvítit and Ukončit hlídání. A tap shows it for 5 s.
     @State private var controls = demoControls
     @State private var hideTask: Task<Void, Never>?
+    /// The brightness this view set last. Another value on the screen means the parent moved the
+    /// slider: then the cry lift leaves the brightness alone for the rest of this Night session.
+    @State private var setBrightness: CGFloat?
+    @State private var parentSetBrightness = false
+    @State private var liftTask: Task<Void, Never>?
 
     var body: some View {
         let sound = activity.current != nil
@@ -40,17 +48,12 @@ struct NightView: View {
                         .monospacedDigit()
                         .foregroundStyle(Theme.moon.opacity(0.22))
                 }
+                stateBlock
                 LiveWaveform(levels: engine.levels, dim: !sound)
                     .frame(height: 90)
                     .padding(.horizontal, 36)
                     .opacity(sound ? 0.95 : 0.55)
                     .animation(.easeInOut(duration: 0.6), value: sound)
-                Label(statusText, systemImage: Theme.symbol(for: engine.soundStatus))
-                    .font(.subheadline.weight(.medium))
-                    // A fault stays bright. A normal state stays dim.
-                    .foregroundStyle(engine.soundStatus == .lost ? Theme.alarm
-                                     : engine.volumeLow ? Theme.warn.opacity(0.8)
-                                     : Color.white.opacity(sound ? 0.6 : 0.28))
                 Spacer()
                 batteryLine
                 if controls {
@@ -100,6 +103,15 @@ struct NightView: View {
         .accessibilityAddTraits(.isButton)
         .accessibilityLabel(controls ? "Noční režim. \(statusText). Dvojitým klepnutím tlačítka skryjete. Noční režim ukončí tlačítko Rozsvítit."
                                      : "Noční režim. \(statusText). Dvojitým klepnutím zobrazíte tlačítka Zvuk, Rozsvítit a Ukončit hlídání.")
+        .modifier(StateAnnouncements(state: engine.roomState))
+        .onChange(of: engine.roomState) { old, new in
+            // The lamp: a dim wine glow on the night table while the baby cries.
+            if new == .cry {
+                lift(to: 0.08, after: 0)
+            } else if old == .cry {
+                lift(to: 0.01, after: 30)
+            }
+        }
         .onAppear {
             engine.setNightMode(true)
             UIApplication.shared.isIdleTimerDisabled = true      // The phone does not lock by itself.
@@ -107,6 +119,7 @@ struct NightView: View {
         }
         .onDisappear {
             hideTask?.cancel()
+            liftTask?.cancel()
             engine.setNightMode(false)
             UIApplication.shared.isIdleTimerDisabled = settings.keepAwake
             restore()
@@ -115,11 +128,47 @@ struct NightView: View {
         .onReceive(NotificationCenter.default.publisher(for: UIApplication.didBecomeActiveNotification)) { _ in dim() }
     }
 
-    private var statusText: String {
-        // Muted still listens. A lost sound says so, muted or not.
-        if engine.mode == .off, engine.soundStatus != .lost { return "Ztlumeno · na pláč upozorní" }
+    /// The state, the word and the subline, above the waveform. Tint, not paint: black stays black.
+    private var stateBlock: some View {
+        let state = engine.roomState
+        let accent = Theme.nightAccent(for: state)
+        // "Nehlídá" is a fault: alarm red at 60 %. "Pláče" is brighter than the calm states.
+        let glyph = state == .cry ? 0.65 : state == .lost ? 0.6 : 0.45
+        return VStack(spacing: 10) {
+            // Only the cry moves at night: a breath or ripples all night would keep SwiftUI drawing.
+            StateGlyph(state: state, diameter: 104, color: accent, motion: state == .cry)
+                .opacity(glyph)
+                .id(state)
+            Text(state.title)
+                .font(.system(size: 56, weight: .semibold, design: .rounded))
+                .minimumScaleFactor(0.6)
+                .lineLimit(1)
+                .foregroundStyle(accent.opacity(0.6))
+                .contentTransition(.opacity)
+            StateSubline(color: .white.opacity(0.4), font: .subheadline)
+            if let modifier = modifierText {
+                Text(modifier)
+                    .font(.footnote.weight(.medium))
+                    .foregroundStyle(engine.volumeLow ? Theme.warn.opacity(0.8) : Color.white.opacity(0.3))
+            }
+        }
+        .multilineTextAlignment(.center)
+        .padding(.horizontal, 24)
+        .animation(.easeInOut(duration: 0.35), value: state)
+        .accessibilityHidden(true)          // The whole screen has one label (below).
+    }
+
+    /// Muted still listens. A lost sound says so, muted or not.
+    private var modifierText: String? {
+        if engine.roomState == .lost || engine.roomState == .connecting { return nil }
         if engine.volumeLow { return "Hlasitost telefonu je nízká" }
-        return activity.current != nil ? "Ozývá se" : engine.soundStatus.title
+        if engine.mode == .off { return "Ztlumeno · na pláč upozorní" }
+        return nil
+    }
+
+    private var statusText: String {
+        let text = StateText.accessibility(engine, source: settings.source)
+        return modifierText.map { "\(text). \($0)" } ?? text
     }
 
     /// Zvuk, Rozsvítit and Ukončit hlídání. Dim too: the room is dark, and the parent needs them only for a moment.
@@ -196,12 +245,46 @@ struct NightView: View {
     private func dim() {
         guard !MonitorEngine.isDemo else { return }
         if savedBrightness == nil { savedBrightness = UIScreen.main.brightness }
-        UIScreen.main.brightness = 0.01
+        UIScreen.main.brightness = engine.roomState == .cry && !parentSetBrightness ? 0.08 : 0.01
+        setBrightness = UIScreen.main.brightness
     }
 
     private func restore() {
+        liftTask?.cancel()
         if let savedBrightness { UIScreen.main.brightness = savedBrightness }
         savedBrightness = nil
+    }
+
+    /// The parent moved the brightness since this view last set it.
+    private func parentMoved() -> Bool {
+        if !parentSetBrightness, let setBrightness, abs(UIScreen.main.brightness - setBrightness) > 0.02 {
+            parentSetBrightness = true
+            Log.shared.add("night: the parent set the brightness, no cry lift")
+        }
+        return parentSetBrightness
+    }
+
+    /// It moves the brightness to `target` over 2 s, after `delay`. Only while Night mode has dimmed
+    /// the screen, and never after the parent chose a brightness.
+    private func lift(to target: CGFloat, after delay: TimeInterval) {
+        guard !MonitorEngine.isDemo, savedBrightness != nil else { return }
+        liftTask?.cancel()
+        liftTask = Task { @MainActor in
+            if delay > 0 {
+                try? await Task.sleep(for: .seconds(delay))
+                guard !Task.isCancelled else { return }
+            }
+            guard !parentMoved() else { return }
+            let start = UIScreen.main.brightness
+            let steps = 20
+            for i in 1...steps {
+                let value = start + (target - start) * CGFloat(i) / CGFloat(steps)
+                UIScreen.main.brightness = value
+                setBrightness = UIScreen.main.brightness
+                try? await Task.sleep(for: .milliseconds(100))
+                guard !Task.isCancelled, !parentMoved() else { return }
+            }
+        }
     }
 }
 
