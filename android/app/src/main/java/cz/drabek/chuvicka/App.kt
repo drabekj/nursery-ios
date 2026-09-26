@@ -45,7 +45,7 @@ object Settings {
         NORMAL("Normální", 0f), LOUD("Zesílená", 12f), MAX("Maximální", 20f)
     }
     enum class Appearance(val title: String) { LIGHT("Světlý"), DARK("Tmavý"), AUTO("Automaticky") }
-    /** The RTSP paths of the common IP cameras: the main stream and the small one. */
+    /** The RTSP paths of the common IP cameras: the main stream and the sub stream. */
     enum class CameraBrand(val title: String, val main: String, val small: String) {
         TAPO("Tapo", "stream1", "stream2"),
         HIKVISION("Hikvision", "Streaming/Channels/101", "Streaming/Channels/102"),
@@ -66,9 +66,9 @@ object Settings {
 
     val role = MutableStateFlow(Role.PARENT)
     val source = MutableStateFlow(Source.CAMERA)
-    val host = MutableStateFlow("192.168.0.136")
+    val host = MutableStateFlow(HomeDefaults.SERVER_HOST)
     /** The Pi's Tailscale address, for the time away from home. */
-    val remoteHost = MutableStateFlow("100.104.188.72")
+    val remoteHost = MutableStateFlow(HomeDefaults.REMOTE_HOST)
     /** The Pi now: at home its LAN address, away its Tailscale address. The monitor sets it. */
     val activeHost = MutableStateFlow("")
     /** The addresses that the phone at the baby reported ("100.x.y.z:8555" first). */
@@ -87,8 +87,9 @@ object Settings {
     val onboarded = MutableStateFlow(true)
     /** The camera source: "go2rtc" (a server) or "rtsp" (an IP camera read directly). */
     val cameraKind = MutableStateFlow(KIND_GO2RTC)
-    val streamMain = MutableStateFlow("nursery")
-    val streamSmall = MutableStateFlow("nursery_sd")
+    /** The go2rtc stream names: the camera's main (high) stream and its sub (low) stream. */
+    val streamMain = MutableStateFlow(HomeDefaults.STREAM_MAIN)
+    val streamSmall = MutableStateFlow(HomeDefaults.STREAM_SMALL)
     /** The IP camera's streams, full RTSP URLs without the user and the password. */
     val rtspUrl = MutableStateFlow("")
     val rtspUrlSmall = MutableStateFlow("")
@@ -102,16 +103,16 @@ object Settings {
         if (!p.contains("onboarded")) p.edit().putBoolean("onboarded", p.all.keys.any { it != "unitCode" }).apply()
         onboarded.value = p.getBoolean("onboarded", true)
         cameraKind.value = p.getString("cameraKind", null) ?: KIND_GO2RTC
-        streamMain.value = p.getString("streamMain", null) ?: "nursery"
-        streamSmall.value = p.getString("streamSmall", null) ?: "nursery_sd"
+        streamMain.value = p.getString("streamMain", null) ?: HomeDefaults.STREAM_MAIN
+        streamSmall.value = p.getString("streamSmall", null) ?: HomeDefaults.STREAM_SMALL
         rtspUrl.value = p.getString("rtspUrl", "") ?: ""
         rtspUrlSmall.value = p.getString("rtspUrlSmall", "") ?: ""
         rtspUser.value = p.getString("rtspUser", "") ?: ""
         rtspBrand.value = enumValueOrNull<CameraBrand>(p.getString("rtspBrand", null)) ?: CameraBrand.TAPO
         role.value = enumValueOrNull<Role>(p.getString("role", null)) ?: Role.PARENT
         source.value = enumValueOrNull<Source>(p.getString("source", null)) ?: Source.CAMERA
-        host.value = p.getString("host", null) ?: "192.168.0.136"
-        remoteHost.value = p.getString("remoteHost", null) ?: "100.104.188.72"
+        host.value = p.getString("host", null) ?: HomeDefaults.SERVER_HOST
+        remoteHost.value = p.getString("remoteHost", null) ?: HomeDefaults.REMOTE_HOST
         babyAddresses.value = p.getString("babyAddresses", "")!!.split(",").filter { it.isNotBlank() }
         babyName.value = p.getString("babyName", "") ?: ""
         babyCode.value = p.getString("babyCode", "") ?: ""
@@ -156,7 +157,7 @@ object Settings {
     /** The stream URL: go2rtc on the Pi, or the IP camera directly (with its user and password). */
     fun cameraUrl(soundOnly: Boolean): String {
         if (cameraKind.value == KIND_RTSP) {
-            // Sound only: the small stream, if the camera has one. Never "?audio".
+            // Sound only: the sub stream, if the camera has one. Never "?audio".
             val url = if (soundOnly && rtspUrlSmall.value.isNotBlank()) rtspUrlSmall.value else rtspUrl.value
             return withCredentials(url.trim(), rtspUser.value, rtspPassword)
         }
@@ -164,10 +165,10 @@ object Settings {
     }
 
     fun go2rtcUrl(server: String, soundOnly: Boolean): String {
-        // Sound only: the 360p stream with its picture, which the app does not draw. Not "?audio":
-        // go2rtc then asks the Tapo camera for the sound track only, and the camera sends nothing.
-        val name = if (soundOnly) streamSmall.value.trim().ifEmpty { "nursery_sd" } else streamMain.value.trim().ifEmpty { "nursery" }
-        return "rtsp://$server:8554/$name"
+        // Sound only: the sub stream with its picture, which the app does not draw. Not "?audio":
+        // some cameras (e.g. Tapo through go2rtc) send no packets on an audio-only request.
+        val name = if (soundOnly) streamSmall.value.trim().ifEmpty { HomeDefaults.STREAM_SMALL } else streamMain.value.trim().ifEmpty { HomeDefaults.STREAM_MAIN }
+        return "rtsp://$server:${Go2rtc.RTSP_PORT}/$name"
     }
 
     /** "rtsp://host/path" to "rtsp://user:pass@host/path", both percent-encoded. */

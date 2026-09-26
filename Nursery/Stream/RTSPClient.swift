@@ -89,7 +89,7 @@ final class RTSPClient: @unchecked Sendable {
     }
 
     /// `Digest realm="x", nonce="y", qop="auth"` to its fields.
-    private static func parseChallenge(_ header: String) -> [String: String] {
+    static func parseChallenge(_ header: String) -> [String: String] {
         var fields: [String: String] = ["scheme": header.split(separator: " ").first.map { $0.lowercased() } ?? ""]
         let pattern = try! NSRegularExpression(pattern: #"(\w+)=(?:"([^"]*)"|([^,\s]*))"#)
         let ns = header as NSString
@@ -107,19 +107,32 @@ final class RTSPClient: @unchecked Sendable {
         if c["scheme"] == "basic" {
             return "Basic " + Data("\(user):\(password)".utf8).base64EncodedString()
         }
-        let realm = c["realm"] ?? "", nonce = c["nonce"] ?? ""
-        let ha1 = Self.md5("\(user):\(realm):\(password)")
-        let ha2 = Self.md5("\(method):\(uri)")
-        var header = "Digest username=\"\(user)\", realm=\"\(realm)\", nonce=\"\(nonce)\", uri=\"\(uri)\""
-        if let qop = c["qop"], qop.split(separator: ",").contains(where: { $0.trimmingCharacters(in: .whitespaces) == "auth" }) {
+        let qop = c["qop"].map { value in value.split(separator: ",").contains { $0.trimmingCharacters(in: .whitespaces) == "auth" } } ?? false
+        var cnonce = ""
+        if qop {
             nonceCount += 1
-            let nc = String(format: "%08x", nonceCount)
-            let cnonce = String(format: "%08x", UInt32.random(in: 0...UInt32.max))
-            header += ", qop=auth, nc=\(nc), cnonce=\"\(cnonce)\", response=\"\(Self.md5("\(ha1):\(nonce):\(nc):\(cnonce):auth:\(ha2)"))\""
-        } else {
-            header += ", response=\"\(Self.md5("\(ha1):\(nonce):\(ha2)"))\""
+            cnonce = String(format: "%08x", UInt32.random(in: 0...UInt32.max))
         }
-        if let opaque = c["opaque"] { header += ", opaque=\"\(opaque)\"" }
+        return Self.digestHeader(user: user, password: password, method: method, uri: uri,
+                                 realm: c["realm"] ?? "", nonce: c["nonce"] ?? "", qop: qop,
+                                 opaque: c["opaque"], nc: nonceCount, cnonce: cnonce)
+    }
+
+    /// The Digest header (RFC 2617). With `qop`, it uses qop=auth with `nc` and `cnonce`.
+    /// It is pure, for the tests.
+    static func digestHeader(user: String, password: String, method: String, uri: String,
+                             realm: String, nonce: String, qop: Bool, opaque: String?,
+                             nc: Int, cnonce: String) -> String {
+        let ha1 = md5("\(user):\(realm):\(password)")
+        let ha2 = md5("\(method):\(uri)")
+        var header = "Digest username=\"\(user)\", realm=\"\(realm)\", nonce=\"\(nonce)\", uri=\"\(uri)\""
+        if qop {
+            let count = String(format: "%08x", nc)
+            header += ", qop=auth, nc=\(count), cnonce=\"\(cnonce)\", response=\"\(md5("\(ha1):\(nonce):\(count):\(cnonce):auth:\(ha2)"))\""
+        } else {
+            header += ", response=\"\(md5("\(ha1):\(nonce):\(ha2)"))\""
+        }
+        if let opaque { header += ", opaque=\"\(opaque)\"" }
         return header
     }
 

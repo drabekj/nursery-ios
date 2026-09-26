@@ -59,7 +59,7 @@ final class Log: ObservableObject, @unchecked Sendable {
     }
 }
 
-/// The settings. The defaults work on the home Wi-Fi with no setup.
+/// The settings. The initial values of the server and the streams come from `HomeDefaults`.
 final class Settings: ObservableObject {
     enum Loudness: String, CaseIterable, Identifiable {
         case normal, loud, max
@@ -80,8 +80,9 @@ final class Settings: ObservableObject {
     enum Quality: String, CaseIterable, Identifiable {
         case high, low
         var id: String { rawValue }
-        /// `high` is 2K only where it shows: zoomed in, or on the full screen. Else 360p.
-        var title: String { switch self { case .high: "2K při přiblížení"; case .low: "Vždy 360p (úspora baterie)" } }
+        /// `high` is the main stream only where it shows: zoomed in, or on the full screen.
+        /// Else the sub stream. `low` is always the sub stream.
+        var title: String { switch self { case .high: "Plné rozlišení při přiblížení"; case .low: "Vždy nižší rozlišení (úspora baterie)" } }
     }
 
     /// What this iPhone does: it watches (the parent) or it is the camera at the baby.
@@ -111,11 +112,11 @@ final class Settings: ObservableObject {
     @Published var rtspUser: String { didSet { d.set(rtspUser, forKey: "rtspUser") } }
     /// "Jiná kamera": the address from the camera's manual, with no user and password.
     @Published var rtspCustom: String { didSet { d.set(rtspCustom, forKey: "rtspCustom") } }
-    /// The go2rtc streams: the main one and the small one (sound only, the photo).
+    /// The go2rtc stream names: the camera's main (high) stream and its sub (low) stream.
     @Published var streamMain: String { didSet { d.set(streamMain, forKey: "streamMain") } }
     @Published var streamSmall: String { didSet { d.set(streamSmall, forKey: "streamSmall") } }
     @Published var host: String { didSet { d.set(host, forKey: "host") } }
-    /// The Pi's Tailscale address. Away from home the app uses it when the LAN address does not answer.
+    /// The server's Tailscale address. Away from home the app uses it when the LAN address does not answer.
     @Published var remoteHost: String { didSet { d.set(remoteHost, forKey: "remoteHost") } }
     /// The address that the app uses now: `host` at home, `remoteHost` away. The engine sets it.
     @Published var activeHost: String = ""
@@ -160,10 +161,10 @@ final class Settings: ObservableObject {
         rtspPort = d.object(forKey: "rtspPort") as? Int ?? 554
         rtspUser = d.string(forKey: "rtspUser") ?? ""
         rtspCustom = d.string(forKey: "rtspCustom") ?? ""
-        streamMain = d.string(forKey: "streamMain") ?? "nursery"
-        streamSmall = d.string(forKey: "streamSmall") ?? "nursery_sd"
-        host = d.string(forKey: "host") ?? "192.168.0.136"
-        remoteHost = d.string(forKey: "remoteHost") ?? "100.104.188.72"        // rpi-host on the tailnet.
+        streamMain = d.string(forKey: "streamMain") ?? HomeDefaults.streamMain
+        streamSmall = d.string(forKey: "streamSmall") ?? HomeDefaults.streamSmall
+        host = d.string(forKey: "host") ?? HomeDefaults.serverHost
+        remoteHost = d.string(forKey: "remoteHost") ?? HomeDefaults.remoteHost
         babyAddresses = d.stringArray(forKey: "babyAddresses") ?? []
         quality = Quality(rawValue: d.string(forKey: "quality") ?? "") ?? .high
         loudness = Loudness(rawValue: d.string(forKey: "loudness") ?? "") ?? .normal
@@ -212,20 +213,22 @@ final class Settings: ObservableObject {
     }
 
     /// The RTSP stream: the go2rtc restream, or the iPhone at the baby. The query "?audio" asks go2rtc for the sound only.
-    /// `preferSmall`: the phone is hot, so the 360p picture also where the setting says 2K.
+    /// `preferSmall`: the sub stream also where the setting allows the main stream
+    /// (the picture is small, or the phone is hot).
     func streamURL(audioOnly: Bool, preferSmall: Bool = false) -> String {
         if source == .phone {
             // The host is not used: the connection goes to the Bonjour service. The code is the path.
             return "rtsp://chuvicka/\(babyCode)" + (audioOnly ? "?audio" : "")
         }
-        // Sound only from the Tapo camera: the small 360p stream, with its picture, and the app
-        // does not draw it. Not "?audio": go2rtc then sets up only the sound track with the camera,
-        // and the Tapo camera sends no packets at all. It worked only while another phone watched
-        // the same stream, so the sound view, Night mode and the background failed at random.
-        // Tested on 25 Sep 2026 with Tools/rtsp_check.py. The 360p picture costs about 0.3 Mbit/s.
+        // Sound only from a camera: the sub stream, with its picture, and the app does not draw it.
+        // Not "?audio": some cameras (e.g. Tapo through go2rtc) send no packets on an audio-only
+        // request, because go2rtc then sets up only the sound track with the camera. With Tapo it
+        // worked only while another phone watched the same stream, so the sound view, Night mode
+        // and the background failed at random. Tested on 25 Sep 2026 with Tools/rtsp_check.py.
+        // The Tapo sub stream (360p) costs about 0.3 Mbit/s.
         let small = audioOnly || preferSmall || quality == .low
         if cameraKind == .rtsp { return rtspURL(small: small) }
-        return "rtsp://\(serverHost):8554/\(small ? streamSmall : streamMain)"
+        return "rtsp://\(serverHost):\(Go2rtc.rtspPort)/\(small ? streamSmall : streamMain)"
     }
 }
 
@@ -264,7 +267,9 @@ final class CameraControl: ObservableObject {
 
     /// It reads `window.NURSERY_CONFIG = { ptzWebhook: '…', powerWebhook: '…' }`.
     func loadConfig() async {
-        guard let url = URL(string: "http://\(settings.serverHost):1984/nursery/config.js") else { return }
+        // Only with go2rtc: a camera read directly has no config file, so there is nothing to ask.
+        guard !HomeDefaults.configPath.isEmpty, settings.cameraKind == .go2rtc else { return }
+        guard let url = URL(string: "http://\(settings.serverHost):\(Go2rtc.apiPort)/\(HomeDefaults.configPath)") else { return }
         do {
             let (data, _) = try await session.data(from: url)
             let text = String(decoding: data, as: UTF8.self)
@@ -300,7 +305,7 @@ final class CameraControl: ObservableObject {
         // A camera with no go2rtc gives no photo on request.
         guard settings.cameraKind == .go2rtc else { return nil }
         let src = settings.quality == .high ? settings.streamMain : settings.streamSmall
-        guard let url = URL(string: "http://\(settings.serverHost):1984/api/frame.jpeg?src=\(src)") else { return nil }
+        guard let url = URL(string: "http://\(settings.serverHost):\(Go2rtc.apiPort)/api/frame.jpeg?src=\(src)") else { return nil }
         var req = URLRequest(url: url)
         req.timeoutInterval = 8          // go2rtc waits for a keyframe.
         do {
@@ -324,7 +329,7 @@ final class CameraControl: ObservableObject {
     }
 
     private func post(_ id: String, body: String) async -> Bool {
-        guard let url = URL(string: "http://\(settings.serverHost):8123/api/webhook/\(id)") else { return false }
+        guard let url = URL(string: "http://\(settings.serverHost):\(HomeAssistant.port)/api/webhook/\(id)") else { return false }
         var req = URLRequest(url: url)
         req.httpMethod = "POST"
         req.setValue("application/x-www-form-urlencoded", forHTTPHeaderField: "Content-Type")

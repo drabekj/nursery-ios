@@ -26,8 +26,11 @@ class RtspClient(url: String, private val host: String, private val port: Int,
 
     class Track(val sdp: SdpTrack, val channel: Int)
 
+    /** The host, the port, and the login of an RTSP URL. */
+    data class Endpoint(val host: String, val port: Int, val user: String, val password: String)
+
     /** The URL without "user:pass@": the credentials go only in the Authorization header. */
-    private val url = url.replaceFirst(Regex("^(rtsp://)[^/@]+@", RegexOption.IGNORE_CASE), "\$1")
+    private val url = withoutCredentials(url)
     private val babyPhone = this.url.startsWith("rtsp://chuvicka/")
     private var socket: Socket? = null
     /** The last challenge of the server: "realm", "nonce", "qop", "opaque", or null for Basic. */
@@ -147,41 +150,27 @@ class RtspClient(url: String, private val host: String, private val port: Int,
     // MARK: The authentication (RFC 2617), as the IP cameras use it
 
     private fun authenticate(header: String) {
-        if (header.trim().startsWith("Basic", ignoreCase = true)) { basic = true; digest = null; return }
-        val fields = HashMap<String, String>()
-        for (m in Regex("(\\w+)=(?:\"([^\"]*)\"|([^,\\s]*))").findAll(header.substringAfter(' '))) {
-            fields[m.groupValues[1].lowercase()] = m.groupValues[2].ifEmpty { m.groupValues[3] }
-        }
+        if (Digest.isBasic(header)) { basic = true; digest = null; return }
         basic = false
-        digest = fields
+        digest = Digest.parseChallenge(header)
         nonceCount = 0
     }
 
     private fun authorization(method: String, uri: String): String? {
         if (user.isEmpty()) return null
-        if (basic) return "Basic " + android.util.Base64.encodeToString("$user:$password".toByteArray(Charsets.UTF_8), android.util.Base64.NO_WRAP)
+        if (basic) return Digest.basicHeader(user, password)
         val d = digest ?: return null
-        val realm = d["realm"] ?: ""
-        val nonce = d["nonce"] ?: ""
-        val ha1 = md5("$user:$realm:$password")
-        val ha2 = md5("$method:$uri")
-        val b = StringBuilder("Digest username=\"$user\", realm=\"$realm\", nonce=\"$nonce\", uri=\"$uri\"")
-        val qop = d["qop"]?.split(",")?.map { it.trim() }?.firstOrNull { it == "auth" }
+        val qop = Digest.chooseQop(d["qop"])
+        var nc = ""
+        var cnonce = ""
         if (qop != null) {
             nonceCount++
-            val nc = "%08x".format(nonceCount)
-            val cnonce = "%016x".format(Random.nextLong())
-            b.append(", qop=$qop, nc=$nc, cnonce=\"$cnonce\", response=\"${md5("$ha1:$nonce:$nc:$cnonce:$qop:$ha2")}\"")
-        } else {
-            b.append(", response=\"${md5("$ha1:$nonce:$ha2")}\"")
+            nc = "%08x".format(nonceCount)
+            cnonce = "%016x".format(Random.nextLong())
         }
-        d["opaque"]?.let { b.append(", opaque=\"$it\"") }
-        d["algorithm"]?.let { b.append(", algorithm=$it") }
-        return b.toString()
+        return Digest.header(user, password, method, uri, d["realm"] ?: "", d["nonce"] ?: "",
+            qop, d["opaque"], d["algorithm"], nc, cnonce)
     }
-
-    private fun md5(text: String): String =
-        MessageDigest.getInstance("MD5").digest(text.toByteArray(Charsets.UTF_8)).joinToString("") { "%02x".format(it) }
 
     @Synchronized
     private fun send(method: String, uri: String, headers: Map<String, String>): Int {
@@ -252,13 +241,62 @@ class RtspClient(url: String, private val host: String, private val port: Int,
         fun isUsable(t: SdpTrack) =
             (t.kind == "video" && t.codec == "H264") || (t.kind == "audio" && (t.codec == "PCMA" || t.codec == "PCMU"))
 
-        /** "rtsp://user:pass@192.168.0.136:8554/nursery" to its host, port, user, and password. */
-        fun forUrl(url: String): RtspClient {
+        /** "rtsp://user:pass@192.168.0.10:8554/stream" to its host, port, user, and password. */
+        fun parse(url: String): Endpoint {
             val u = try { URI(url) } catch (e: Exception) { throw Failure("Adresa kamery není platná.") }
             val info = u.rawUserInfo ?: ""
             val user = URLDecoder.decode(info.substringBefore(':'), "UTF-8")
             val password = if (':' in info) URLDecoder.decode(info.substringAfter(':'), "UTF-8") else ""
-            return RtspClient(url, u.host ?: throw Failure("Adresa kamery není platná."), if (u.port > 0) u.port else 554, user, password)
+            return Endpoint(u.host ?: throw Failure("Adresa kamery není platná."), if (u.port > 0) u.port else 554, user, password)
         }
+
+        fun forUrl(url: String): RtspClient {
+            val e = parse(url)
+            return RtspClient(url, e.host, e.port, e.user, e.password)
+        }
+
+        /** The URL without "user:pass@": the credentials go only in the Authorization header. */
+        fun withoutCredentials(url: String): String =
+            url.replaceFirst(Regex("^(rtsp://)[^/@]+@", RegexOption.IGNORE_CASE), "\$1")
     }
+}
+
+/** The authentication of the IP cameras (RFC 2617): pure functions, so the unit tests run them. */
+object Digest {
+    /** True when the camera asks for Basic, not Digest. */
+    fun isBasic(header: String): Boolean = header.trim().startsWith("Basic", ignoreCase = true)
+
+    /** The fields of a "Digest realm=..., nonce=..." challenge, the keys in lower case. */
+    fun parseChallenge(header: String): Map<String, String> {
+        val fields = HashMap<String, String>()
+        for (m in Regex("(\\w+)=(?:\"([^\"]*)\"|([^,\\s]*))").findAll(header.substringAfter(' '))) {
+            fields[m.groupValues[1].lowercase()] = m.groupValues[2].ifEmpty { m.groupValues[3] }
+        }
+        return fields
+    }
+
+    /** "auth" if the server offers it. The app does not do "auth-int". */
+    fun chooseQop(offer: String?): String? = offer?.split(",")?.map { it.trim() }?.firstOrNull { it == "auth" }
+
+    fun basicHeader(user: String, password: String): String =
+        "Basic " + java.util.Base64.getEncoder().encodeToString("$user:$password".toByteArray(Charsets.UTF_8))
+
+    /** The Authorization header. With no qop, nc and cnonce are not used. */
+    fun header(user: String, password: String, method: String, uri: String, realm: String, nonce: String,
+               qop: String?, opaque: String?, algorithm: String?, nc: String, cnonce: String): String {
+        val ha1 = md5("$user:$realm:$password")
+        val ha2 = md5("$method:$uri")
+        val b = StringBuilder("Digest username=\"$user\", realm=\"$realm\", nonce=\"$nonce\", uri=\"$uri\"")
+        if (qop != null) {
+            b.append(", qop=$qop, nc=$nc, cnonce=\"$cnonce\", response=\"${md5("$ha1:$nonce:$nc:$cnonce:$qop:$ha2")}\"")
+        } else {
+            b.append(", response=\"${md5("$ha1:$nonce:$ha2")}\"")
+        }
+        opaque?.let { b.append(", opaque=\"$it\"") }
+        algorithm?.let { b.append(", algorithm=$it") }
+        return b.toString()
+    }
+
+    fun md5(text: String): String =
+        MessageDigest.getInstance("MD5").digest(text.toByteArray(Charsets.UTF_8)).joinToString("") { "%02x".format(it) }
 }

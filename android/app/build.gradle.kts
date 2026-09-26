@@ -67,4 +67,7 @@ dependencies {
 
     // The QR code of the pairing: make it on the phone at the baby, read it on the parent's.
     implementation("com.google.zxing:core:3.5.3")
+
+    // The unit tests of the pure parts: the protocol, the login, and the pairing link.
+    testImplementation("junit:junit:4.13.2")
 }

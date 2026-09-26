@@ -1,7 +1,15 @@
-# Nursery — a native iOS baby monitor for the Tapo TC72
+# Chůvička (Nursery) — a local-only baby monitor for iOS and Android
 
-A local-only iPhone app. It shows the nursery camera and plays its sound in real time. It continues on the
-lock screen and in picture in picture. It uses no cloud service and no third-party code.
+It shows the camera in the nursery and plays its sound in real time. It continues on the lock screen and in
+picture in picture. It uses no cloud service. Three sources: a camera through a go2rtc server, an IP camera
+read directly (RTSP), or an old phone at the baby (iOS or Android) that sends to the parents' phones.
+The iOS app has no third-party code; the Android app uses AndroidX, CameraX and zxing (the QR code).
+
+The state of the app for other users, and the roadmap: `docs/READINESS.md`.
+
+The diagram below is the developer's own setup. Its addresses and stream names are the app's initial
+values, kept in one place (`Nursery/App/HomeDefaults.swift`, `android/.../HomeDefaults.kt`), so a public
+build empties them and changes nothing else.
 
 ```
  iPhone app                                   Raspberry Pi 192.168.0.136
@@ -42,7 +50,7 @@ navigation bar. The background glows softly with the loudness of the room.
   crying and fussing, or every sound.
 - **Move** puts arrows on the picture itself, so you watch while you aim. Tap for one step, or hold to keep turning.
   The pinch zoom (1–4×, double tap) changes only your screen.
-- **Photo** takes a full 2K frame from go2rtc and opens the share sheet.
+- **Photo** takes one full frame of the main stream from go2rtc and opens the share sheet.
 - **Night** makes the screen black at minimum brightness, with a dim clock and waveform. The waveform
   brightens while a sound lasts.
 - **Picture in picture** opens by itself when you swipe home. **Full screen** comes with a button, or when you turn the phone.
@@ -81,13 +89,21 @@ A paid developer account ($99/year) gives one year, and TestFlight lets your wif
 
 The app needs no change on the Pi. It uses what already runs:
 
-- go2rtc RTSP on port **8554**, with the streams `nursery` (2K) and `nursery_sd` (360p). The camera audio is G.711 A-law.
+- go2rtc RTSP on port **8554**, with two streams of the camera: the main (high) stream and the sub (low)
+  stream. Their names are in Settings (the developer's are `nursery`, 2K, and `nursery_sd`, 360p). The app
+  asks for the main stream only when the picture is big (zoomed in, full screen); else the sub stream, which
+  also serves the sound-only modes. The camera audio must be G.711 (A-law or µ-law).
 - `http://<server>:1984/nursery/config.js` with `ptzWebhook` (and `powerWebhook` later). The app reads the ids from it, so no secret is in the app.
 - The Home Assistant webhook on port **8123** (`automation nursery_ptz_webhook`).
 
-The server address is in Settings (the default is `192.168.0.136`). Change it there after the move to the HP server.
+The server address is in Settings; the initial value comes from `HomeDefaults`.
 
-## The test of the protocol code
+## Tests
+
+Unit tests cover the pure code on both platforms: SDP, RTP and the H.264 depacketizer, G.711, the Digest
+login of IP cameras, the pairing link, and the level meter. iOS: `NurseryTests/`, run with
+`xcodebuild test -scheme Nursery` on a simulator. Android: `android/app/src/test/`, run with
+`gradle testReleaseUnitTest`. CI runs both.
 
 `Tools/rtsp_check.py` is a line-by-line Python copy of the protocol code of the app (`RTP.swift` and the
 RTSP steps). It connects to go2rtc, rebuilds the H.264 frames, and checks them with ffmpeg. It also checks
@@ -121,3 +137,5 @@ python3 Tools/rtsp_check.py "rtsp://192.168.0.136:8554/nursery?audio" 5
 | `Nursery/UI/*` | The SwiftUI screens. |
 | `NurseryWidget/` | The Live Activity for the lock screen and the Dynamic Island. |
 | `Tools/` | The protocol check, and the icon drawing script. |
+| `Nursery/App/HomeDefaults.swift`, `android/…/HomeDefaults.kt` | The developer's home addresses and stream names: the only place with them. |
+| `NurseryTests/`, `android/app/src/test/` | The unit tests of the pure code. |

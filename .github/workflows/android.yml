@@ -28,6 +28,13 @@ jobs:
         with:
           gradle-version: "8.11.1"
 
+      - name: Unit tests
+        run: |
+          # The pure parts: SDP, RTP, H.264, G.711, the camera login, and the pairing link.
+          cd android
+          gradle testReleaseUnitTest --no-daemon --stacktrace 2>&1 | tee ../test.log | grep -E "^e: |error:|FAILED|BUILD|tests completed" || true
+          grep -q "BUILD SUCCESSFUL" ../test.log
+
       - name: Build the APK
         env:
           KEYSTORE_B64: ${{ secrets.CHUVICKA_KEYSTORE_B64 }}
@@ -68,6 +75,8 @@ jobs:
             app.apk
             shots/
             gradle.log
+            test.log
+            android/app/build/test-results/**/*.xml
 
       - name: Publish the APK for the phones
         if: github.ref == 'refs/heads/master'

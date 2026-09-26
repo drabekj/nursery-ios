@@ -82,7 +82,7 @@ struct SettingsView: View {
                         Label("Obraz a zvuk z", systemImage: "dot.radiowaves.left.and.right")
                     }
                     if settings.source == .camera {
-                        TextField("192.168.0.136", text: $host)
+                        TextField(HomeDefaults.serverHost.isEmpty ? "IP adresa serveru" : HomeDefaults.serverHost, text: $host)
                             .keyboardType(.numbersAndPunctuation)
                             .textInputAutocapitalization(.never)
                             .autocorrectionDisabled()
