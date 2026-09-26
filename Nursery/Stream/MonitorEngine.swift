@@ -739,15 +739,63 @@ final class MonitorEngine: ObservableObject {
             let reason = note.userInfo?[AVAudioSessionInterruptionReasonKey] as? UInt ?? 0
             Log.shared.add("sound interrupted, reason \(reason)")   // 1 = the app was suspended.
             audio.setInterrupted(true)
+            recoverSound()
         case .ended:
             // A monitor resumes always, also without the "should resume" option.
             Log.shared.add("sound interruption ended")
+            endRecovery()
             activateAudioSession()
             audio.setInterrupted(false)
             audio.start()
             audio.setMuted(mode == .off)
         @unknown default:
             break
+        }
+    }
+
+    // MARK: Taking the sound back
+
+    private var recoveryTask: Task<Void, Never>?
+    private var recoveryBackgroundTask: UIBackgroundTaskIdentifier = .invalid
+
+    /// Siri, an alarm or an app that wants the sound only for itself interrupted the monitor.
+    /// Do not wait for "interruption ended": many apps never send it, and in the background iOS
+    /// suspends an app with no sound. Try to take the sound back each 2 s instead. A background
+    /// task keeps the app awake for these tries (iOS gives about 30 s). A call refuses the tries,
+    /// and then "interruption ended" after the call starts the sound again.
+    private func recoverSound() {
+        guard !suspended, !Self.isDemo else { return }
+        recoveryTask?.cancel()
+        if recoveryBackgroundTask == .invalid {
+            recoveryBackgroundTask = UIApplication.shared.beginBackgroundTask(withName: "sound recovery") { [weak self] in
+                MainActor.assumeIsolated { self?.endRecovery() }
+            }
+        }
+        recoveryTask = Task { [weak self] in
+            for attempt in 1...12 {
+                try? await Task.sleep(for: .seconds(2))
+                guard let self, !Task.isCancelled else { return }
+                do {
+                    try AVAudioSession.sharedInstance().setActive(true)
+                } catch {
+                    continue            // The other sound still has priority. Try again.
+                }
+                Log.shared.add("sound taken back after \(attempt * 2) s")
+                self.audio.setInterrupted(false)
+                self.audio.start()
+                self.audio.setMuted(self.mode == .off)
+                break
+            }
+            self?.endRecovery()
+        }
+    }
+
+    private func endRecovery() {
+        recoveryTask?.cancel()
+        recoveryTask = nil
+        if recoveryBackgroundTask != .invalid {
+            UIApplication.shared.endBackgroundTask(recoveryBackgroundTask)
+            recoveryBackgroundTask = .invalid
         }
     }
 
