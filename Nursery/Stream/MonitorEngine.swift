@@ -49,6 +49,9 @@ final class MonitorEngine: ObservableObject {
     @Published private(set) var audioOnly = false
     @Published private(set) var delayMilliseconds = 0
     @Published private(set) var failures = 0
+    /// A short message for a toast, for example after the camera was found at a new address.
+    /// The screen shows it, then calls `clearNotice()`.
+    @Published private(set) var notice: String?
     /// The iPhone's own volume, 0...1. The app cannot change it by code, but it can warn when it is low.
     @Published private(set) var systemVolume: Float = 1
     /// Live sound at a volume that a sleeping parent may not hear.
@@ -206,6 +209,8 @@ final class MonitorEngine: ObservableObject {
     }
 
     func soundOn() { mode = .live }
+
+    func clearNotice() { notice = nil }
 
     // MARK: The life cycle
 
@@ -415,7 +420,8 @@ final class MonitorEngine: ObservableObject {
             self.currentURL = url
             if self.detailActive != detail { self.detailActive = detail }
             let client: RTSPClient
-            do { client = try RTSPClient(url: url, endpoint: self.settings.babyEndpoint) } catch {
+            let direct = self.settings.source == .camera && self.settings.cameraKind == .rtsp
+            do { client = try RTSPClient(url: url, endpoint: self.settings.babyEndpoint, directCamera: direct) } catch {
                 self.connection = .retrying("Adresa serveru není platná.")
                 return
             }
@@ -442,8 +448,10 @@ final class MonitorEngine: ObservableObject {
     private func chooseRoute() async {
         switch settings.source {
         case .camera where settings.cameraKind == .rtsp:
-            // A camera straight on the LAN: no Tailscale way (a camera cannot run Tailscale).
-            if viaTailscale { viaTailscale = false }
+            // The camera has one address, its LAN address. Away from home, the home's Tailscale
+            // subnet route carries it. Only for the "Cesta" row: the connection is the same.
+            let away = Self.cameraOverTailscale(host: settings.rtspHost, local: Reach.localAddresses())
+            if viaTailscale != away { viaTailscale = away }
         case .camera:
             // The LAN address first: at home it answers at once. Away, it does not, in 1.2 s.
             let home = settings.trimmedHost
@@ -472,6 +480,30 @@ final class MonitorEngine: ObservableObject {
             let isTailscale = direct.map(tailscale) ?? false
             if viaTailscale != isTailscale { viaTailscale = isTailscale }
         }
+    }
+
+    /// This phone has a Tailscale address, and the camera is not on the phone's own network (/24).
+    nonisolated static func cameraOverTailscale(host: String, local: [String]) -> Bool {
+        guard local.contains(where: Reach.isTailscale), networkPrefix(host) != nil else { return false }
+        return !onOwnNetwork(host: host, local: local)
+    }
+
+    /// The camera's address is on the same /24 as one of this phone's private addresses.
+    nonisolated static func onOwnNetwork(host: String, local: [String]) -> Bool {
+        func isPrivate(_ ip: String) -> Bool {
+            let p = ip.split(separator: ".").compactMap { Int($0) }
+            guard p.count == 4 else { return false }
+            return p[0] == 10 || (p[0] == 172 && (16...31).contains(p[1])) || (p[0] == 192 && p[1] == 168)
+        }
+        guard let camera = networkPrefix(host) else { return false }
+        return local.contains { isPrivate($0) && networkPrefix($0) == camera }
+    }
+
+    /// "192.168.0.197" to "192.168.0". Nil for a name or an IPv6 address.
+    nonisolated private static func networkPrefix(_ ip: String) -> String? {
+        let parts = ip.trimmingCharacters(in: .whitespaces).split(separator: ".")
+        guard parts.count == 4, parts.allSatisfy({ UInt8($0) != nil }) else { return nil }
+        return parts.prefix(3).joined(separator: ".")
     }
 
     // These closures run on the RTSP queue. They are nonisolated, so they never touch the main actor.
@@ -543,18 +575,61 @@ final class MonitorEngine: ObservableObject {
         client = nil
         let message = (error as? LocalizedError)?.errorDescription ?? error?.localizedDescription ?? "Spojení se ukončilo."
         Log.shared.add("connection ended: \(message)")
-        connection = .retrying(awayHint(message))
         failures += 1
         pictureLive = false
-        let delay = retryDelay
-        // In the background, after a long outage (the camera is off for the night), try every 30 s,
-        // not every 8 s: each try wakes the Wi-Fi radio. In the foreground, 8 s at most.
-        retryDelay = min(retryDelay * 2, !isForeground && failures >= 10 ? 30 : 8)
+        let delay: Double
+        if case .cameraFull? = error as? RTSPClient.Failure {
+            // Other phones hold the camera's sessions. A fast retry only takes a slot again and
+            // again, so wait a fixed 15 s, and keep the backoff as it is.
+            connection = .retrying(message)
+            delay = 15
+            Log.shared.add("camera full, retry in 15 s")
+        } else {
+            connection = .retrying(awayHint(message))
+            delay = retryDelay
+            // In the background, after a long outage (the camera is off for the night), try every 30 s,
+            // not every 8 s: each try wakes the Wi-Fi radio. In the foreground, 8 s at most.
+            retryDelay = min(retryDelay * 2, !isForeground && failures >= 10 ? 30 : 8)
+        }
+        let relocate = shouldRelocate(after: error)
+        if relocate { lastRelocation = Date() }
         retryTask?.cancel()
         retryTask = Task { [weak self] in
+            if relocate, let self {
+                let found = await CameraFinder.relocate(settings: self.settings)
+                guard !Task.isCancelled, gen == self.generation else { return }
+                if let host = found, host != self.settings.rtspHost {
+                    self.settings.rtspHost = host
+                    Log.shared.add("camera moved to \(host)")
+                    self.notice = "Kamera nalezena na nové adrese"
+                    self.reconnect(why: "camera moved")
+                    return
+                }
+            }
             try? await Task.sleep(for: .seconds(delay))
             guard let self, !Task.isCancelled, gen == self.generation else { return }
             self.connect()
+        }
+    }
+
+    // MARK: A camera at a new address
+
+    /// The last search for a camera that moved. At most one search per 60 s.
+    private var lastRelocation = Date.distantPast
+
+    /// The router gave the camera a new address: the saved one does not answer at all. Search the
+    /// home network after the second failure, in the foreground or in picture in picture only
+    /// (the scan wakes the Wi-Fi radio for about 3 s). Not for a full camera or a wrong password:
+    /// those answer at the saved address. Only on the home network: a new address from the home
+    /// router stays on the same /24, and away from home a search would ask a stranger's devices.
+    private func shouldRelocate(after error: Error?) -> Bool {
+        guard settings.source == .camera, settings.cameraKind == .rtsp, settings.rtspBrand != .other,
+              failures >= 2, isForeground || pip.isActive,
+              Date().timeIntervalSince(lastRelocation) > 60,
+              Self.onOwnNetwork(host: settings.rtspHost, local: Reach.localAddresses()) else { return false }
+        switch error as? RTSPClient.Failure {
+        case .unreachable?, .timeout?: return true
+        default: return false
         }
     }
 
@@ -563,7 +638,7 @@ final class MonitorEngine: ObservableObject {
         guard failures >= 1 else { return message }
         switch settings.source {
         case .camera where settings.cameraKind == .rtsp:
-            return message + " Mimo domov kamera přímo nefunguje. Použijte druhý telefon nebo server go2rtc."
+            return message + " Mimo domov to funguje jen přes domácí Tailscale (Nastavení → Pro pokročilé → Mimo domov)."
         case .camera where settings.trimmedRemoteHost.isEmpty:
             return message + " Mimo domov zadejte v Nastavení adresu přes Tailscale."
         case .camera:
@@ -715,7 +790,15 @@ final class MonitorEngine: ObservableObject {
     private func streamURL(audioOnly: Bool) -> String { stream(audioOnly: audioOnly).url }
 
     /// The main stream plays now. For the "Stav" row in the settings.
-    @Published private(set) var detailActive = false
+    @Published private(set) var detailActive = false {
+        didSet { Self.liveDetail = detailActive }
+    }
+
+    /// The live connection uses the main (detail) stream. A photo from a direct camera then reads
+    /// the sub stream, else the main stream: never a second session on the path that plays. The
+    /// camera serves at most 3 sessions per path (Tapo), and a few phones already hold some.
+    /// Static, because CameraControl has no engine.
+    static private(set) var liveDetail = false
 
     /// A new stream if the wanted URL changed (detail, heat or Low Power Mode), with the same view.
     private func refreshStream(why: String) {
