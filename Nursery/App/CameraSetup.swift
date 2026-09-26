@@ -16,7 +16,7 @@ enum HomeAssistant {
     static let port: UInt16 = 8123
 }
 
-/// The common IP cameras, with the RTSP paths of their main and small streams.
+/// The common IP cameras, with the RTSP paths of their main and sub streams.
 /// A new user picks the brand and types the IP address, the user and the password.
 enum CameraBrand: String, CaseIterable, Identifiable {
     case tapo, hikvision, dahua, reolink, other
@@ -32,7 +32,7 @@ enum CameraBrand: String, CaseIterable, Identifiable {
         }
     }
 
-    /// The path of the main stream and of the small stream.
+    /// The path of the main stream and of the sub stream. `small` is the sub stream.
     var paths: (main: String, small: String?) {
         switch self {
         case .tapo: ("stream1", "stream2")

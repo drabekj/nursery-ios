@@ -73,7 +73,7 @@ struct MonitorView: View {
         .onAppear(perform: applyDemoScreen)
     }
 
-    /// The picture is big (full screen, an iPad) or zoomed in: only then is 2K worth its cost.
+    /// The picture is big (full screen, an iPad) or zoomed in: only then is the main stream worth its cost.
     private var wantsDetail: Bool {
         !night && !soundView && (vSize == .compact || hSize == .regular || zoom.scale > 1.25)
     }

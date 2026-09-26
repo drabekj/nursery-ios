@@ -18,7 +18,7 @@ struct HelpView: View {
                       "Když vypadne spojení s kamerou, přijde po 20 sekundách upozornění a Chůvička se sama připojí znovu. Kdyby iOS aplikaci ukončil, do 2,5 minuty přijde upozornění „Chůvička přestala hlídat“. Stačí ji znovu otevřít.",
                       footnote: "Upozornění fungují, jen když je povolíte. Aplikaci nezavírejte přejetím nahoru v přepínači aplikací, tím hlídání ukončíte.")
                 topic("waveform", "Obraz, nebo jen zvuk",
-                      "Přepínač nahoře volí, co hlavní obrazovka ukazuje. Obraz ukazuje živé video z postýlky. Jen zvuk ukazuje jen pokojíček: kruh, který se rozvlní se zvukem, a slovy, co se děje. Obraz se nezobrazuje. Z kamery Tapo se stahuje jen v nejnižší kvalitě, protože bez něj neposílá ani zvuk. Z telefonu u miminka jde jen zvuk.",
+                      "Přepínač nahoře volí, co hlavní obrazovka ukazuje. Obraz ukazuje živé video z postýlky. Jen zvuk ukazuje jen pokojíček: kruh, který se rozvlní se zvukem, a slovy, co se děje. Obraz se nezobrazuje. Z kamery se přesto stahuje v nižším rozlišení, protože některé kamery (třeba Tapo) bez obrazu neposílají ani zvuk. Z telefonu u miminka jde jen zvuk.",
                       footnote: "Jen zvuk šetří baterii i Wi-Fi a telefon méně hřeje. Na miminko se můžete kdykoli podívat tlačítkem Nahlédnout do postýlky. Pořídí jednu fotku z kamery, bez živého obrazu.")
                 topic("speaker.wave.1", "Hlasitost",
                       "Chůvička hraje tak hlasitě, jak je nastavený iPhone. Když je hlasitost iPhonu pod 20 %, ukáže Chůvička upozornění a posuvník hlasitosti. Když je zvuk ztlumený, tlačítko Zvuk svítí červeně. Při pláči pak přijde upozornění, stejně jako při hlasitosti pod 20 %.",

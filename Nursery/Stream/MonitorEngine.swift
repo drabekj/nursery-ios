@@ -667,7 +667,7 @@ final class MonitorEngine: ObservableObject {
     private var currentURL: String?
 
     /// A new stream only when the wanted one differs. With the camera, the small picture, the sound
-    /// view, Night mode and the background can all use the same 360p stream: then only the drawing
+    /// view, Night mode and the background can all use the same sub stream: then only the drawing
     /// changes, with no reconnect, no gap in the sound, and no new handshake.
     private func updateStream(why: String) {
         let wanted = wantsAudioOnly
@@ -678,8 +678,9 @@ final class MonitorEngine: ObservableObject {
         reconnect(why: why)
     }
 
-    /// The stream to ask for. 2K only for a zoomed or full-screen picture (it has about 16 times
-    /// the pixels of 360p, and it keeps the Wi-Fi and the decoder busy). A hot phone gets 360p.
+    /// The stream to ask for. The main stream only for a zoomed or full-screen picture (it has many
+    /// times the pixels of the sub stream, and it keeps the Wi-Fi and the decoder busy).
+    /// A hot phone gets the sub stream.
     private func streamURL(audioOnly: Bool) -> String {
         settings.streamURL(audioOnly: audioOnly, preferSmall: thermalHot || !wantsDetail)
     }
@@ -695,23 +696,24 @@ final class MonitorEngine: ObservableObject {
     private var wantsDetail = false
     private var detailTask: Task<Void, Never>?
 
-    /// Up to 2K after 0.6 s (the pinch has settled). Back to 360p only after 10 s, so a short
-    /// zoom out and in again does not switch twice. Each switch is a reconnect: the sound
-    /// pauses for about a second, and the picture holds its last frame until the next keyframe.
+    /// Up to the main stream after 0.6 s (the pinch has settled). Back to the sub stream only
+    /// after 10 s, so a short zoom out and in again does not switch twice. Each switch is a
+    /// reconnect: the sound pauses for about a second, and the picture holds its last frame
+    /// until the next keyframe.
     func setDetail(_ on: Bool) {
         detailTask?.cancel()
         detailTask = Task { [weak self] in
             try? await Task.sleep(for: .seconds(on ? 0.6 : 10))
             guard let self, !Task.isCancelled, self.wantsDetail != on else { return }
             self.wantsDetail = on
-            self.refreshStream(why: on ? "detail: 2K picture" : "no detail: 360p picture")
+            self.refreshStream(why: on ? "detail: main stream" : "no detail: sub stream")
         }
     }
 
     // MARK: Heat
 
-    /// The phone is hot (thermal state serious or critical). The app then asks for the 360p
-    /// picture instead of 2K, which cuts the Wi-Fi and the decoder work, until it cools down.
+    /// The phone is hot (thermal state serious or critical). The app then asks for the sub stream
+    /// instead of the main stream, which cuts the Wi-Fi and the decoder work, until it cools down.
     private(set) var thermalHot = false
 
     private func thermalChanged() {
@@ -719,7 +721,7 @@ final class MonitorEngine: ObservableObject {
         let hot = state == .serious || state == .critical
         guard hot != thermalHot else { return }
         thermalHot = hot
-        Log.shared.add("thermal state \(state.rawValue): \(hot ? "small picture until the phone cools" : "normal picture")")
+        Log.shared.add("thermal state \(state.rawValue): \(hot ? "sub stream until the phone cools" : "normal picture")")
         refreshStream(why: "thermal state changed")
     }
 
