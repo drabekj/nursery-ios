@@ -204,12 +204,17 @@ object Monitor {
         val name = Settings.babyName.value
         val code = Settings.babyCode.value
         if (name.isEmpty() || code.isEmpty()) throw IOException("Není spárovaný telefon u miminka. Spárujte ho v Nastavení.")
-        val target = BabyFinder.resolve(context, name)?.also { viaTailscale.value = false }
-            ?: Settings.babyAddresses.value.firstNotNullOfOrNull { a ->
+        // The addresses that the phone reported last time first: the home Wi-Fi, then Tailscale.
+        // They need no mDNS, which a phone with the screen off often stops answering.
+        // mDNS only when none answers, for example when the router gave the phone a new address.
+        val target = Settings.babyAddresses.value
+            .sortedBy { RtspClient.isTailscale(it.substringBeforeLast(":")) }
+            .firstNotNullOfOrNull { a ->
                 val host = a.substringBeforeLast(":")
                 val port = a.substringAfterLast(":").toIntOrNull() ?: return@firstNotNullOfOrNull null
                 if (RtspClient.canConnect(host, port)) (host to port).also { viaTailscale.value = RtspClient.isTailscale(host) } else null
             }
+            ?: BabyFinder.resolve(context, name)?.also { viaTailscale.value = false }
             ?: throw IOException(awayHint("Telefon u miminka „$name“ není v síti. Běží na něm vysílání?"))
         babyDirect = target
         // The host in the URL is not used: the socket goes to the found address. The code is the path.

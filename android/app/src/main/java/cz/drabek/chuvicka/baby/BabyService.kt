@@ -46,6 +46,7 @@ class BabyService : LifecycleService() {
     private var registration: NsdManager.RegistrationListener? = null
     private var wakeLock: PowerManager.WakeLock? = null
     private var wifiLock: WifiManager.WifiLock? = null
+    private var multicastLock: WifiManager.MulticastLock? = null
     private var timer: Timer? = null
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
@@ -94,6 +95,9 @@ class BabyService : LifecycleService() {
         @Suppress("DEPRECATION")
         val mode = if (Build.VERSION.SDK_INT >= 29) WifiManager.WIFI_MODE_FULL_LOW_LATENCY else WifiManager.WIFI_MODE_FULL_HIGH_PERF
         wifiLock = wm.createWifiLock(mode, "chuvicka:baby").apply { acquire() }
+        // With the screen off, many phones drop multicast, so the phone no longer answers
+        // the parents' mDNS questions and they cannot find it. This lock keeps multicast on.
+        multicastLock = wm.createMulticastLock("chuvicka:baby").apply { setReferenceCounted(false); acquire() }
         BabyState.running.value = true
         startTimer()
         Log.add("baby phone on, ${if (video) "picture and sound" else "sound only"}")
@@ -163,6 +167,7 @@ class BabyService : LifecycleService() {
         BabyState.capture = null
         wakeLock?.let { if (it.isHeld) it.release() }
         wifiLock?.let { if (it.isHeld) it.release() }
+        multicastLock?.let { if (it.isHeld) it.release() }
         BabyState.running.value = false
         BabyState.port.value = 0
         BabyState.parents.value = 0

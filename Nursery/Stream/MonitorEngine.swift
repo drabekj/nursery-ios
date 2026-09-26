@@ -412,9 +412,6 @@ final class MonitorEngine: ObservableObject {
 
     /// True when the stream goes over Tailscale (the phone is away from home).
     @Published private(set) var viaTailscale = false
-    /// The phone at the baby: try its reported addresses before Bonjour. It turns on after
-    /// Bonjour failed (away from home), and it stays while it works.
-    private var babyDirectFirst = false
 
     private func chooseRoute() async {
         switch settings.source {
@@ -431,10 +428,14 @@ final class MonitorEngine: ObservableObject {
             settings.activeHost = host
             viaTailscale = host != home
         case .phone:
+            // The addresses that the phone reported last time first: the home Wi-Fi, then Tailscale.
+            // They need no Bonjour. An Android phone with the screen off often stops answering
+            // Bonjour, and then each attempt failed for minutes (26 Sep 2026). Bonjour only when
+            // no address answers, for example when the router gave the phone a new address.
             settings.babyDirect = nil
             viaTailscale = false
-            guard babyDirectFirst else { return }
-            for address in settings.babyAddresses {
+            func tailscale(_ address: String) -> Bool { Reach.split(address).map { Reach.isTailscale($0.host) } ?? false }
+            for address in settings.babyAddresses.sorted(by: { !tailscale($0) && tailscale($1) }) {
                 guard let a = Reach.split(address), await Reach.canConnect(host: a.host, port: a.port) else { continue }
                 settings.babyDirect = address
                 viaTailscale = Reach.isTailscale(a.host)
@@ -509,8 +510,6 @@ final class MonitorEngine: ObservableObject {
         client = nil
         let message = (error as? LocalizedError)?.errorDescription ?? error?.localizedDescription ?? "Spojení se ukončilo."
         Log.shared.add("connection ended: \(message)")
-        // The phone at the baby: after a failure, try the other way (Bonjour or its addresses).
-        if settings.source == .phone, !settings.babyAddresses.isEmpty { babyDirectFirst.toggle() }
         connection = .retrying(awayHint(message))
         failures += 1
         pictureLive = false
