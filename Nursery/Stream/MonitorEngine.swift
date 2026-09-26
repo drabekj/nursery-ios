@@ -565,7 +565,11 @@ final class MonitorEngine: ObservableObject {
         let session = AVAudioSession.sharedInstance()
         do {
             // .playback: the sound continues on the lock screen and with the silent switch on.
-            try session.setCategory(.playback, mode: .default, options: [])
+            // .mixWithOthers: another app's sound (a video, music, a voice message) plays together
+            // with the monitor. Without it, that app interrupted the monitor, the engine stopped,
+            // iOS then suspended the app in the background, and nobody listened (26 Sep 2026).
+            // The cost: iOS shows no Now Playing controls for a mixable app. A call still interrupts.
+            try session.setCategory(.playback, mode: .default, options: [.mixWithOthers])
             // 40 ms audio buffers: fewer wake-ups of the audio thread than the default 5-10 ms.
             // The jitter cushion (80-400 ms) is far larger, so the delay does not change noticeably.
             try? session.setPreferredIOBufferDuration(0.04)
