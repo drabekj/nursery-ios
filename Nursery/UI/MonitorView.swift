@@ -158,6 +158,7 @@ struct MonitorView: View {
         }
         // The controls on a field take its type colour: white on teal, wine, graphite; ink on amber.
         .environment(\.colorScheme, onField ? fieldScheme : scheme)
+        .tint(onField ? onFieldColor : Theme.accent)
     }
 
     private var stageTransition: AnyTransition {
@@ -447,6 +448,7 @@ struct MonitorView: View {
 private struct FieldBars: ViewModifier {
     let scheme: ColorScheme?
 
+    @ViewBuilder
     func body(content: Content) -> some View {
         if let scheme {
             content
@@ -530,6 +532,7 @@ struct AlertOffer: View {
                     Text("Povolit").fontWeight(.semibold).foregroundStyle(.black)
                 }
                 .buttonStyle(.borderedProminent)
+                .tint(Theme.moon)          // Dark text needs the yellow, also over a field (tint white or ink there).
                 .controlSize(.small)
                 Button("Později", action: dismiss).font(.caption).foregroundStyle(.secondary)
             }
