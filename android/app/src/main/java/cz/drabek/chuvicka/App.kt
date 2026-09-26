@@ -46,13 +46,14 @@ object Settings {
         NORMAL("Normální", 0f), LOUD("Zesílená", 12f), MAX("Maximální", 20f)
     }
     enum class Appearance(val title: String) { LIGHT("Světlý"), DARK("Tmavý"), AUTO("Automaticky") }
-    /** The RTSP paths of the common IP cameras: the main stream and the sub stream. */
-    enum class CameraBrand(val title: String, val main: String, val small: String) {
-        TAPO("Tapo", "stream1", "stream2"),
-        HIKVISION("Hikvision", "Streaming/Channels/101", "Streaming/Channels/102"),
-        DAHUA("Dahua / Imou", "cam/realmonitor?channel=1&subtype=0", "cam/realmonitor?channel=1&subtype=1"),
-        REOLINK("Reolink", "h264Preview_01_main", "h264Preview_01_sub"),
-        OTHER("Jiná kamera", "", ""),
+    /** The RTSP paths of the common IP cameras: the main stream and the sub stream. And the ONVIF port
+     *  (for the turning of the camera): Tapo 2020 (it refuses 80), the others their defaults. */
+    enum class CameraBrand(val title: String, val main: String, val small: String, val onvifPort: Int) {
+        TAPO("Tapo", "stream1", "stream2", 2020),
+        HIKVISION("Hikvision", "Streaming/Channels/101", "Streaming/Channels/102", 80),
+        DAHUA("Dahua / Imou", "cam/realmonitor?channel=1&subtype=0", "cam/realmonitor?channel=1&subtype=1", 80),
+        REOLINK("Reolink", "h264Preview_01_main", "h264Preview_01_sub", 8000),
+        OTHER("Jiná kamera", "", "", 80),
     }
 
     const val KIND_GO2RTC = "go2rtc"
