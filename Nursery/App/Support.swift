@@ -59,7 +59,7 @@ final class Log: ObservableObject, @unchecked Sendable {
     }
 }
 
-/// The settings. The defaults work on the home Wi-Fi with no setup.
+/// The settings. The initial values of the server and the streams come from `HomeDefaults`.
 final class Settings: ObservableObject {
     enum Loudness: String, CaseIterable, Identifiable {
         case normal, loud, max
@@ -115,7 +115,7 @@ final class Settings: ObservableObject {
     @Published var streamMain: String { didSet { d.set(streamMain, forKey: "streamMain") } }
     @Published var streamSmall: String { didSet { d.set(streamSmall, forKey: "streamSmall") } }
     @Published var host: String { didSet { d.set(host, forKey: "host") } }
-    /// The Pi's Tailscale address. Away from home the app uses it when the LAN address does not answer.
+    /// The server's Tailscale address. Away from home the app uses it when the LAN address does not answer.
     @Published var remoteHost: String { didSet { d.set(remoteHost, forKey: "remoteHost") } }
     /// The address that the app uses now: `host` at home, `remoteHost` away. The engine sets it.
     @Published var activeHost: String = ""
@@ -160,10 +160,10 @@ final class Settings: ObservableObject {
         rtspPort = d.object(forKey: "rtspPort") as? Int ?? 554
         rtspUser = d.string(forKey: "rtspUser") ?? ""
         rtspCustom = d.string(forKey: "rtspCustom") ?? ""
-        streamMain = d.string(forKey: "streamMain") ?? "nursery"
-        streamSmall = d.string(forKey: "streamSmall") ?? "nursery_sd"
-        host = d.string(forKey: "host") ?? "192.168.0.136"
-        remoteHost = d.string(forKey: "remoteHost") ?? "100.104.188.72"        // rpi-host on the tailnet.
+        streamMain = d.string(forKey: "streamMain") ?? HomeDefaults.streamMain
+        streamSmall = d.string(forKey: "streamSmall") ?? HomeDefaults.streamSmall
+        host = d.string(forKey: "host") ?? HomeDefaults.serverHost
+        remoteHost = d.string(forKey: "remoteHost") ?? HomeDefaults.remoteHost
         babyAddresses = d.stringArray(forKey: "babyAddresses") ?? []
         quality = Quality(rawValue: d.string(forKey: "quality") ?? "") ?? .high
         loudness = Loudness(rawValue: d.string(forKey: "loudness") ?? "") ?? .normal
@@ -225,7 +225,7 @@ final class Settings: ObservableObject {
         // Tested on 25 Sep 2026 with Tools/rtsp_check.py. The 360p picture costs about 0.3 Mbit/s.
         let small = audioOnly || preferSmall || quality == .low
         if cameraKind == .rtsp { return rtspURL(small: small) }
-        return "rtsp://\(serverHost):8554/\(small ? streamSmall : streamMain)"
+        return "rtsp://\(serverHost):\(Go2rtc.rtspPort)/\(small ? streamSmall : streamMain)"
     }
 }
 
@@ -264,7 +264,7 @@ final class CameraControl: ObservableObject {
 
     /// It reads `window.NURSERY_CONFIG = { ptzWebhook: '…', powerWebhook: '…' }`.
     func loadConfig() async {
-        guard let url = URL(string: "http://\(settings.serverHost):1984/nursery/config.js") else { return }
+        guard let url = URL(string: "http://\(settings.serverHost):\(Go2rtc.apiPort)/\(HomeDefaults.configPath)") else { return }
         do {
             let (data, _) = try await session.data(from: url)
             let text = String(decoding: data, as: UTF8.self)
@@ -300,7 +300,7 @@ final class CameraControl: ObservableObject {
         // A camera with no go2rtc gives no photo on request.
         guard settings.cameraKind == .go2rtc else { return nil }
         let src = settings.quality == .high ? settings.streamMain : settings.streamSmall
-        guard let url = URL(string: "http://\(settings.serverHost):1984/api/frame.jpeg?src=\(src)") else { return nil }
+        guard let url = URL(string: "http://\(settings.serverHost):\(Go2rtc.apiPort)/api/frame.jpeg?src=\(src)") else { return nil }
         var req = URLRequest(url: url)
         req.timeoutInterval = 8          // go2rtc waits for a keyframe.
         do {
@@ -324,7 +324,7 @@ final class CameraControl: ObservableObject {
     }
 
     private func post(_ id: String, body: String) async -> Bool {
-        guard let url = URL(string: "http://\(settings.serverHost):8123/api/webhook/\(id)") else { return false }
+        guard let url = URL(string: "http://\(settings.serverHost):\(HomeAssistant.port)/api/webhook/\(id)") else { return false }
         var req = URLRequest(url: url)
         req.httpMethod = "POST"
         req.setValue("application/x-www-form-urlencoded", forHTTPHeaderField: "Content-Type")

@@ -4,6 +4,18 @@ import Security
 /// How the parent reads a camera: through a go2rtc server, or straight from the camera (RTSP).
 enum CameraKind: String { case go2rtc, rtsp }
 
+/// The ports of go2rtc. These are the software's defaults, not the developer's setup,
+/// so they are not in `HomeDefaults`.
+enum Go2rtc {
+    static let rtspPort: UInt16 = 8554
+    static let apiPort: UInt16 = 1984
+}
+
+/// The default port of Home Assistant, for its webhooks.
+enum HomeAssistant {
+    static let port: UInt16 = 8123
+}
+
 /// The common IP cameras, with the RTSP paths of their main and small streams.
 /// A new user picks the brand and types the IP address, the user and the password.
 enum CameraBrand: String, CaseIterable, Identifiable {

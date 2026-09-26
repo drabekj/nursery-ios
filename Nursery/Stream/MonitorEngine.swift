@@ -429,7 +429,7 @@ final class MonitorEngine: ObservableObject {
             let home = settings.trimmedHost
             let remote = settings.trimmedRemoteHost
             var host = home
-            if !remote.isEmpty, remote != home, !(await Reach.canConnect(host: home, port: 8554)) { host = remote }
+            if !remote.isEmpty, remote != home, !(await Reach.canConnect(host: home, port: Go2rtc.rtspPort)) { host = remote }
             // Set only a change: each set redraws every view that watches the settings.
             if settings.activeHost != host {
                 Log.shared.add("server: \(host == home ? "home" : "Tailscale") \(host)")
