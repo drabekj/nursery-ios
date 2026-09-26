@@ -89,6 +89,8 @@ jobs:
           shot baby baby light
           shot baby-live baby-live light
           shot activity-dark activity dark
+          # The states of the room (2.0): the engine sets the state from the name.
+          for s in klid sound-cry sound-lost sound-connecting sound-muted main-cry night-cry; do shot "$s" "$s" light; done
 
       - name: Upload the screenshots and logs
         if: always()
