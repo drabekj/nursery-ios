@@ -25,6 +25,7 @@ import cz.drabek.chuvicka.App
 import cz.drabek.chuvicka.Go2rtc
 import cz.drabek.chuvicka.Net
 import cz.drabek.chuvicka.Settings
+import cz.drabek.chuvicka.parent.CameraFinder
 import cz.drabek.chuvicka.proto.RtspClient
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.delay
@@ -42,19 +43,26 @@ fun RemoteScreen(back: () -> Unit) {
     val ipCamera = source == Settings.Source.CAMERA && kind == Settings.KIND_RTSP
     var here by remember { mutableStateOf(false) }
     var serverOk by remember { mutableStateOf(false) }
+    var cameraOk by remember { mutableStateOf(false) }
     var remoteField by remember { mutableStateOf(Settings.remoteHost.value) }
     val babyAddresses by Settings.babyAddresses.collectAsState()
     val babyTailscale = App.demo || babyAddresses.any { RtspClient.isTailscale(it.substringBeforeLast(":")) }
 
     // The checklist, read again every 2 s.
     LaunchedEffect(ipCamera) {
-        if (ipCamera) return@LaunchedEffect
         var n = 0
         while (true) {
-            if (App.demo) { here = true; serverOk = true }
+            if (App.demo) { here = true; serverOk = true; cameraOk = true }
             else {
                 here = withContext(Dispatchers.IO) { Net.hasTailscale() }
-                if (Settings.source.value == Settings.Source.CAMERA) {
+                if (ipCamera) {
+                    // The camera's home address answers with Tailscale on, away from home: the route works.
+                    // At home it answers anyway, so it counts only on another network.
+                    val host = hostOf(Settings.rtspUrl.value.trim())
+                    cameraOk = here && host.isNotEmpty() && withContext(Dispatchers.IO) {
+                        CameraFinder.homeNetwork()?.second != host.substringBeforeLast('.') && RtspClient.canConnect(host, 554)
+                    }
+                } else if (Settings.source.value == Settings.Source.CAMERA) {
                     val h = Settings.remoteHost.value.trim()
                     serverOk = h.isNotEmpty() && withContext(Dispatchers.IO) { RtspClient.canConnect(h, Go2rtc.RTSP_PORT) }
                 } else if (n % 5 == 0 && !Settings.babyAddresses.value.any { RtspClient.isTailscale(it.substringBeforeLast(":")) }) {
@@ -73,9 +81,14 @@ fun RemoteScreen(back: () -> Unit) {
                 fontSize = 17.sp, lineHeight = 24.sp, color = colors.ink)
             Spacer(Modifier.height(16.dp))
             if (ipCamera) {
-                RemoteNote("IP kameru Chůvička ukáže jen doma, na stejné Wi-Fi. Do kamery totiž nejde nainstalovat Tailscale, který by ji bezpečně propojil s vaším telefonem.")
+                CheckItem(here, "Tailscale v tomto telefonu", if (here) null else "Nainstalujte Tailscale a přihlaste se.") {
+                    if (!here) OutlinedButton(onClick = { openTailscaleStore(context) }, Modifier.heightIn(min = 48.dp)) { Text("Stáhnout Tailscale", color = colors.accent) }
+                }
                 Spacer(Modifier.height(12.dp))
-                RemoteNote("Chcete hlídat i na dálku? Použijte místo kamery starý telefon u postýlky. Změníte to v Nastavení → Kamera.")
+                CheckItem(cameraOk, "Domácí síť přes Tailscale",
+                    if (cameraOk) null else "Pro pokročilé: na počítači nebo routeru doma zapněte v Tailscale sdílení domácí sítě (subnet route) pro adresu kamery. Pak Chůvička mimo domov použije stejnou adresu kamery jako doma. Ověří se samo, až budete mimo domov.")
+                Spacer(Modifier.height(12.dp))
+                RemoteNote("Tailscale vytvoří soukromou šifrovanou síť jen pro vaše zařízení. Obraz nejde přes žádný cizí server. Doma Chůvička funguje i bez něj.")
             } else {
                 CheckItem(here, "Tailscale v tomto telefonu", if (here) null else "Nainstalujte Tailscale a přihlaste se.") {
                     if (!here) OutlinedButton(onClick = { openTailscaleStore(context) }, Modifier.heightIn(min = 48.dp)) { Text("Stáhnout Tailscale", color = colors.accent) }

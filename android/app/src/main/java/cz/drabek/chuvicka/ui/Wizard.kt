@@ -49,6 +49,7 @@ import cz.drabek.chuvicka.WizardEvents
 import cz.drabek.chuvicka.baby.BabyState
 import cz.drabek.chuvicka.parent.BabyFinder
 import cz.drabek.chuvicka.parent.CameraFinder
+import cz.drabek.chuvicka.parent.ServerMigration
 import kotlinx.coroutines.delay
 import java.net.URI
 
@@ -380,11 +381,17 @@ private fun BabyDoneStep(frame: Frame, startBaby: () -> Unit, done: () -> Unit) 
 
 @Composable
 private fun SourceStep(frame: Frame, phone: () -> Unit, camera: () -> Unit, server: () -> Unit) {
-    StepPage(frame, "Odkud bude obraz a zvuk?", below = { SmallButton("Mám vlastní server", server) }) {
+    StepPage(frame, "Odkud bude obraz a zvuk?", below = {
+        // The own server is the rare case: a small link, not a card.
+        TextButton(onClick = server, Modifier.padding(top = 4.dp).heightIn(min = 48.dp)) {
+            Text("Pro pokročilé: mám vlastní server (go2rtc)", color = colors.muted, fontSize = 14.sp, textAlign = TextAlign.Center)
+        }
+    }) {
         BigCard(Icons.Filled.PhoneAndroid, "Druhý telefon", "Starý telefon postavíte k postýlce. Nejjednodušší.",
             badge = "Doporučeno", big = true, onClick = phone)
         Spacer(Modifier.height(14.dp))
-        BigCard(Icons.Filled.Videocam, "Mám IP kameru", "Tapo, Hikvision, Dahua…", onClick = camera)
+        BigCard(Icons.Filled.Videocam, "Kamera v síti", "Tapo, Hikvision, Dahua, Reolink… Chůvička ji najde sama.",
+            big = true, onClick = camera)
     }
 }
 
@@ -478,7 +485,7 @@ private fun CameraStep(frame: Frame, next: () -> Unit) {
     val other = brand == Settings.CameraBrand.OTHER
     val ready = if (other) url.isNotBlank() else ip.isNotBlank()
 
-    StepPage(frame, if (other) "Jiná kamera" else "Kamera ${brand.title}", "Údaje najdete v aplikaci kamery.", primary = "Vyzkoušet", primaryEnabled = ready, onPrimary = {
+    StepPage(frame, if (other) "Jiná kamera" else "Kamera ${brand.title}", "Adresu kamery Chůvička najde sama. Vy zadáte jen účet kamery.", primary = "Vyzkoušet", primaryEnabled = ready, onPrimary = {
         val host = ip.trim().removePrefix("rtsp://").trimEnd('/')
         val p = port.trim().toIntOrNull() ?: 554
         val main = if (other) url.trim().let { if (it.startsWith("rtsp://", ignoreCase = true)) it else "rtsp://$it" } else "rtsp://$host:$p/${brand.main}"
@@ -558,6 +565,7 @@ private fun FinderSection(port: Int, what: String, hint: String, host: String, p
 
 @Composable
 private fun ServerStep(frame: Frame, next: () -> Unit) {
+    val context = LocalContext.current
     var host by remember { mutableStateOf(Settings.host.value) }
     var main by remember { mutableStateOf(Settings.streamMain.value) }
     var small by remember { mutableStateOf(Settings.streamSmall.value) }
@@ -570,6 +578,7 @@ private fun ServerStep(frame: Frame, next: () -> Unit) {
             Settings.set(Settings.streamSmall, "streamSmall", small.trim().ifEmpty { main.trim() })
             Settings.set(Settings.cameraKind, "cameraKind", Settings.KIND_GO2RTC)
             Settings.set(Settings.source, "source", Settings.Source.CAMERA)
+            if (!App.demo) ServerMigration.markDone(context)       // Chosen on purpose: never switch it away.
             next()
         }, below = { if (!manual) SmallButton("Upravit streamy ručně") { manual = true } }) {
         Field(host, { host = it }, "Adresa serveru", "Například ${HomeDefaults.SERVER_HOST.ifEmpty { "192.168.0.10" }}", KeyboardType.Uri)

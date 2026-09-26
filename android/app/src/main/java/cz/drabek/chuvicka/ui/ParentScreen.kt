@@ -24,16 +24,23 @@ import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.automirrored.filled.KeyboardArrowLeft
+import androidx.compose.material.icons.automirrored.filled.KeyboardArrowRight
 import androidx.compose.material.icons.automirrored.filled.VolumeOff
 import androidx.compose.material.icons.automirrored.filled.VolumeUp
 import androidx.compose.material.icons.filled.BatteryChargingFull
 import androidx.compose.material.icons.filled.Bedtime
 import androidx.compose.material.icons.filled.BrightnessLow
 import androidx.compose.material.icons.filled.GraphicEq
+import androidx.compose.material.icons.filled.Groups
+import androidx.compose.material.icons.filled.KeyboardArrowDown
+import androidx.compose.material.icons.filled.KeyboardArrowUp
+import androidx.compose.material.icons.filled.OpenWith
 import androidx.compose.material.icons.filled.Info
 import androidx.compose.material.icons.filled.Lock
 import androidx.compose.material.icons.filled.MoreVert
@@ -54,10 +61,14 @@ import androidx.compose.ui.draw.scale
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.graphics.vector.ImageVector
+import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalView
 import androidx.compose.ui.res.painterResource
+import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.semantics.onClick
+import androidx.compose.ui.semantics.role
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.semantics.stateDescription
 import androidx.compose.ui.text.font.FontWeight
@@ -67,17 +78,23 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.compose.ui.viewinterop.AndroidView
 import cz.drabek.chuvicka.App
+import cz.drabek.chuvicka.Log
 import cz.drabek.chuvicka.R
 import cz.drabek.chuvicka.Settings
 import cz.drabek.chuvicka.parent.Connection
 import cz.drabek.chuvicka.parent.Monitor
+import cz.drabek.chuvicka.parent.PtzDirection
 import cz.drabek.chuvicka.parent.RoomLevel
 import cz.drabek.chuvicka.parent.SoundMode
 import cz.drabek.chuvicka.parent.SoundStatus
 import cz.drabek.chuvicka.parent.VideoDecoder
+import kotlinx.coroutines.CoroutineStart
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.sync.Mutex
+import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.withContext
 import java.text.SimpleDateFormat
 import java.util.Date
@@ -101,6 +118,20 @@ fun ParentScreen(openSettings: () -> Unit, openHelp: () -> Unit, pip: Boolean, e
     val context = androidx.compose.ui.platform.LocalContext.current
     // Every "Ukončit hlídání" asks first. The demo screen "stop" shows the question.
     var confirmStop by remember { mutableStateOf(App.demoScreen == "stop") }
+    // "Natočit": the arrows on the picture. The demo screen "aim" shows them.
+    var aiming by remember { mutableStateOf(App.demoScreen == "aim") }
+    val ptzReady by Monitor.ptzReady.collectAsState()
+    LaunchedEffect(soundView, night, ptzReady) { if (soundView || night || (!ptzReady && !App.demo)) aiming = false }
+    val snackbar = remember { SnackbarHostState() }
+    // A message of the monitor ("Kamera nalezena na nové adrese"): once, then gone.
+    LaunchedEffect(Unit) {
+        Monitor.notice.collect { text ->
+            if (text != null) {
+                Monitor.notice.value = null
+                snackbar.showSnackbar(text)
+            }
+        }
+    }
     if (paused) {
         PausedScreen { Monitor.paused.value = false; cz.drabek.chuvicka.parent.ParentService.start(context) }
         return
@@ -114,13 +145,15 @@ fun ParentScreen(openSettings: () -> Unit, openHelp: () -> Unit, pip: Boolean, e
             }
             Spacer(Modifier.height(16.dp))
             AnimatedContent(soundView, Modifier.weight(1f), transitionSpec = { fadeIn(tween(350)) togetherWith fadeOut(tween(200)) }, label = "view") { sound ->
-                if (sound) SoundStage() else PictureStage(enterPip)
+                if (sound) SoundStage() else PictureStage(enterPip, aiming && !night, snackbar) { aiming = false }
             }
             Spacer(Modifier.height(12.dp))
             VolumeWarning()
-            ControlBar()
+            ControlBar(aiming) { aiming = !aiming }
             Spacer(Modifier.height(8.dp))
         }
+        // Above the control bar; Night mode covers it.
+        SnackbarHost(snackbar, Modifier.align(Alignment.BottomCenter).navigationBarsPadding().padding(start = 16.dp, end = 16.dp, bottom = 88.dp))
         AnimatedVisibility(night, enter = fadeIn(tween(500)), exit = fadeOut(tween(500))) {
             NightScreen(close = { Monitor.night.value = false; Monitor.reconnect("night mode off") }, requestStop = { confirmStop = true })
         }
@@ -198,14 +231,16 @@ private fun Segment(selected: Boolean, icon: ImageVector, title: String, onClick
 // MARK: The picture view
 
 @Composable
-private fun PictureStage(enterPip: () -> Unit) {
+private fun PictureStage(enterPip: () -> Unit, aiming: Boolean, snackbar: SnackbarHostState, closeAim: () -> Unit) {
     val (w, h) = Monitor.videoSize.collectAsState().value
     val pictureLive by Monitor.pictureLive.collectAsState()
     Column {
         Box(Modifier.fillMaxWidth().aspectRatio(w.toFloat() / maxOf(h, 1)).clip(RoundedCornerShape(26.dp)).background(Color.Black)) {
             VideoSurface(Modifier.fillMaxSize())
             if (!pictureLive) VideoPlaceholder()
-            if (pictureLive && !App.demo) {
+            // A plain if: AnimatedVisibility in a Box inside a Column resolves to the Column's version.
+            if (aiming) AimOverlay(snackbar, closeAim)
+            if (pictureLive && !App.demo && !aiming) {
                 IconButton(onClick = enterPip, Modifier.align(Alignment.BottomEnd).padding(10.dp).clip(CircleShape).background(Color.Black.copy(alpha = 0.45f))) {
                     Icon(Icons.Filled.PictureInPictureAlt, "Obraz v obraze", tint = Color.White)
                 }
@@ -252,7 +287,14 @@ private fun VideoPlaceholder() {
     Column(Modifier.fillMaxSize().background(Color.Black.copy(alpha = 0.8f)).padding(20.dp),
         horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.Center) {
         val c = connection
-        if (c is Connection.Retrying && c.failures >= 2) {
+        if (c is Connection.Retrying && c.why.startsWith("Kameru teď sleduje")) {
+            // The camera allows only a few phones at a time. The monitor tries again by itself.
+            Icon(Icons.Filled.Groups, null, tint = colors.warn, modifier = Modifier.size(30.dp))
+            Spacer(Modifier.height(8.dp))
+            Text(c.why, color = Color.White, fontWeight = FontWeight.SemiBold, textAlign = TextAlign.Center)
+            Spacer(Modifier.height(8.dp))
+            Button(onClick = { Monitor.reconnect("user asked") }) { Text("Zkusit znovu") }
+        } else if (c is Connection.Retrying && c.failures >= 2) {
             Icon(Icons.Filled.WifiOff, null, tint = colors.alarm, modifier = Modifier.size(30.dp))
             Spacer(Modifier.height(8.dp))
             Text(if (source == Settings.Source.PHONE) "Telefon u miminka je nedostupný" else "Kamera je nedostupná",
@@ -273,6 +315,104 @@ private fun VideoPlaceholder() {
                 else -> "Připojování ke kameře…"
             }, color = Color.White.copy(alpha = 0.7f), textAlign = TextAlign.Center)
         }
+    }
+}
+
+/**
+ * "Natočit": four arrows on the picture, so the parent watches while aiming. The same as on the iPhone:
+ * a tap is one step, holding repeats a step every 0.7 s. It closes itself after 20 s with no use.
+ */
+@Composable
+private fun AimOverlay(snackbar: SnackbarHostState, done: () -> Unit) {
+    var hint by remember { mutableStateOf(true) }
+    var lastUse by remember { mutableLongStateOf(System.currentTimeMillis()) }
+    val scope = rememberCoroutineScope()
+    val lock = remember { Mutex() }          // One move at a time.
+    val currentDone by rememberUpdatedState(done)
+    DisposableEffect(Unit) {
+        Log.add("aim on")
+        onDispose { Log.add("aim off") }
+    }
+    LaunchedEffect(Unit) {
+        delay(2500)
+        hint = false
+        while (true) {
+            delay(2000)
+            // Not in the demo: the screenshot must show the arrows.
+            if (!App.demo && System.currentTimeMillis() - lastUse > 20_000) {
+                Log.add("aim: 20 s with no use")
+                currentDone()
+                break
+            }
+        }
+    }
+    val step: suspend (PtzDirection) -> Unit = { d ->
+        lastUse = System.currentTimeMillis()
+        hint = false
+        if (!App.demo) {
+            val ok = lock.withLock { withContext(Dispatchers.IO) { Monitor.move(d) } }
+            lastUse = System.currentTimeMillis()
+            if (!ok && snackbar.currentSnackbarData == null) scope.launch { snackbar.showSnackbar("Kamera se neotočila.") }
+        }
+    }
+    Box(Modifier.fillMaxSize().background(Color.Black.copy(alpha = 0.22f))) {
+        AimArrow(Icons.Filled.KeyboardArrowUp, "Natočit kameru nahoru", Modifier.align(Alignment.TopCenter)) { step(PtzDirection.UP) }
+        AimArrow(Icons.Filled.KeyboardArrowDown, "Natočit kameru dolů", Modifier.align(Alignment.BottomCenter)) { step(PtzDirection.DOWN) }
+        AimArrow(Icons.AutoMirrored.Filled.KeyboardArrowLeft, "Natočit kameru doleva", Modifier.align(Alignment.CenterStart)) { step(PtzDirection.LEFT) }
+        AimArrow(Icons.AutoMirrored.Filled.KeyboardArrowRight, "Natočit kameru doprava", Modifier.align(Alignment.CenterEnd)) { step(PtzDirection.RIGHT) }
+        AnimatedVisibility(hint, Modifier.align(Alignment.Center).padding(horizontal = 76.dp), enter = fadeIn(), exit = fadeOut(tween(400))) {
+            Text("Klepnutím nebo podržením šipky natočíte kameru",
+                Modifier.clip(RoundedCornerShape(50)).background(Color.Black.copy(alpha = 0.55f)).padding(horizontal = 14.dp, vertical = 8.dp),
+                color = Color.White, fontSize = 13.sp, fontWeight = FontWeight.Medium, textAlign = TextAlign.Center)
+        }
+        Text("Hotovo",
+            Modifier.align(Alignment.TopEnd).padding(12.dp).clip(RoundedCornerShape(50)).background(Color.Black.copy(alpha = 0.45f))
+                .clickable { Log.add("aim: Hotovo"); done() }.padding(horizontal = 14.dp, vertical = 8.dp),
+            color = Color.White, fontSize = 15.sp, fontWeight = FontWeight.SemiBold)
+    }
+}
+
+/** One round arrow: a tap is one step; held, a step every 0.7 s until released. */
+@Composable
+private fun AimArrow(icon: ImageVector, label: String, modifier: Modifier, step: suspend () -> Unit) {
+    var pressed by remember { mutableStateOf(false) }
+    val currentStep by rememberUpdatedState(step)
+    val scope = rememberCoroutineScope()
+    Box(modifier.padding(10.dp).size(54.dp).scale(if (pressed) 0.9f else 1f).clip(CircleShape)
+        .background(if (pressed) colors.moon.copy(alpha = 0.6f) else Color.Black.copy(alpha = 0.45f))
+        .semantics {
+            contentDescription = label
+            role = Role.Button
+            onClick { scope.launch { currentStep() }; true }
+        }
+        .pointerInput(Unit) {
+            coroutineScope {
+                detectTapGestures(onPress = {
+                    var held = true
+                    pressed = true
+                    // Undispatched: a quick tap still makes its one step. A running step always finishes
+                    // (it ends with Stop), the loop only checks between the steps.
+                    launch(start = CoroutineStart.UNDISPATCHED) {
+                        while (true) {
+                            val started = System.currentTimeMillis()
+                            currentStep()
+                            if (!held) break
+                            val rest = 700 - (System.currentTimeMillis() - started)
+                            if (rest > 0) delay(rest)
+                            if (!held) break
+                        }
+                    }
+                    try {
+                        tryAwaitRelease()
+                    } finally {
+                        held = false
+                        pressed = false
+                    }
+                })
+            }
+        },
+        contentAlignment = Alignment.Center) {
+        Icon(icon, null, Modifier.size(32.dp), tint = Color.White)
     }
 }
 
@@ -334,13 +474,8 @@ private fun PeekCard() {
     var taken by remember { mutableStateOf(0L) }
     var loading by remember { mutableStateOf(false) }
     var failed by remember { mutableStateOf(false) }
-    var unavailable by remember { mutableStateOf(false) }
     val scope = rememberCoroutineScope()
     fun peek() {
-        // An IP camera read directly gives no photo: only the live picture.
-        if (!App.demo && Settings.source.value == Settings.Source.CAMERA && Settings.cameraKind.value == Settings.KIND_RTSP) {
-            unavailable = true; return
-        }
         loading = true; failed = false
         scope.launch {
             val bytes = withContext(Dispatchers.IO) { Monitor.snapshot() }
@@ -364,7 +499,6 @@ private fun PeekCard() {
         Column(Modifier.weight(1f)) {
             Text("Fotka z postýlky", fontWeight = FontWeight.SemiBold, color = colors.ink)
             val sub = when {
-                unavailable -> "Fotka není k dispozici. Přepněte na Obraz."
                 failed -> "Kamera neodpověděla. Zkuste to znovu."
                 loading -> "Fotím…"
                 taken > 0 -> "${ago(taken)} · klepnutím obnovíte"
@@ -445,8 +579,13 @@ private fun VolumeWarning() {
 }
 
 @Composable
-private fun ControlBar() {
+private fun ControlBar(aiming: Boolean, toggleAim: () -> Unit) {
     val mode by Monitor.mode.collectAsState()
+    val ptzReady by Monitor.ptzReady.collectAsState()
+    val source by Settings.source.collectAsState()
+    val soundView by Settings.soundView.collectAsState()
+    // Only for a camera that turns (ONVIF), and only with the picture. The demo shows it for the screenshot.
+    val canAim = ((ptzReady && source == Settings.Source.CAMERA) || App.demo) && !soundView
     Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(10.dp)) {
         Box(Modifier.weight(1f)) {
             BarButton(
@@ -457,6 +596,13 @@ private fun ControlBar() {
                 modifier = Modifier.semantics { stateDescription = if (mode == SoundMode.OFF) "Ztlumeno" else "Živý zvuk" },
                 onClick = { Monitor.setMode(if (mode == SoundMode.OFF) SoundMode.LIVE else SoundMode.OFF) },
             )
+        }
+        if (canAim) {
+            Box(Modifier.weight(1f)) {
+                BarButton("Natočit", Icons.Filled.OpenWith, if (aiming) colors.moon else colors.card, if (aiming) Color.Black else colors.ink,
+                    modifier = Modifier.semantics { stateDescription = if (aiming) "Šipky zobrazené" else "Šipky skryté" },
+                    onClick = toggleAim)
+            }
         }
         Box(Modifier.weight(1f)) {
             BarButton("Noční", Icons.Filled.Bedtime, colors.card, colors.ink,

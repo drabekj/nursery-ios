@@ -13,7 +13,7 @@ shot() {   # shot <file> <screen>
   adb exec-out screencap -p > "shots/$1.png"
   echo "shot $1"
 }
-for s in parent sound muted volume night night-controls stop settings settings-advanced remote help baby baby-live; do shot "$s" "$s"; done
+for s in parent aim sound muted volume night night-controls stop settings settings-advanced remote help baby baby-live; do shot "$s" "$s"; done
 for s in wizard wizard-role wizard-source wizard-camera wizard-test; do shot "$s" "$s"; done
 shot parent-dark parent-dark
 shot sound-dark sound-dark
