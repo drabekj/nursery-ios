@@ -203,9 +203,11 @@ struct SettingsView: View {
         }
     }
 
-    /// The go2rtc server: its address and the camera controls live only there.
+    /// The go2rtc server: its address and the "from the server" toggle live only there.
     private var server: Bool { settings.source == .camera && settings.cameraKind == .go2rtc }
-    private var aims: Bool { server && settings.cameraControl }
+    /// A camera read directly: its controls come from the camera itself (ONVIF).
+    private var direct: Bool { settings.source == .camera && settings.cameraKind == .rtsp }
+    private var aims: Bool { (server && settings.cameraControl) || direct }
 
     /// What is connected, in the words of the guide.
     private var cameraText: String {
