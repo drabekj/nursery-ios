@@ -21,15 +21,16 @@ struct HelpView: View {
                       "Přepínač nahoře volí, co hlavní obrazovka ukazuje. Obraz ukazuje živé video z postýlky. Jen zvuk ukazuje jen pokojíček: kruh, který se rozvlní se zvukem, a slovy, co se děje. Obraz se nezobrazuje. Z kamery Tapo se stahuje jen v nejnižší kvalitě, protože bez něj neposílá ani zvuk. Z telefonu u miminka jde jen zvuk.",
                       footnote: "Jen zvuk šetří baterii i Wi-Fi a telefon méně hřeje. Na miminko se můžete kdykoli podívat tlačítkem Nahlédnout do postýlky. Pořídí jednu fotku z kamery, bez živého obrazu.")
                 topic("speaker.wave.1", "Hlasitost",
-                      "Chůvička hraje tak hlasitě, jak je nastavený iPhone. Když je hlasitost iPhonu pod 20 %, ukáže Chůvička upozornění a posuvník hlasitosti. Když je zvuk vypnutý, tlačítko Zvuk svítí červeně.",
+                      "Chůvička hraje tak hlasitě, jak je nastavený iPhone. Když je hlasitost iPhonu pod 20 %, ukáže Chůvička upozornění a posuvník hlasitosti. Když je zvuk ztlumený, tlačítko Zvuk svítí červeně. Při pláči pak přijde upozornění, stejně jako při hlasitosti pod 20 %.",
                       footnote: "Tlačítko ztišení na boku iPhonu Chůvičku neztiší. Hlasitost ale ano.")
                 topic("moon.stars", "Noční režim",
                       "Displej zůstane zapnutý, ale téměř černý a na nejnižším jasu. Telefon se sám nezamkne. Obraz se zastaví, zvuk a upozornění běží dál. Když se miminko ozve, vlnovka se rozsvítí. Klepnutím displej probudíte.")
                 topic("battery.75", "Baterie a nabíjení",
                       "Nejúspornější je zamčený telefon, kdy běží jen zvuk. Noční režim a zobrazení Jen zvuk spotřebují o něco víc, protože svítí displej. Nejvíc spotřebuje otevřená aplikace se živým obrazem. Na celou noc doporučujeme nabíječku.",
                       footnote: "Spotřebu vašeho telefonu Chůvička měří sama. Teď: \(battery.summary).")
-                topic("bell.badge.fill", "Tichý režim",
-                      "Chůvička nic nepřehrává, ale dál poslouchá. Když se miminko ozve, přijde upozornění. Hodí se, když nechcete celou noc slyšet šum pokoje. Zapnete ho podržením tlačítka Zvuk.")
+                topic("bell.badge.fill", "Ztlumený zvuk",
+                      "Když zvuk ztlumíte tlačítkem Zvuk, Chůvička nic nepřehrává, ale dál poslouchá. Když se miminko rozpláče, přijde upozornění, i když máte aplikaci otevřenou. Hodí se, když nechcete celou noc slyšet šum pokoje.",
+                      footnote: "Upozornění přijde také při živém zvuku, když je hlasitost iPhonu pod 20 %. Poslouchat úplně přestane jen po Ukončit hlídání.")
                 topic("chart.bar.xaxis", "Přehled",
                       "Ukazuje, kdy Chůvička poslouchala a kdy se miminko ozvalo, i s fotkou z kamery. Šedá místa znamenají, že Chůvička neposlouchala. To není totéž co ticho.")
                 topic("iphone.gen3.radiowaves.left.and.right", "Dva telefony místo kamery",

@@ -27,10 +27,12 @@ enum class RoomLevel(val title: String) {
 }
 
 enum class SoundStatus(val title: String) {
-    LISTENING("Živý zvuk"), SILENT("Tichý režim"), CONNECTING("Připojování…"), LOST("Zvuk vypadl"), MUTED("Zvuk vypnut")
+    LISTENING("Živý zvuk"), SILENT("Ztlumeno"), CONNECTING("Připojování…"), LOST("Zvuk vypadl"), MUTED("Zvuk vypnut")
 }
 
-enum class SoundMode(val title: String) { LIVE("Živý zvuk"), SILENT("Tichý režim"), OFF("Vypnuto") }
+/** Muted is not off: nothing plays, but the app still hears the room and warns about a cry.
+ * Only the power button stops the listening. */
+enum class SoundMode(val title: String) { LIVE("Živý zvuk"), OFF("Ztlumeno") }
 
 sealed interface Connection {
     data object Idle : Connection
@@ -241,8 +243,7 @@ object Monitor {
 
     fun tick(now: Long = System.currentTimeMillis()) {
         val raw = if (App.demo) demoLevel(now) else peak.also { peak = 0f }
-        val target = if (mode.value != SoundMode.OFF) raw else 0f
-        smoothed = if (target > smoothed) target else smoothed * 0.82f + target * 0.18f
+        smoothed = if (raw > smoothed) raw else smoothed * 0.82f + raw * 0.18f
         history.value = history.value.drop(1) + smoothed
         holdRoomLevel(RoomLevel.of(smoothed), now)
         detectSound(smoothed, now)
@@ -251,8 +252,7 @@ object Monitor {
         val heard = now - lastAudio < 3000
         if (heard) everHeard = true
         val s = when {
-            mode.value == SoundMode.OFF -> SoundStatus.MUTED
-            heard -> if (mode.value == SoundMode.SILENT) SoundStatus.SILENT else SoundStatus.LISTENING
+            heard -> if (mode.value == SoundMode.OFF) SoundStatus.SILENT else SoundStatus.LISTENING
             !everHeard -> SoundStatus.CONNECTING
             else -> SoundStatus.LOST
         }
@@ -305,7 +305,8 @@ object Monitor {
                 if (aboveSince == null) aboveSince = now
                 if (now - aboveSince!! >= 1000) {
                     soundNow.value = true
-                    if (mode.value == SoundMode.SILENT) Alerts.sound(context)
+                    // Warn when the parent may not hear it: the sound muted, or the phone volume low.
+                    if (mode.value == SoundMode.OFF || volume.value < 0.2f) Alerts.sound(context)
                 }
             }
             if (soundNow.value) lastSound.value = now

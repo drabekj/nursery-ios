@@ -362,7 +362,7 @@ private fun RoomWords(center: Boolean) {
     }
     val sub = when (status) {
         SoundStatus.LISTENING -> if (loudness == Settings.Loudness.NORMAL) "Živý zvuk" else "Živý zvuk · ${loudness.title} +${loudness.decibels.toInt()} dB"
-        SoundStatus.SILENT -> "Tichý režim · při zvuku přijde upozornění"
+        SoundStatus.SILENT -> if (soundView) "Ztlumeno · při pláči přijde upozornění\nZvuk zapnete klepnutím na kruh" else "Ztlumeno · při pláči přijde upozornění"
         SoundStatus.CONNECTING -> "Spouštění živého zvuku…"
         SoundStatus.LOST -> "Obnovování spojení…"
         SoundStatus.MUTED -> if (soundView) "Zapnete ho klepnutím na kruh" else "Zapnete ho tlačítkem Zvuk"
@@ -413,8 +413,8 @@ private fun ControlBar() {
     Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(10.dp)) {
         Box(Modifier.weight(1f)) {
             BarButton(
-                title = when (mode) { SoundMode.LIVE -> "Zvuk"; SoundMode.SILENT -> "Tichý"; SoundMode.OFF -> "Vypnuto" },
-                icon = when (mode) { SoundMode.LIVE -> Icons.AutoMirrored.Filled.VolumeUp; SoundMode.SILENT -> Icons.Filled.Notifications; SoundMode.OFF -> Icons.AutoMirrored.Filled.VolumeOff },
+                title = when (mode) { SoundMode.LIVE -> "Zvuk"; SoundMode.OFF -> "Ztlumeno" },
+                icon = when (mode) { SoundMode.LIVE -> Icons.AutoMirrored.Filled.VolumeUp; SoundMode.OFF -> Icons.AutoMirrored.Filled.VolumeOff },
                 fill = if (mode == SoundMode.OFF) colors.alarm else colors.moon,     // Off is red: nothing plays.
                 ink = if (mode == SoundMode.OFF) Color.White else Color.Black,
                 onClick = { Monitor.setMode(if (mode == SoundMode.OFF) SoundMode.LIVE else SoundMode.OFF) },

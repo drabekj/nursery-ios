@@ -1,9 +1,24 @@
 import SwiftUI
+import UserNotifications
 
 /// iOS tells the app delegate when the user closes the app.
-final class AppDelegate: NSObject, UIApplicationDelegate {
+final class AppDelegate: NSObject, UIApplicationDelegate, UNUserNotificationCenterDelegate {
     static var onTerminate: (() -> Void)?
+
+    func application(_ application: UIApplication,
+                     didFinishLaunchingWithOptions launchOptions: [UIApplication.LaunchOptionsKey: Any]? = nil) -> Bool {
+        UNUserNotificationCenter.current().delegate = self
+        return true
+    }
+
     func applicationWillTerminate(_ application: UIApplication) { Self.onTerminate?() }
+
+    /// iOS hides a notification while its app is open. A cry with the sound muted must show
+    /// also then, for example in Night mode on the night table.
+    func userNotificationCenter(_ center: UNUserNotificationCenter, willPresent notification: UNNotification) async
+        -> UNNotificationPresentationOptions {
+        [.banner, .list, .sound]
+    }
 }
 
 @main

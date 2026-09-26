@@ -21,10 +21,12 @@ final class MonitorEngine: ObservableObject {
     /// Live: you hear the room. Silent: you hear nothing, and a sound gives a notification.
     /// Off: no sound. In the background, Live and Silent keep the app awake.
     enum SoundMode: String, CaseIterable, Identifiable {
-        case live, silent, off
+        /// Muted is not off: the app plays nothing, but it still hears the room and warns about a cry.
+        /// Only "Ukončit hlídání" stops the listening.
+        case live, off
         var id: String { rawValue }
-        var title: String { switch self { case .live: "Živý zvuk"; case .silent: "Tichý režim s upozorněním"; case .off: "Vypnuto" } }
-        var symbol: String { switch self { case .live: "speaker.wave.2.fill"; case .silent: "bell.badge.fill"; case .off: "speaker.slash.fill" } }
+        var title: String { switch self { case .live: "Živý zvuk"; case .off: "Ztlumeno" } }
+        var symbol: String { switch self { case .live: "speaker.wave.2.fill"; case .off: "speaker.slash.fill" } }
     }
 
     /// The one state that the screen shows. It joins the connection and the picture.
@@ -56,12 +58,9 @@ final class MonitorEngine: ObservableObject {
         didSet {
             guard mode != oldValue else { return }
             UserDefaults.standard.set(mode.rawValue, forKey: "soundMode")
-            if mode != .off { lastOnMode = mode }
             applyMode()
         }
     }
-    /// The mode to use when the sound goes on again.
-    private(set) var lastOnMode: SoundMode = .live
 
     var overall: Overall {
         switch connection {
@@ -119,10 +118,10 @@ final class MonitorEngine: ObservableObject {
 
     init(settings: Settings) {
         self.settings = settings
-        var savedMode = SoundMode(rawValue: UserDefaults.standard.string(forKey: "soundMode") ?? "") ?? .live
+        let saved = UserDefaults.standard.string(forKey: "soundMode") ?? ""
+        var savedMode = SoundMode(rawValue: saved) ?? (saved == "silent" ? .off : .live)   // "silent" was the old muted mode.
         if Self.isDemo { savedMode = UserDefaults.standard.string(forKey: "demoScreen") == "muted" ? .off : .live }
         mode = savedMode
-        lastOnMode = savedMode == .off ? .live : savedMode
         let view = VideoLayerView()
         videoView = view
         renderer = VideoRenderer(layer: view.displayLayer)
@@ -194,7 +193,7 @@ final class MonitorEngine: ObservableObject {
         }
     }
 
-    func soundOn() { mode = lastOnMode }
+    func soundOn() { mode = .live }
 
     // MARK: The life cycle
 
@@ -327,14 +326,8 @@ final class MonitorEngine: ObservableObject {
     private func enterBackgroundMode() {
         guard !isForeground, !pip.isActive else { return }
         shared.withLock { $0.renderVideo = false }
-        if mode != .off {
-            if !audioOnly { reconnect(why: "background: sound only") }
-        } else {
-            // No sound and no picture: nothing to do. Close the stream.
-            Log.shared.add("background with no sound: stream closed")
-            stopClient()
-            connection = .idle
-        }
+        // Also with the sound muted: the app still listens, to warn about a cry.
+        if !audioOnly { reconnect(why: "background: sound only") }
     }
 
     private func pictureInPictureChanged(_ active: Bool) {
@@ -353,10 +346,10 @@ final class MonitorEngine: ObservableObject {
     private var wantsPicture: Bool { !nightMode && !settings.soundView }
 
     /// In the foreground, the app asks for the sound only when no screen shows the picture.
-    /// In the background, it asks for the sound only, unless the sound is off (then it closes the stream).
+    /// In the background, it asks for the sound only.
     private var wantsAudioOnly: Bool {
         guard !pip.isActive else { return false }
-        return isForeground ? !wantsPicture : mode != .off
+        return isForeground ? !wantsPicture : true
     }
 
     private func stopClient() {
@@ -570,30 +563,23 @@ final class MonitorEngine: ObservableObject {
     private func applyMode() {
         guard !Self.isDemo else { updateStatus(force: true); return }
         guard !suspended else { return }
-        switch mode {
-        case .live, .silent:
-            activateAudioSession()
-            audio.start()
-            // Silent mode plays the stream at zero volume. The app stays awake and hears the room.
-            audio.setMuted(mode == .silent)
-            alerted = false
-            if mode == .silent { NurseryAlerts.requestPermission() }
-        case .off:
-            audio.stop()
-            activityLog.interrupt()
-            NurseryAlerts.clearLoss()
-            NurseryAlerts.disarmWatchdog()
-        }
+        activateAudioSession()
+        audio.start()
+        // Muted plays the stream at zero volume. The app stays awake, hears the room, and warns about a cry.
+        audio.setMuted(mode == .off)
+        alerted = false
+        if mode == .off { NurseryAlerts.requestPermission() }
         updateStatus(force: true)
         if !isForeground { enterBackgroundMode() }
-        if !isForeground, mode != .off, client == nil { reconnect(why: "sound on in the background") }
+        if !isForeground, client == nil { reconnect(why: "sound mode changed in the background") }
     }
 
     /// It returns a full frame from go2rtc. The app sets it (CameraControl.snapshot).
     var snapshotProvider: (() async -> UIImage?)?
 
-    /// An episode starts in the room. Keep a photo of the moment, and in silent mode
-    /// (or with the sound alert on) tell the parent.
+    /// An episode starts in the room. Keep a photo of the moment, and tell the parent when the
+    /// parent may not hear it: the sound muted, the iPhone volume low, or the sound alert on.
+    /// Also with the app open, for example in Night mode on the night table.
     private func episodeStarted(_ episode: SoundActivity.Episode) {
         Log.shared.add(String(format: "sound episode, level %.2f, floor %.2f", episode.peak, activityLog.noiseFloor))
         if let snapshotProvider {
@@ -603,9 +589,11 @@ final class MonitorEngine: ObservableObject {
                 if let image = await snapshotProvider() { Moments.save(image, for: episode.id) }
             }
         }
-        let wanted = mode == .silent || (mode == .live && settings.alertOnSound)
-        guard wanted, UIApplication.shared.applicationState != .active,
-              Date().timeIntervalSince(lastSoundAlert) > 60 else { return }
+        let unheard = mode == .off || volumeLow
+        let wanted = unheard || settings.alertOnSound
+        // With live sound at a good volume, the parent hears it. An alert on the open app is noise then.
+        let appOpen = UIApplication.shared.applicationState == .active
+        guard wanted, !(appOpen && !unheard), Date().timeIntervalSince(lastSoundAlert) > 60 else { return }
         lastSoundAlert = Date()
         NurseryAlerts.postSound(at: episode.start)
     }
@@ -658,10 +646,8 @@ final class MonitorEngine: ObservableObject {
             Log.shared.add("sound interruption ended")
             activateAudioSession()
             audio.setInterrupted(false)
-            if mode != .off {
-                audio.start()
-                audio.setMuted(mode == .silent)
-            }
+            audio.start()
+            audio.setMuted(mode == .off)
         @unknown default:
             break
         }
@@ -681,7 +667,7 @@ final class MonitorEngine: ObservableObject {
 
         // Fast attack, slow release. This is how a VU meter moves.
         let raw = Self.isDemo ? demoLevel() : s.peak
-        let target = mode != .off ? raw : 0
+        let target = raw
         let smoothed = target > meter ? target : meter * 0.82 + target * 0.18
         meter = smoothed
         // Change the published values only while a screen shows them. Each change makes SwiftUI
@@ -694,7 +680,7 @@ final class MonitorEngine: ObservableObject {
             history.append(smoothed)
         }
 
-        if mode != .off, soundStatus == .listening || soundStatus == .silent {
+        if soundStatus == .listening || soundStatus == .silent {
             activityLog.feed(level: smoothed, at: now)
         }
         holdRoomLevel(RoomLevel(smoothed), now: now)
@@ -712,9 +698,9 @@ final class MonitorEngine: ObservableObject {
         }
         updateStatus(force: false, lastAudio: s.lastAudio)
 
-        if mode != .off { audio.heal() }
+        audio.heal()
         // The watchdog: while the app runs in the background, keep the "stopped" alert 150 s away.
-        if !isForeground, mode != .off, !Self.isDemo, now.timeIntervalSince(lastWatchdog) >= 30 {
+        if !isForeground, !Self.isDemo, now.timeIntervalSince(lastWatchdog) >= 30 {
             lastWatchdog = now
             NurseryAlerts.armWatchdog()
         }
@@ -756,8 +742,7 @@ final class MonitorEngine: ObservableObject {
     private func updateStatus(force: Bool, lastAudio: Date? = nil) {
         let heardRecently = Date().timeIntervalSince(lastAudio ?? shared.withLock { $0.lastAudio }) < 3
         let status: SoundStatus
-        if mode == .off { status = .muted }
-        else if heardRecently { status = mode == .silent ? .silent : .listening }
+        if heardRecently { status = mode == .off ? .silent : .listening }
         else if !everHeard { status = .connecting }
         else { status = .lost }
 
@@ -780,6 +765,6 @@ final class MonitorEngine: ObservableObject {
         }
 
         guard !Self.isDemo else { return }
-        activity.update(status: status, enabled: settings.liveActivity && mode != .off)
+        activity.update(status: status, enabled: settings.liveActivity)
     }
 }

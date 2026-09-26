@@ -156,7 +156,7 @@ struct SoundStage: View {
                     .foregroundStyle(RoomWords.color(engine))
                     .contentTransition(.opacity)
                     .animation(.easeInOut(duration: 0.35), value: RoomWords.headline(engine))
-                Text(engine.mode == .off ? "Zapnete ho klepnutím na kruh" : RoomWords.subline(engine, settings))
+                Text(engine.mode == .off ? "Ztlumeno · při pláči přijde upozornění\nZvuk zapnete klepnutím na kruh" : RoomWords.subline(engine, settings))
                     .font(.subheadline)
                     .foregroundStyle(.secondary)
             }

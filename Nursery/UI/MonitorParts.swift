@@ -216,7 +216,7 @@ enum RoomWords {
         switch e.soundStatus {
         case .listening:
             settings.loudness == .normal ? "Živý zvuk" : "Živý zvuk · \(settings.loudness.title) +\(Int(settings.loudness.decibels)) dB"
-        case .silent: "Tichý režim · při zvuku přijde upozornění"
+        case .silent: "Ztlumeno · při pláči přijde upozornění"
         case .connecting: "Spouštění živého zvuku…"
         case .lost: "Obnovování spojení s kamerou…"
         case .muted: "Zapnete ho tlačítkem Zvuk"
@@ -354,14 +354,13 @@ struct ControlBar: View {
         .buttonStyle(PressScale())
         .accessibilityLabel("Zvuk")
         .accessibilityValue(engine.mode.title)
-        .accessibilityHint("Dvojitým klepnutím zvuk zapnete nebo vypnete. Podržením zobrazíte další volby.")
+        .accessibilityHint("Dvojitým klepnutím zvuk zapnete nebo ztlumíte. Ztlumená Chůvička dál poslouchá a na pláč upozorní. Podržením zobrazíte další volby.")
     }
 
     private var soundTitle: String {
         switch engine.mode {
         case .live: "Zvuk"
-        case .silent: "Tichý"
-        case .off: "Vypnuto"
+        case .off: "Ztlumeno"
         }
     }
 }

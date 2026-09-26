@@ -10,7 +10,7 @@ struct NurseryActivityAttributes: ActivityAttributes {
         var title: String {
             switch self {
             case .listening: "Živý zvuk"
-            case .silent: "Tichý režim"
+            case .silent: "Ztlumeno"
             case .connecting: "Připojování…"
             case .lost: "Zvuk vypadl"
             case .muted: "Zvuk vypnut"
