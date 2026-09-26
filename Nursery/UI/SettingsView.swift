@@ -16,6 +16,7 @@ struct SettingsView: View {
 
     var body: some View {
         NavigationStack(path: $path) {
+            ScrollViewReader { proxy in
             Form {
                 Section {
                     Button(action: changeCamera) {
@@ -98,6 +99,7 @@ struct SettingsView: View {
                         Label("Pro pokročilé", systemImage: "gearshape.2")
                     }
                 }
+                .id("advanced")
 
                 Section {
                     row("Verze", Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String ?? "–")
@@ -119,6 +121,15 @@ struct SettingsView: View {
             }
             .confirmationDialog("Smazat historii a fotky?", isPresented: $confirmClear, titleVisibility: .visible) {
                 Button("Smazat historii", role: .destructive) { engine.activityLog.clear() }
+            }
+            // The screenshot of the advanced rows: they are below the fold.
+            .onChange(of: advanced) { _, on in
+                guard on, MonitorEngine.isDemo else { return }
+                Task {
+                    try? await Task.sleep(for: .seconds(1))      // After the rows are laid out.
+                    withAnimation { proxy.scrollTo("advanced", anchor: .top) }
+                }
+            }
             }
         }
         // On the stack, not on the Form: the Form appears again after each Zpět.
