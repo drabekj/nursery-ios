@@ -68,7 +68,7 @@ navigation bar. The background glows softly with the loudness of the room.
 ## Demo mode and screenshots
 
 `-demo YES` shows a synthetic night-vision frame and a fake sound (a short "cry" each 12 s), with no server.
-`-demoScreen aim|activity|night|settings|alerts` opens that screen at launch. CI runs the demo in the iOS
+`-demoScreen aim|activity|night|night-controls|settings|settings-advanced|remote|help|alerts|paused|muted|volume|wizard-…` opens that screen at launch. CI runs the demo in the iOS
 Simulator, and it uploads the screenshots as the `build-output` artifact.
 
 ## Build it (on the Mac)
