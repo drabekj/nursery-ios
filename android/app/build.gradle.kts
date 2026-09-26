@@ -47,6 +47,8 @@ android {
     }
     kotlinOptions { jvmTarget = "17" }
     buildFeatures { compose = true }
+    // The cry model is memory-mapped from the APK: it must stay uncompressed.
+    androidResources { noCompress += "tflite" }
 }
 
 dependencies {
@@ -67,6 +69,9 @@ dependencies {
 
     // The QR code of the pairing: make it on the phone at the baby, read it on the parent's.
     implementation("com.google.zxing:core:3.5.3")
+
+    // The cry classifier (YAMNet): on the phone, only while the room is loud.
+    implementation("org.tensorflow:tensorflow-lite:2.17.0")
 
     // The unit tests of the pure parts: the protocol, the login, and the pairing link.
     testImplementation("junit:junit:4.13.2")

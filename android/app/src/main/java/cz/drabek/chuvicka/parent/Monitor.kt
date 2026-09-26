@@ -128,8 +128,10 @@ object Monitor {
     /** The running sound event: its start and its peak level. */
     private var eventStart: Long? = null
     private var eventPeak = 0f
-    private var machine = RoomStateMachine()
+    private var machine = newMachine()
     private var ticks = 0
+    /** The cry classifier, from the start to the stop of the monitor. Never in the demo. */
+    @Volatile private var cry: CryDetector? = null
 
     val soundOnly get() = Settings.soundView.value || night.value
 
@@ -166,7 +168,8 @@ object Monitor {
         this.context = context.applicationContext
         running = true
         mode.value = Settings.soundMode.value
-        machine = RoomStateMachine()
+        machine = newMachine()
+        cry = if (App.demo) null else CryDetector(this.context)
         _roomState.value = RoomState.CONNECTING
         _roomStateSince.value = System.currentTimeMillis()
         player = AudioPlayer().also {
@@ -184,6 +187,8 @@ object Monitor {
         thread?.interrupt()
         player?.release()
         player = null
+        cry?.close()
+        cry = null
         unwatchPower()
         connection.value = Connection.Idle
         detailActive.value = false
@@ -493,12 +498,17 @@ object Monitor {
 
     private fun measure(p: RtpPacket, uLaw: Boolean) {
         val table = if (uLaw) G711.uLaw else G711.aLaw
+        // The cry classifier gets a copy of the samples, only while a sound event runs.
+        val detector = cry
+        val samples = if (detector != null && detector.wanted && p.length > 0) FloatArray(p.length) else null
         var sum = 0.0
         for (i in 0 until p.length) {
             val s = table[p.data[p.offset + i].toInt() and 0xFF] / 32768.0
             sum += s * s
+            if (samples != null) samples[i] = s.toFloat()
         }
         if (p.length > 0) peak = max(peak, levelFromRms(sqrt(sum / p.length)))
+        if (samples != null) detector?.feed(samples)
     }
 
     // MARK: The tick, 10 times a second, from the service
@@ -509,6 +519,7 @@ object Monitor {
         history.value = history.value.drop(1) + smoothed
         holdRoomLevel(RoomLevel.of(smoothed), now)
         detectSound(smoothed, now)
+        cry?.setActive(soundNow.value)
 
         pictureLive.value = now - lastVideo < 3000
         val heard = now - lastAudio < 3000
@@ -563,6 +574,8 @@ object Monitor {
 
     /** The room state from the signals. The machine keeps the rules, see RoomState.kt. */
     private fun updateRoomState(now: Long) {
+        val detector = cry
+        if (detector != null) while (true) machine.classified(detector.verdicts.poll() ?: break)
         val s = status.value
         val input = RoomStateMachine.Input(
             heard = s == SoundStatus.LISTENING || s == SoundStatus.SILENT,
@@ -572,10 +585,13 @@ object Monitor {
             eventPeak = eventPeak,
             level = smoothed,
             loudLevel = max(SOUND_THRESHOLD + 0.15f, 0.45f),
-            classifierAvailable = false,
+            classifierAvailable = detector?.available ?: false,
         )
         setRoomState(machine.update(input, now), machine.since ?: now)
     }
+
+    /** The machine with the verdict rule of CryDetector: every cry verdict (0.35 and more) counts. */
+    private fun newMachine() = RoomStateMachine(cryConfidence = Yamnet.BABY_CRY_MIN)
 
     /** Emit only on a change. */
     private fun setRoomState(state: RoomState, since: Long) {
