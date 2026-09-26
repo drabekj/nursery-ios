@@ -43,6 +43,16 @@ enum CameraBrand: String, CaseIterable, Identifiable {
         }
     }
 
+    /// The port of the ONVIF service (pan and tilt). Tapo refuses port 80; it answers on 2020.
+    /// "Jiná kamera" tries 80: with no answer there, the app shows no aim button.
+    var onvifPort: UInt16 {
+        switch self {
+        case .tapo: 2020
+        case .hikvision, .dahua, .other: 80
+        case .reolink: 8000
+        }
+    }
+
     var hint: String? {
         switch self {
         case .tapo: "Účet kamery vytvoříte v aplikaci Tapo: Kamera → Nastavení → Pokročilé nastavení → Účet kamery. Není to váš účet Tapo."
