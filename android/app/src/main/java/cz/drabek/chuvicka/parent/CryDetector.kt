@@ -162,7 +162,7 @@ class CryDetector(private val context: Context) {
 
     private fun execute(task: () -> Unit) {
         if (closed) return
-        try { executor.execute(task) } catch (_: RejectedExecutionException) {}
+        try { executor.execute { task() } } catch (_: RejectedExecutionException) {}
     }
 
     private fun process(samples: FloatArray) {
