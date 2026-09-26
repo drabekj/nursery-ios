@@ -24,6 +24,9 @@ struct HelpList: View {
             topic("lock.iphone", "Se zamčeným telefonem",
                   "Zvuk běží dál i se zamčenou obrazovkou a když přepnete do jiné aplikace. Video nebo hudba v jiné aplikaci Chůvičku nepřeruší, hrají spolu. Přeruší ji jen telefonát, po něm se hlídání obnoví samo. Na zamčené obrazovce je aktivita „Chůvička hlídá od 21:40“.",
                   footnote: "iOS nedovolí aplikacím, které na pozadí jen přehrávají zvuk, průběžně měnit aktivitu na zamčené obrazovce. Proto ukazuje hlavně to, že Chůvička hlídá a od kdy.")
+            topic("waveform.circle", "Klid, Ozývá se, Pláče",
+                  "Chůvička poslouchá, jak je v pokoji hlasito. **Ozývá se** znamená, že je tam něco slyšet — vzdech, pes, dveře. **Pláče** ukáže, když v hlasitém zvuku rozpozná dětský pláč; rozpoznávání běží jen v telefonu a jen když je v pokoji hluk. Může se splést, zvuk z telefonu u miminka má nižší kvalitu. **Klid** znamená, že je ticho; jestli miminko spí, Chůvička poznat neumí.",
+                  footnote: "Barva obrazovky říká totéž na dálku: tyrkysová klid, žlutá ozývá se, vínová pláče, šedá nehlídá.")
             topic("stop.circle", "Jak hlídání vypnout",
                   "V aplikaci klepněte na tři tečky → Ukončit hlídání, na zamčené obrazovce na Ukončit hlídání, v nočním režimu klepněte na displej a zvolte Ukončit hlídání. Chůvička se vždy nejdřív zeptá.",
                   footnote: "Když hlídání vypnete vy, žádné upozornění nepřijde. Upozornění „Chůvička přestala hlídat“ přijde jen tehdy, když aplikaci ukončí iOS.")
@@ -31,8 +34,8 @@ struct HelpList: View {
                   "Když vypadne spojení s kamerou, přijde po 20 sekundách upozornění a Chůvička se sama připojí znovu. Kdyby iOS aplikaci ukončil, do 2,5 minuty přijde upozornění „Chůvička přestala hlídat“. Stačí ji znovu otevřít.",
                   footnote: "Upozornění fungují, jen když je povolíte. Aplikaci nezavírejte přejetím nahoru v přepínači aplikací, tím hlídání ukončíte.")
             topic("waveform", "Obraz, nebo jen zvuk",
-                  "Přepínač nahoře volí, co hlavní obrazovka ukazuje. Obraz ukazuje živé video z postýlky. Jen zvuk ukazuje jen pokojíček: kruh, který se rozvlní se zvukem, a slovy, co se děje. Obraz se nezobrazuje. Z kamery se přesto stahuje, protože některé kamery bez obrazu neposílají ani zvuk. Z telefonu u miminka jde jen zvuk.",
-                  footnote: "Jen zvuk šetří baterii i Wi-Fi a telefon méně hřeje. Na miminko se můžete kdykoli podívat tlačítkem Fotka z postýlky. Pořídí jednu fotku z kamery, bez živého obrazu.")
+                  "Přepínač nahoře volí, co hlavní obrazovka ukazuje. Obraz ukazuje živé video z postýlky. Jen zvuk ukazuje přes celou obrazovku barvou a slovem, co se v pokoji děje, aby to bylo vidět i z postele. Obraz se nezobrazuje. Z kamery se přesto stahuje, protože některé kamery bez obrazu neposílají ani zvuk. Z telefonu u miminka jde jen zvuk.",
+                  footnote: "Jen zvuk šetří baterii i Wi-Fi a telefon méně hřeje. Na miminko se můžete kdykoli podívat přepínačem Obraz.")
             topic("speaker.wave.1", "Hlasitost",
                   "Chůvička hraje tak hlasitě, jak je nastavený telefon. Když je hlasitost telefonu pod 20 %, ukáže Chůvička upozornění a posuvník hlasitosti. Když je zvuk ztlumený, tlačítko Zvuk svítí červeně. Při pláči pak přijde upozornění, stejně jako při hlasitosti pod 20 %.",
                   footnote: "Tlačítko ztišení na boku telefonu Chůvičku neztiší. Hlasitost ale ano.")
@@ -78,7 +81,8 @@ struct HelpList: View {
             Label(title, systemImage: symbol)
                 .font(.headline)
                 .foregroundStyle(.primary)
-            Text(text)
+            // **Bold** in the text marks the state words.
+            Text((try? AttributedString(markdown: text)) ?? AttributedString(text))
                 .font(.subheadline)
                 .fixedSize(horizontal: false, vertical: true)
             if let footnote {
