@@ -66,9 +66,9 @@ enum ServerMigration {
 
     private static func get(host: String, path: String) async -> Data? {
         guard let url = URL(string: "http://\(host):\(Go2rtc.apiPort)/\(path)") else { return nil }
-        guard let (data, response) = try? await session.data(from: url),
-              (response as? HTTPURLResponse)?.statusCode == 200 else { return nil }
-        return data
+        guard let answer = try? await session.data(from: url),
+              (answer.1 as? HTTPURLResponse)?.statusCode == 200 else { return nil }
+        return answer.0
     }
 
     // MARK: Parsing (pure, for the tests)

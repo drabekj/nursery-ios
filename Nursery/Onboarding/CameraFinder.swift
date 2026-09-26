@@ -83,9 +83,10 @@ enum CameraFinder {
         let usable = candidates.filter { c in
             isPrivate(c.ip) && !c.name.hasPrefix("pdp_ip") && !c.name.hasPrefix("utun") && !c.name.hasPrefix("ipsec")
         }
-        let best = usable.first { $0.name == "en0" }
-            ?? usable.first { $0.name.hasPrefix("bridge") || $0.ip.hasPrefix("172.20.10.") }
-            ?? usable.first { $0.name.hasPrefix("en") }
+        let wifi = usable.first(where: { $0.name == "en0" })
+        let hotspot = usable.first(where: { $0.name.hasPrefix("bridge") || $0.ip.hasPrefix("172.20.10.") })
+        let wired = usable.first(where: { $0.name.hasPrefix("en") })
+        let best = wifi ?? hotspot ?? wired
         guard let best else { return nil }
         return (best.ip, best.ip.split(separator: ".").prefix(3).joined(separator: "."))
     }
