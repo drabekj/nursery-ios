@@ -75,7 +75,7 @@ final class VideoRenderer: @unchecked Sendable {
         renderer.enqueue(sample)
     }
 
-    private static func makeFormat(sps: [UInt8], pps: [UInt8]) -> CMVideoFormatDescription? {
+    static func makeFormat(sps: [UInt8], pps: [UInt8]) -> CMVideoFormatDescription? {
         var format: CMFormatDescription?
         let status = sps.withUnsafeBufferPointer { s in
             pps.withUnsafeBufferPointer { p -> OSStatus in
@@ -90,7 +90,7 @@ final class VideoRenderer: @unchecked Sendable {
         return status == noErr ? format : nil
     }
 
-    private static func makeSample(_ unit: H264AccessUnit, format: CMVideoFormatDescription) -> CMSampleBuffer? {
+    static func makeSample(_ unit: H264AccessUnit, format: CMVideoFormatDescription) -> CMSampleBuffer? {
         // AVCC: each NAL unit has a 4-byte length in front, and no start code.
         var avcc = [UInt8]()
         avcc.reserveCapacity(unit.nalUnits.reduce(0) { $0 + $1.count + 4 })
