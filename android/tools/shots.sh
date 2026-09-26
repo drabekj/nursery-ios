@@ -14,6 +14,8 @@ shot() {   # shot <file> <screen>
   echo "shot $1"
 }
 for s in parent aim sound muted volume night night-controls stop settings settings-advanced remote help baby baby-live; do shot "$s" "$s"; done
+# The room state: Klid, Pláče, Nehlídá, Připojuji…, Ozývá se muted; the band in Pláče; Night mode in Pláče.
+for s in klid sound-cry sound-lost sound-connecting sound-muted main-cry night-cry; do shot "$s" "$s"; done
 for s in wizard wizard-role wizard-source wizard-camera wizard-test; do shot "$s" "$s"; done
 shot parent-dark parent-dark
 shot sound-dark sound-dark

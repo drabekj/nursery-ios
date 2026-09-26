@@ -9,6 +9,7 @@ import androidx.compose.material.icons.automirrored.filled.VolumeUp
 import androidx.compose.material.icons.filled.BatteryChargingFull
 import androidx.compose.material.icons.filled.Bedtime
 import androidx.compose.material.icons.filled.GraphicEq
+import androidx.compose.material.icons.filled.Hearing
 import androidx.compose.material.icons.filled.Lock
 import androidx.compose.material.icons.filled.NotificationsActive
 import androidx.compose.material.icons.filled.PhoneAndroid
@@ -23,7 +24,11 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.vector.ImageVector
+import androidx.compose.ui.text.AnnotatedString
+import androidx.compose.ui.text.SpanStyle
+import androidx.compose.ui.text.buildAnnotatedString
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.withStyle
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 
@@ -34,6 +39,13 @@ fun HelpScreen(back: () -> Unit) {
         Topic(Icons.Filled.ScreenLockPortrait, "Se zamčeným telefonem",
             "Zvuk běží dál i se zamčenou obrazovkou a když přepnete do jiné aplikace. Video nebo hudba v jiné aplikaci Chůvičku nepřeruší, hrají spolu. Dokud Chůvička hlídá, je v oznámeních „Chůvička hlídá“ i s tím, co se v pokojíčku děje.",
             "Android vyžaduje, aby aplikace, která hlídá se zhasnutým displejem, měla oznámení. Proto ho nejde skrýt.")
+        // The words of the room state. The classifier hears 8 kHz sound, half its training rate: it can be wrong.
+        Topic(Icons.Filled.Hearing, "Klid, Ozývá se, Pláče", buildAnnotatedString {
+            append("Chůvička poslouchá, jak je v pokoji hlasito. ")
+            bold("Ozývá se"); append(" znamená, že je tam něco slyšet — vzdech, pes, dveře. ")
+            bold("Pláče"); append(" ukáže, když v hlasitém zvuku rozpozná dětský pláč; rozpoznávání běží jen v telefonu a jen když je v pokoji hluk. Může se splést, zvuk z telefonu u miminka má nižší kvalitu. ")
+            bold("Klid"); append(" znamená, že je ticho; jestli miminko spí, Chůvička poznat neumí.")
+        }, "Upozornění přijde na pláč. Na každý zvuk jen tehdy, když to zapnete v Nastavení → Pro pokročilé.")
         Topic(Icons.Filled.StopCircle, "Jak hlídání vypnout",
             "V oznámení „Chůvička hlídá“ klepněte na Ukončit hlídání, nebo v aplikaci na tři tečky → Ukončit hlídání. Hlídání skončí také, když aplikaci zavřete přejetím v přehledu aplikací.",
             "Když hlídání vypnete vy, žádné upozornění nepřijde.")
@@ -41,15 +53,15 @@ fun HelpScreen(back: () -> Unit) {
             "Když vypadne spojení s kamerou, přijde po 20 sekundách upozornění a Chůvička se sama připojí znovu.",
             "Upozornění fungují, jen když je povolíte. Aplikaci nezavírejte přejetím v přehledu aplikací, tím hlídání ukončíte.")
         Topic(Icons.Filled.GraphicEq, "Obraz, nebo jen zvuk",
-            "Přepínač nahoře volí, co hlavní obrazovka ukazuje. Obraz ukazuje živé video z postýlky. Jen zvuk ukazuje jen pokojíček: kruh, který se rozvlní se zvukem, a slovy, co se děje. Obraz se nezobrazuje. Z kamery se přesto stahuje v nižším rozlišení, protože některé kamery (třeba Tapo) bez obrazu neposílají ani zvuk.",
-            "Jen zvuk šetří baterii i Wi-Fi a telefon méně hřeje. Na miminko se můžete kdykoli podívat klepnutím na Fotka z postýlky. Pořídí jednu fotku, bez živého obrazu, z kamery i z druhého telefonu.")
+            "Přepínač nahoře volí, co hlavní obrazovka ukazuje. Obraz ukazuje živé video z postýlky. Jen zvuk ukazuje jen pokojíček: celou obrazovku v barvě stavu a jedním slovem, co se děje. Obraz se nezobrazuje. Z kamery se přesto stahuje v nižším rozlišení, protože některé kamery (třeba Tapo) bez obrazu neposílají ani zvuk.",
+            "Jen zvuk šetří baterii i Wi-Fi a telefon méně hřeje. Po 30 sekundách bez dotyku obrazovka ztmavne; při pláči nebo dotyku se zase rozsvítí.")
         Topic(Icons.AutoMirrored.Filled.VolumeUp, "Hlasitost",
             "Chůvička hraje tak hlasitě, jak je nastavený telefon. Když je hlasitost telefonu pod 20 %, ukáže Chůvička upozornění a tlačítko Zesílit. Hlasitost Chůvičky můžete zvýšit v Nastavení → Hlasitost.")
         Topic(Icons.AutoMirrored.Filled.VolumeOff, "Ztlumeno",
             "Když zvuk ztlumíte tlačítkem Zvuk, Chůvička nic nepřehrává, ale dál poslouchá. Tlačítko pak svítí červeně a ukazuje Ztlumeno. Když se miminko rozpláče, přijde upozornění, i když máte aplikaci otevřenou. Hodí se, když nechcete celou noc slyšet šum pokoje.",
             "Upozornění přijde také při živém zvuku, když je hlasitost telefonu pod 20 %. Poslouchat úplně přestane jen po Ukončit hlídání.")
         Topic(Icons.Filled.Bedtime, "Noční režim",
-            "Displej zůstane zapnutý, ale téměř černý a na nejnižším jasu. Telefon se sám nezamkne. Obraz se zastaví, zvuk a upozornění běží dál. Když se miminko ozve, vlnovka se rozsvítí. Klepnutím zobrazíte tlačítka Zvuk a Ukončit hlídání, dalším klepnutím noční režim ukončíte.")
+            "Displej zůstane zapnutý, ale téměř černý a na nejnižším jasu. Telefon se sám nezamkne. Obraz se zastaví, zvuk a upozornění běží dál. Když se miminko ozve, vlnovka se rozsvítí. Když pláče, displej se na chvíli trochu rozjasní. Klepnutím zobrazíte tlačítka Zvuk a Ukončit hlídání, dalším klepnutím noční režim ukončíte.")
         Topic(Icons.Filled.BatteryChargingFull, "Baterie a nabíjení",
             "Nejúspornější je zamčený telefon, kdy běží jen zvuk. Noční režim a zobrazení Jen zvuk spotřebují o něco víc, protože svítí displej. Nejvíc spotřebuje otevřená aplikace se živým obrazem. Na celou noc doporučujeme nabíječku.")
         Topic(Icons.Filled.PhoneAndroid, "Dva telefony místo kamery",
@@ -67,9 +79,15 @@ fun HelpScreen(back: () -> Unit) {
     }
 }
 
+private fun AnnotatedString.Builder.bold(text: String) = withStyle(SpanStyle(fontWeight = FontWeight.SemiBold)) { append(text) }
+
 /** One question: an icon, a title, the answer, and a small note under it. */
 @Composable
-private fun Topic(icon: ImageVector, title: String, text: String, footnote: String? = null) {
+private fun Topic(icon: ImageVector, title: String, text: String, footnote: String? = null) =
+    Topic(icon, title, AnnotatedString(text), footnote)
+
+@Composable
+private fun Topic(icon: ImageVector, title: String, text: AnnotatedString, footnote: String? = null) {
     Column(Modifier.padding(horizontal = 16.dp, vertical = 6.dp).fillMaxWidth().clip(RoundedCornerShape(20.dp)).background(colors.card).padding(16.dp),
         verticalArrangement = Arrangement.spacedBy(8.dp)) {
         Row(verticalAlignment = Alignment.CenterVertically) {

@@ -58,7 +58,10 @@ class MainActivity : ComponentActivity() {
             App.demo = true
             App.demoScreen = intent.getStringExtra("screen") ?: ""
             Settings.role.value = if (App.demoScreen.startsWith("baby")) Settings.Role.BABY else Settings.Role.PARENT
-            Settings.soundView.value = App.demoScreen == "sound" || App.demoScreen == "sound-dark"
+            // The glance view: "sound…" and "klid". The engine sets the room state from the name.
+            Settings.soundView.value = App.demoScreen.startsWith("sound") || App.demoScreen == "klid"
+            // "sound-muted": Ozývá se with the muted ribbon. The monitor takes the mode at its start.
+            if (App.demoScreen == "sound-muted") Settings.soundMode.value = cz.drabek.chuvicka.parent.SoundMode.OFF
             Settings.appearance.value = if (App.demoScreen.endsWith("dark")) Settings.Appearance.DARK else Settings.Appearance.LIGHT
             Settings.unitCode.value = "482913"
             if (App.demoScreen == "wizard-test") Settings.source.value = Settings.Source.PHONE
@@ -102,7 +105,7 @@ class MainActivity : ComponentActivity() {
                 else ParentService.stop(this@MainActivity)
             }
             LaunchedEffect(Unit) {
-                if (App.demoScreen == "night" || App.demoScreen == "night-controls") Monitor.night.value = true
+                if (App.demoScreen == "night" || App.demoScreen == "night-controls" || App.demoScreen == "night-cry") Monitor.night.value = true
                 if (App.demoScreen == "baby-live") BabyService.start(this@MainActivity)
             }
             // The status bar icons follow the app's appearance, not the system's.
