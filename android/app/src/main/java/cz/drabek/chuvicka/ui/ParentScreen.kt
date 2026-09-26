@@ -550,7 +550,7 @@ private fun AimArrow(icon: ImageVector, label: String, modifier: Modifier, step:
 private fun SoundStage(dim: Boolean, animate: Boolean, announce: Boolean) {
     val on = LocalOnField.current?.on ?: colors.ink
     Column(horizontalAlignment = Alignment.CenterHorizontally) {
-        Field(dim, animate, announce, Modifier.weight(1f).fillMaxWidth())
+        GlanceField(dim, animate, announce, Modifier.weight(1f).fillMaxWidth())
         Spacer(Modifier.height(12.dp))
         SoundCards(on)
     }
@@ -558,7 +558,7 @@ private fun SoundStage(dim: Boolean, animate: Boolean, announce: Boolean) {
 
 /** The field on its own: it recomposes once a second (the durations), the cards do not. */
 @Composable
-private fun Field(dim: Boolean, animate: Boolean, announce: Boolean, modifier: Modifier) {
+private fun GlanceField(dim: Boolean, animate: Boolean, announce: Boolean, modifier: Modifier) {
     StateField(roomView(), dim, animate, raiseVolume = { Monitor.raiseVolume() }, modifier, announce = announce)
 }
 
