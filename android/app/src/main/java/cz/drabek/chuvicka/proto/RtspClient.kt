@@ -241,7 +241,7 @@ class RtspClient(url: String, private val host: String, private val port: Int,
         fun isUsable(t: SdpTrack) =
             (t.kind == "video" && t.codec == "H264") || (t.kind == "audio" && (t.codec == "PCMA" || t.codec == "PCMU"))
 
-        /** "rtsp://user:pass@192.168.0.136:8554/nursery" to its host, port, user, and password. */
+        /** "rtsp://user:pass@192.168.0.10:8554/stream" to its host, port, user, and password. */
         fun parse(url: String): Endpoint {
             val u = try { URI(url) } catch (e: Exception) { throw Failure("Adresa kamery není platná.") }
             val info = u.rawUserInfo ?: ""

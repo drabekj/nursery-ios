@@ -634,7 +634,7 @@ private struct RemotePage: View {
         case (.camera, .go2rtc):
             let host = settings.trimmedRemoteHost
             guard !host.isEmpty else { return false }
-            return await Reach.canConnect(host: host, port: 8554, timeout: 2)
+            return await Reach.canConnect(host: host, port: Go2rtc.rtspPort, timeout: 2)
         case (.camera, .rtsp): return false
         }
     }

@@ -267,7 +267,8 @@ final class CameraControl: ObservableObject {
 
     /// It reads `window.NURSERY_CONFIG = { ptzWebhook: '…', powerWebhook: '…' }`.
     func loadConfig() async {
-        guard !HomeDefaults.configPath.isEmpty else { return }
+        // Only with go2rtc: a camera read directly has no config file, so there is nothing to ask.
+        guard !HomeDefaults.configPath.isEmpty, settings.cameraKind == .go2rtc else { return }
         guard let url = URL(string: "http://\(settings.serverHost):\(Go2rtc.apiPort)/\(HomeDefaults.configPath)") else { return }
         do {
             let (data, _) = try await session.data(from: url)

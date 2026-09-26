@@ -413,7 +413,7 @@ private fun PairStep(frame: Frame, scan: () -> Unit, paired: () -> Unit) {
         Numbered(2, "Zvolte Být u miminka.")
         Numbered(3, "Ukáže QR kód. Ten naskenujte tímto telefonem.")
         Spacer(Modifier.height(8.dp))
-        Text("Chůvičku stáhnete na iPhone z App Store, na Android z Google Play.", fontSize = 14.sp, color = colors.muted)
+        Text("Na druhém telefonu musí být Chůvička také nainstalovaná.", fontSize = 14.sp, color = colors.muted)
         if (manual) {
             val finder = remember { BabyFinder(context) }
             DisposableEffect(Unit) { finder.start(); onDispose { finder.stop() } }

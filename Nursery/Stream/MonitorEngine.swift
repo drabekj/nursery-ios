@@ -402,7 +402,9 @@ final class MonitorEngine: ObservableObject {
                 return
             }
             self.client = client
-            Log.shared.add("connect \(url)\(self.viaTailscale ? " over Tailscale" : "")")
+            // Not the URL: it carries the camera password or the pairing code, and the log is shared.
+            let target = self.settings.source == .phone ? "the phone at the baby" : self.settings.cameraKind == .go2rtc ? "go2rtc \(self.settings.serverHost)" : "the camera \(self.settings.rtspHost)"
+            Log.shared.add("connect \(target)\(onlyAudio ? " (sound only)" : "")\(self.viaTailscale ? " over Tailscale" : "")")
             client.onClose = Self.closeSink(engine: self, generation: gen)
             let prepare = Self.router(client: client, renderer: self.renderer, audio: self.audio, shared: self.shared)
             do {

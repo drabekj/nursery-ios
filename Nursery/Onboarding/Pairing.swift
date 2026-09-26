@@ -34,6 +34,8 @@ struct PairLink: Equatable {
         c.host = "pair"
         c.queryItems = [.init(name: "n", value: name), .init(name: "c", value: code),
                         .init(name: "a", value: addresses.joined(separator: ","))]
+        // URLComponents leaves "+" as it is, and Android reads it as a space. Encode it.
+        c.percentEncodedQuery = c.percentEncodedQuery?.replacingOccurrences(of: "+", with: "%2B")
         return c.url!
     }
 
