@@ -135,6 +135,7 @@ enum NurseryAlerts {
     private static let lossID = "nursery.sound.lost"
     private static let soundID = "nursery.sound.event"
     private static let watchdogID = "nursery.watchdog"
+    private static let interruptedID = "nursery.interrupted"
 
     static func requestPermission() {
         UNUserNotificationCenter.current().requestAuthorization(options: [.alert, .sound]) { _, _ in }
@@ -169,6 +170,16 @@ enum NurseryAlerts {
 
     static func clearLoss() {
         UNUserNotificationCenter.current().removeDeliveredNotifications(withIdentifiers: [lossID])
+    }
+
+    /// Another sound took the audio, and iOS is about to suspend the app before it got it back.
+    static func postInterrupted() {
+        post(id: interruptedID, title: "Hlídání přerušil jiný zvuk",
+             body: "Chůvička teď neposlouchá. Klepnutím hlídání obnovíte.")
+    }
+
+    static func clearInterrupted() {
+        UNUserNotificationCenter.current().removeDeliveredNotifications(withIdentifiers: [interruptedID])
     }
 
     static func postSound(at date: Date) {

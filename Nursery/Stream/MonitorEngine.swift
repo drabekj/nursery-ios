@@ -316,6 +316,16 @@ final class MonitorEngine: ObservableObject {
         isForeground = true
         Log.shared.add("foreground")
         NurseryAlerts.disarmWatchdog()
+        NurseryAlerts.clearInterrupted()
+        // Back from an interruption that never ended (or a tap on its notification): take the
+        // sound back now. In the foreground iOS allows it, unless a call goes on.
+        if !Self.isDemo, !audio.isRunning {
+            endRecovery()
+            activateAudioSession()
+            audio.setInterrupted(false)
+            audio.start()
+            audio.setMuted(mode == .off)
+        }
         audioOnlyTask?.cancel()
         UIApplication.shared.isIdleTimerDisabled = settings.keepAwake
         let render = wantsPicture
@@ -744,6 +754,7 @@ final class MonitorEngine: ObservableObject {
             // A monitor resumes always, also without the "should resume" option.
             Log.shared.add("sound interruption ended")
             endRecovery()
+            NurseryAlerts.clearInterrupted()
             activateAudioSession()
             audio.setInterrupted(false)
             audio.start()
@@ -759,35 +770,51 @@ final class MonitorEngine: ObservableObject {
     private var recoveryBackgroundTask: UIBackgroundTaskIdentifier = .invalid
 
     /// Siri, an alarm or an app that wants the sound only for itself interrupted the monitor.
-    /// Do not wait for "interruption ended": many apps never send it, and in the background iOS
-    /// suspends an app with no sound. Try to take the sound back each 2 s instead. A background
-    /// task keeps the app awake for these tries (iOS gives about 30 s). A call refuses the tries,
-    /// and then "interruption ended" after the call starts the sound again.
+    /// Do not wait for "interruption ended": many apps never send it. Try to take the sound back:
+    /// each 2 s for the first 30 s, then each 10 s, for 5 minutes. A call refuses the tries, and
+    /// "interruption ended" after the call starts the sound again.
+    ///
+    /// In the background, iOS gives an app with no sound only about 30 s (a background task),
+    /// then it suspends the app. Just before that, tell the parent at once, clearly, instead of
+    /// the watchdog's vague "stopped watching" 2.5 minutes later.
     private func recoverSound() {
         guard !suspended, !Self.isDemo else { return }
         recoveryTask?.cancel()
         if recoveryBackgroundTask == .invalid {
             recoveryBackgroundTask = UIApplication.shared.beginBackgroundTask(withName: "sound recovery") { [weak self] in
-                MainActor.assumeIsolated { self?.endRecovery() }
+                MainActor.assumeIsolated { self?.backgroundTimeEnded() }
             }
         }
         recoveryTask = Task { [weak self] in
-            for attempt in 1...12 {
-                try? await Task.sleep(for: .seconds(2))
+            let start = Date()
+            while Date().timeIntervalSince(start) < 300 {
+                let elapsed = Date().timeIntervalSince(start)
+                try? await Task.sleep(for: .seconds(elapsed < 30 ? 2 : 10))
                 guard let self, !Task.isCancelled else { return }
                 do {
                     try AVAudioSession.sharedInstance().setActive(true)
                 } catch {
                     continue            // The other sound still has priority. Try again.
                 }
-                Log.shared.add("sound taken back after \(attempt * 2) s")
+                Log.shared.add("sound taken back after \(Int(Date().timeIntervalSince(start))) s")
                 self.audio.setInterrupted(false)
                 self.audio.start()
                 self.audio.setMuted(self.mode == .off)
+                NurseryAlerts.clearInterrupted()
                 break
             }
             self?.endRecovery()
         }
+    }
+
+    /// iOS ends the background time now, and the sound is not back. The app gets suspended.
+    private func backgroundTimeEnded() {
+        Log.shared.add("sound not back before iOS suspends the app")
+        NurseryAlerts.postInterrupted()
+        // The watchdog would say the same, less clearly, 2.5 minutes later. When "interruption
+        // ended" wakes the app, the sound starts again and the tick arms the watchdog again.
+        NurseryAlerts.disarmWatchdog()
+        endRecovery()
     }
 
     private func endRecovery() {
