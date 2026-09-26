@@ -16,7 +16,13 @@ final class SoundActivity: ObservableObject {
         var start: Date
         var end: Date
         var peak: Float
+        /// The room word was "Pláče" during this event (the classifier, or the loudness rule without it).
+        var cried = false
+        /// The cry classifier gave at least one verdict during this event.
+        var classified = false
         var duration: TimeInterval { end.timeIntervalSince(start) }
+
+        enum CodingKeys: String, CodingKey { case id, start, end, peak, cried, classified }
     }
 
     /// A span of time when the app listened to the room.
@@ -33,9 +39,19 @@ final class SoundActivity: ObservableObject {
         let end: Date
         let peak: Float
         let soundSeconds: TimeInterval
+        /// An event of it reached "Pláče".
+        var cried = false
+        /// The classifier listened to an event of it.
+        var classified = false
         var duration: TimeInterval { end.timeIntervalSince(start) }
-        /// Crying: a long or a loud episode. Everything else is fussing.
-        var kind: Kind { soundSeconds >= 12 || peak >= 0.78 ? .cry : .fuss }
+        /// Crying: the room word was "Pláče", so the live screen and the history agree. Without any
+        /// verdict of the classifier (an old saved episode, or no model), the old rule decides:
+        /// a long or a loud episode. Everything else is fussing.
+        var kind: Kind {
+            if cried { return .cry }
+            if classified { return .fuss }
+            return soundSeconds >= 12 || peak >= 0.78 ? .cry : .fuss
+        }
         var title: String { kind == .cry ? "Pláč" : "Zafňukání" }
     }
 
@@ -86,7 +102,8 @@ final class SoundActivity: ObservableObject {
             guard let first = group.first, let last = group.last else { return }
             result.append(Episode(id: first.id, start: first.start, end: last.end,
                                   peak: group.map(\.peak).max() ?? 0,
-                                  soundSeconds: group.reduce(0) { $0 + $1.duration }))
+                                  soundSeconds: group.reduce(0) { $0 + $1.duration },
+                                  cried: group.contains { $0.cried }, classified: group.contains { $0.classified }))
             group = []
         }
         for e in all {
@@ -148,6 +165,20 @@ final class SoundActivity: ObservableObject {
         if now.timeIntervalSince(lastSave) > 300 { save() }
     }
 
+    /// The room word became "Pláče" during the sound now. Once per event: each change redraws.
+    func markCurrentCried() {
+        guard var event = current, !event.cried else { return }
+        event.cried = true
+        current = event
+    }
+
+    /// The cry classifier gave a verdict during the sound now. Once per event.
+    func markCurrentClassified() {
+        guard var event = current, !event.classified else { return }
+        event.classified = true
+        current = event
+    }
+
     /// It ends an event in progress, for example when the sound goes off.
     func interrupt() {
         aboveSince = nil
@@ -205,6 +236,20 @@ final class SoundActivity: ObservableObject {
             }
         }
         events = burst(8.1, [3], 0.55) + burst(4.4, [8, 14, 22, 9], 0.9) + burst(2.0, [4, 3], 0.6) + burst(0.3, [6], 0.66)
+    }
+}
+
+extension SoundActivity.Event {
+    /// The events saved by 1.9 and older have no `cried` and `classified`. They decode as false,
+    /// so their episodes keep the old loudness rule.
+    init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        id = try c.decode(UUID.self, forKey: .id)
+        start = try c.decode(Date.self, forKey: .start)
+        end = try c.decode(Date.self, forKey: .end)
+        peak = try c.decode(Float.self, forKey: .peak)
+        cried = try c.decodeIfPresent(Bool.self, forKey: .cried) ?? false
+        classified = try c.decodeIfPresent(Bool.self, forKey: .classified) ?? false
     }
 }
 

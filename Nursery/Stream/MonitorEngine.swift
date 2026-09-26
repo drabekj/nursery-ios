@@ -1088,6 +1088,7 @@ final class MonitorEngine: ObservableObject {
     private func cryVerdict(_ verdict: CryVerdict) {
         guard cryListening, activityLog.current != nil else { return }      // A late one after the event.
         roomMachine.classified(verdict)
+        activityLog.markCurrentClassified()
     }
 
     /// The model did not load, or it failed. From now on the loudness rule decides.
@@ -1116,6 +1117,8 @@ final class MonitorEngine: ObservableObject {
                 loudLevel: max(activityLog.threshold + 0.15, 0.45),
                 classifierAvailable: classifierAvailable)
             next = roomMachine.update(input, now: now)
+            // Přehled calls the episode "Pláč" iff the word was "Pláče" during it.
+            if next == .cry, event != nil { activityLog.markCurrentCried() }
         }
         guard next != roomState else { return }
         roomState = next
