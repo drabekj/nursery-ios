@@ -49,8 +49,11 @@ struct HelpList: View {
             topic("iphone.gen3.radiowaves.left.and.right", "Dva telefony místo kamery",
                   "Starší iPhone nebo telefon s Androidem může být kamerou u postýlky. Nainstalujte na něj Chůvičku a zvolte Být u miminka. Na svém telefonu pak v Nastavení → Kamera zvolte Druhý telefon a naskenujte jeho QR kód. Spolu fungují všechny kombinace iPhonu a Androidu.",
                   footnote: "iPhone u miminka musí mít Chůvičku otevřenou a nezamčenou, jinak iOS zastaví kameru. Zvuk poběží i se zamčeným telefonem. Android u miminka vysílá obraz i zvuk i se zhasnutým displejem. Oba nechte na nabíječce.")
+            topic("web.camera", "Kamera v síti",
+                  "Chůvička čte kameru přímo, bez serveru. Kamera zvládne jen několik telefonů najednou: když je jich moc, Chůvička to řekne a zkusí to za chvíli znovu. Když kamera dostane novou adresu, Chůvička ji sama najde.",
+                  footnote: "Natočit funguje u kamer, které umí ONVIF (Tapo, Hikvision, Dahua, Reolink).")
             topic("globe", "Mimo domov",
-                  "Doma se Chůvička připojuje přímo. Mimo domov jde přes vaši soukromou síť (Tailscale), která musí být v telefonu zapnutá. Nastavíte ji v Nastavení → Pro pokročilé → Mimo domov. Telefon u miminka ji musí mít také a jednou se k němu musíte připojit doma, aby si Chůvička zapamatovala jeho adresu.",
+                  "Doma se Chůvička připojuje přímo. Mimo domov jde přes vaši soukromou síť (Tailscale), která musí být v telefonu zapnutá. Nastavíte ji v Nastavení → Pro pokročilé → Mimo domov. Telefon u miminka ji musí mít také a jednou se k němu musíte připojit doma, aby si Chůvička zapamatovala jeho adresu. Kameru v síti uvidíte mimo domov jen s Tailscale i doma (sdílení domácí sítě, pro pokročilé); jinak jen doma.",
                   footnote: "Obraz jde šifrovaně, ne přes cizí server. V Nastavení → Pro pokročilé v řádku Cesta vidíte, jestli jde spojení doma, nebo mimo domov.")
             topic("hand.raised", "Soukromí",
                   "Obraz i zvuk zůstávají ve vaší domácí síti, mimo domov jdou jen šifrovaně přes vaši soukromou síť. Nic se neposílá na cizí server a kamera sama přístup k internetu nemá.",
