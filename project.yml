@@ -95,3 +95,28 @@ targets:
       base:
         PRODUCT_BUNDLE_IDENTIFIER: cz.drabek.nursery.widget
         SKIP_INSTALL: YES
+
+  # The unit tests of the pure code: SDP, RTP, H.264, G.711, the Digest login, the pairing link.
+  # They run in the app on the simulator: xcodebuild test -scheme Nursery
+  NurseryTests:
+    type: bundle.unit-test
+    platform: iOS
+    sources: [NurseryTests]
+    dependencies:
+      - target: Nursery
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: cz.drabek.nursery.tests
+        GENERATE_INFOPLIST_FILE: YES
+        TEST_HOST: $(BUILT_PRODUCTS_DIR)/Nursery.app/Nursery
+        BUNDLE_LOADER: $(TEST_HOST)
+
+schemes:
+  Nursery:
+    build:
+      targets:
+        Nursery: all
+        NurseryTests: [test]
+    test:
+      targets:
+        - NurseryTests
