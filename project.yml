@@ -74,6 +74,9 @@ targets:
         ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME: AccentColor
     dependencies:
       - target: NurseryWidget
+    # The Nursery scheme also runs the unit tests: xcodebuild test -scheme Nursery
+    scheme:
+      testTargets: [NurseryTests]
 
   NurseryWidget:
     type: app-extension
@@ -97,7 +100,7 @@ targets:
         SKIP_INSTALL: YES
 
   # The unit tests of the pure code: SDP, RTP, H.264, G.711, the Digest login, the pairing link.
-  # They run in the app on the simulator: xcodebuild test -scheme Nursery
+  # They run in the app on the simulator, through the Nursery scheme.
   NurseryTests:
     type: bundle.unit-test
     platform: iOS
@@ -108,15 +111,3 @@ targets:
       base:
         PRODUCT_BUNDLE_IDENTIFIER: cz.drabek.nursery.tests
         GENERATE_INFOPLIST_FILE: YES
-        TEST_HOST: $(BUILT_PRODUCTS_DIR)/Nursery.app/Nursery
-        BUNDLE_LOADER: $(TEST_HOST)
-
-schemes:
-  Nursery:
-    build:
-      targets:
-        Nursery: all
-        NurseryTests: [test]
-    test:
-      targets:
-        - NurseryTests
