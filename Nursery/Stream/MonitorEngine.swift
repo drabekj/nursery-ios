@@ -117,6 +117,9 @@ final class MonitorEngine: ObservableObject {
     private var roomMachine = RoomStateMachine()
     /// The cry classifier can run. False after it failed: then the loudness rule decides.
     private var classifierAvailable = true
+    /// It hears a baby cry in the sound. It gets the samples only during a sound event.
+    private lazy var cry = CryDetector(format: audio.format)
+    private var cryListening = false
 
     /// The processor time of the whole app, in seconds.
     nonisolated private static func processCPUSeconds() -> Double {
@@ -157,6 +160,10 @@ final class MonitorEngine: ObservableObject {
         activityLog.margin = settings.sensitivity.margin
         activityLog.onEpisodeStart = { [weak self] episode in self?.episodeStarted(episode) }
         settings.$sensitivity.sink { [weak self] s in self?.activityLog.margin = s.margin }.store(in: &bag)
+        if !Self.isDemo {           // The demo sets the words directly. No classifier there.
+            cry.setSinks(verdict: Self.verdictSink(engine: self), failure: Self.cryFailureSink(engine: self))
+            audio.onSamples = { [cry] samples in cry.feed(samples) }
+        }
 
         settings.$loudness.dropFirst().sink { [weak self] l in self?.audio.setGain(decibels: l.decibels) }.store(in: &bag)
         // A new source, or a new pairing: connect again.
@@ -240,6 +247,7 @@ final class MonitorEngine: ObservableObject {
         connection = .idle
         audio.stop()
         activityLog.interrupt()
+        setCryListening(false)
         NurseryAlerts.disarmWatchdog()
         NurseryAlerts.clearLoss()
         activity.end()
@@ -542,6 +550,18 @@ final class MonitorEngine: ObservableObject {
 
     nonisolated private static func levelSink(_ shared: OSAllocatedUnfairLock<Shared>) -> (Float) -> Void {
         { level in shared.withLock { $0.peak = max($0.peak, level) } }
+    }
+
+    nonisolated private static func verdictSink(engine: MonitorEngine) -> CryDetector.VerdictSink {
+        { [weak engine] verdict in
+            Task { @MainActor in engine?.cryVerdict(verdict) }
+        }
+    }
+
+    nonisolated private static func cryFailureSink(engine: MonitorEngine) -> CryDetector.FailureSink {
+        { [weak engine] why in
+            Task { @MainActor in engine?.cryClassifierFailed(why) }
+        }
     }
 
     nonisolated private static func closeSink(engine: MonitorEngine, generation: Int) -> (Error?) -> Void {
@@ -995,6 +1015,9 @@ final class MonitorEngine: ObservableObject {
         if soundStatus == .listening || soundStatus == .silent {
             activityLog.feed(level: smoothed, at: now)
         }
+        // The cry classifier listens only while a sound event runs. Only a change costs anything.
+        let wantCry = !Self.isDemo && classifierAvailable && activityLog.current != nil
+        if wantCry != cryListening { setCryListening(wantCry) }
         holdRoomLevel(RoomLevel(smoothed), now: now)
 
         guard ticks % 5 == 0 else { return }       // The rest runs at 2 Hz.
@@ -1050,6 +1073,29 @@ final class MonitorEngine: ObservableObject {
             louderSince = nil
             quieterSince = nil
         }
+    }
+
+    // MARK: The cry classifier
+
+    private func setCryListening(_ on: Bool) {
+        guard on != cryListening else { return }
+        cryListening = on
+        audio.setSamplesWanted(on)
+        cry.setActive(on)
+    }
+
+    /// A verdict for one window of sound, at most twice a second. The detector logs it.
+    private func cryVerdict(_ verdict: CryVerdict) {
+        guard cryListening, activityLog.current != nil else { return }      // A late one after the event.
+        roomMachine.classified(verdict)
+    }
+
+    /// The model did not load, or it failed. From now on the loudness rule decides.
+    private func cryClassifierFailed(_ why: String) {
+        guard classifierAvailable else { return }
+        classifierAvailable = false
+        setCryListening(false)
+        Log.shared.add("cry classifier not available (\(why)): the loudness rule decides")
     }
 
     /// The word of the room, from the signals the engine has. Published only when it changes.

@@ -12,11 +12,15 @@ import os
 final class LiveAudioPlayer: @unchecked Sendable {
     /// The level of the room, 0...1, before the gain. It runs on the caller's queue.
     var onLevel: ((Float) -> Void)?
+    /// The decoded samples, -1...1, before the gain: the input of the cry detector. Set it once,
+    /// before the stream starts. It runs on the caller's queue, only while `setSamplesWanted(true)`.
+    var onSamples: (([Float]) -> Void)?
 
     private let q = DispatchQueue(label: "nursery.audio", qos: .userInteractive)
     private var engine = AVAudioEngine()
     private var player = AVAudioPlayerNode()
-    private let format: AVAudioFormat
+    /// Float32, mono, at the stream's rate (8000 Hz for G.711).
+    let format: AVAudioFormat
     private let sampleRate: Double
     private let startFrames: Int
     private let maxFrames: Int
@@ -33,6 +37,7 @@ final class LiveAudioPlayer: @unchecked Sendable {
     // Read from other threads.
     private let queuedFrames = OSAllocatedUnfairLock(initialState: 0)
     private let engineRunning = OSAllocatedUnfairLock(initialState: false)
+    private let samplesWanted = OSAllocatedUnfairLock(initialState: false)
 
     init(sampleRate: Double = 8000) {
         self.sampleRate = sampleRate
@@ -107,6 +112,10 @@ final class LiveAudioPlayer: @unchecked Sendable {
 
     var isRunning: Bool { engineRunning.withLock { $0 } }
 
+    /// The cry detector listens: hand the samples to `onSamples`. Off in a quiet room, so the
+    /// decoding for it costs nothing then.
+    func setSamplesWanted(_ on: Bool) { samplesWanted.withLock { $0 = on } }
+
     /// The current delay of the queue, in seconds.
     var bufferedSeconds: Double { Double(queuedFrames.withLock { $0 }) / sampleRate }
 
@@ -116,12 +125,17 @@ final class LiveAudioPlayer: @unchecked Sendable {
         guard !payload.isEmpty else { return }
 
         // The level of the room, from the raw samples, on the caller's queue.
+        let tap = samplesWanted.withLock { $0 } ? onSamples : nil
+        var samples: [Float] = []
+        if tap != nil { samples.reserveCapacity(payload.count) }
         var sum: Float = 0
         for byte in payload {
             let s = Float(table[Int(byte)]) / 32768
             sum += s * s
+            if tap != nil { samples.append(s) }
         }
         onLevel?(Self.level(fromRMS: sqrtf(sum / Float(payload.count))))
+        tap?(samples)
 
         let bytes = Array(payload)
         q.async { self.schedule(bytes, table: table) }
