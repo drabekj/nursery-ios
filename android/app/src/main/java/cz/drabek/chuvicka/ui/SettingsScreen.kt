@@ -59,6 +59,7 @@ fun SettingsScreen(back: () -> Unit, openLog: () -> Unit, becomeBaby: () -> Unit
     val loudness by Settings.loudness.collectAsState()
     val appearance by Settings.appearance.collectAsState()
     val alertOnSound by Settings.alertOnSound.collectAsState()
+    val alertOnAnySound by Settings.alertOnAnySound.collectAsState()
     val viaTailscale by Monitor.viaTailscale.collectAsState()
     val detailActive by Monitor.detailActive.collectAsState()
     val ptzReady by Monitor.ptzReady.collectAsState()
@@ -83,7 +84,8 @@ fun SettingsScreen(back: () -> Unit, openLog: () -> Unit, becomeBaby: () -> Unit
         Section(null) {
             NavRow("Kamera", camera) { openWizard(WizardStep.SOURCE) }
         }
-        Section("Zvuk", footer = "Zesílená se hodí do tichého pokoje.") {
+        // Hlasitost is the playback only; the cry detection hears the room as it is.
+        Section("Zvuk", footer = "Zesílená se hodí do tichého pokoje. Hlasitost nemění, kdy Chůvička poslouchá, jestli jde o pláč.") {
             Choice("Hlasitost", Settings.Loudness.entries.map { it to it.title }, loudness) {
                 Settings.set(Settings.loudness, "loudness", it); Monitor.setGain(it.decibels)
             }
@@ -102,6 +104,8 @@ fun SettingsScreen(back: () -> Unit, openLog: () -> Unit, becomeBaby: () -> Unit
         if (advanced) {
             Section("Upozornění", footer = "Na výpadek spojení a na pláč, když zvuk neslyšíte, upozorní Chůvička vždy.") {
                 Switchy("Upozornit na pláč i když zvuk hraje", alertOnSound) { Settings.set(Settings.alertOnSound, "alertOnSound", it) }
+                // Off by default: a sigh or a dog is Ozývá se, not a reason to wake the parent.
+                Switchy("Upozornit i na každý zvuk", alertOnAnySound) { Settings.set(Settings.alertOnAnySound, "alertOnAnySound", it) }
             }
             Section("Displej") {
                 Choice("Vzhled", Settings.Appearance.entries.map { it to it.title }, appearance) { Settings.set(Settings.appearance, "appearance", it) }
