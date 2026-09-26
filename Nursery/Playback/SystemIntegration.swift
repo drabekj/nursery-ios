@@ -133,7 +133,8 @@ final class LiveActivityController {
 @MainActor
 enum NurseryAlerts {
     private static let lossID = "nursery.sound.lost"
-    private static let soundID = "nursery.sound.event"
+    /// One card per episode: "Miminko pláče" replaces "Miminko se ozývá" of the same episode.
+    private static func soundID(_ episode: UUID) -> String { "nursery.sound.\(episode.uuidString)" }
     private static let watchdogID = "nursery.watchdog"
     private static let interruptedID = "nursery.interrupted"
 
@@ -145,9 +146,9 @@ enum NurseryAlerts {
         await UNUserNotificationCenter.current().notificationSettings().authorizationStatus
     }
 
-    static func postLoss() {
-        post(id: lossID, title: "Spojení s pokojíčkem se přerušilo",
-             body: "Zvuk vypadl. Chůvička se pokusí připojit znovu sama.")
+    static func postLoss(at date: Date) {
+        post(id: lossID, title: "Chůvička nehlídá",
+             body: "Spojení vypadlo v \(time(date)). Chůvička to zkouší dál sama.")
     }
 
     /// The watchdog. While the app runs in the background, it moves this notification
@@ -182,9 +183,18 @@ enum NurseryAlerts {
         UNUserNotificationCenter.current().removeDeliveredNotifications(withIdentifiers: [interruptedID])
     }
 
-    static func postSound(at date: Date) {
-        let time = date.formatted(.dateTime.hour().minute().locale(Locale(identifier: "cs_CZ")))
-        post(id: soundID, title: "Miminko se ozvalo", body: "V \(time). Klepnutím zobrazíte kameru.")
+    /// The room word became "Pláče". `level` is the loudness word, lower-case ("velmi hlasitý zvuk").
+    static func postCry(episode: UUID, since date: Date, level: String) {
+        post(id: soundID(episode), title: "Miminko pláče", body: "od \(time(date)) · \(level)")
+    }
+
+    /// The room word became "Ozývá se". Only with the setting "every sound".
+    static func postSound(episode: UUID, at date: Date, level: String) {
+        post(id: soundID(episode), title: "Miminko se ozývá", body: "v \(time(date)) · \(level)")
+    }
+
+    private static func time(_ date: Date) -> String {
+        date.formatted(.dateTime.hour().minute().locale(Locale(identifier: "cs_CZ")))
     }
 
     private static func post(id: String, title: String, body: String) {

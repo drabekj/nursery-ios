@@ -119,7 +119,10 @@ final class Settings: ObservableObject {
     @Published var babyDirect: String?
     @Published var loudness: Loudness { didSet { d.set(loudness.rawValue, forKey: "loudness") } }
     @Published var keepAwake: Bool { didSet { d.set(keepAwake, forKey: "keepAwake") } }
+    /// A cry gives a notification also when the parent hears the live sound.
     @Published var alertOnSound: Bool { didSet { d.set(alertOnSound, forKey: "alertOnSound") } }
+    /// Also a sound that is not a cry ("Miminko se ozývá") gives a notification. Off by default.
+    @Published var alertOnAnySound: Bool { didSet { d.set(alertOnAnySound, forKey: "alertOnAnySound") } }
     @Published var sensitivity: Sensitivity { didSet { d.set(sensitivity.rawValue, forKey: "sensitivity") } }
     @Published var appearance: Appearance { didSet { d.set(appearance.rawValue, forKey: "appearance") } }
     @Published var role: Role { didSet { d.set(role.rawValue, forKey: "role") } }
@@ -160,6 +163,7 @@ final class Settings: ObservableObject {
         loudness = Loudness(rawValue: d.string(forKey: "loudness") ?? "") ?? .normal
         keepAwake = d.object(forKey: "keepAwake") as? Bool ?? true
         alertOnSound = d.object(forKey: "alertOnSound") as? Bool ?? false
+        alertOnAnySound = d.object(forKey: "alertOnAnySound") as? Bool ?? false
         sensitivity = Sensitivity(rawValue: d.string(forKey: "sensitivity") ?? "") ?? .medium
         appearance = Appearance(rawValue: d.string(forKey: "appearance") ?? "") ?? .automatic
         role = Role(rawValue: d.string(forKey: "role") ?? "") ?? .parent

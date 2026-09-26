@@ -110,6 +110,9 @@ final class MonitorEngine: ObservableObject {
     private var louderSince: Date?
     private var quieterSince: Date?
     private var lastSoundAlert = Date.distantPast
+    /// The episodes that got a notification already: one "se ozývá" and one "pláče" each at most.
+    private var soundAlertEpisode: UUID?
+    private var cryAlertEpisode: UUID?
     private var lastWatchdog = Date.distantPast
     private var lastAlive = Date()
     private var lastAliveCPU = MonitorEngine.processCPUSeconds()
@@ -752,9 +755,8 @@ final class MonitorEngine: ObservableObject {
     /// It returns a full frame from go2rtc. The app sets it (CameraControl.snapshot).
     var snapshotProvider: (() async -> UIImage?)?
 
-    /// An episode starts in the room. Keep a photo of the moment, and tell the parent when the
-    /// parent may not hear it: the sound muted, the iPhone volume low, or the sound alert on.
-    /// Also with the app open, for example in Night mode on the night table.
+    /// An episode starts in the room. Keep a photo of the moment. The notification comes with
+    /// the room word (`roomStateChanged`), not here.
     private func episodeStarted(_ episode: SoundActivity.Episode) {
         Log.shared.add(String(format: "sound episode, level %.2f, floor %.2f", episode.peak, activityLog.noiseFloor))
         if let snapshotProvider {
@@ -767,13 +769,41 @@ final class MonitorEngine: ObservableObject {
                 await Task.detached(priority: .utility) { Moments.save(image, for: id) }.value
             }
         }
+    }
+
+    /// The room word changed. "Pláče" and (with the setting) "Ozývá se" tell the parent when the
+    /// parent may not hear it: the sound muted, the iPhone volume low, or the alert setting on.
+    /// Also with the app open, for example in Night mode on the night table.
+    private func roomStateChanged(from old: RoomState, to new: RoomState) {
+        guard !Self.isDemo, !suspended, activityLog.current != nil else { return }
+        switch new {
+        case .cry: alertSound(cry: true)
+        case .sound where old == .calm: alertSound(cry: false)      // A new sound, not the end of a cry.
+        default: break
+        }
+    }
+
+    private func alertSound(cry: Bool) {
+        guard let episode = activityLog.episodes.first else { return }      // The running one, newest first.
         let unheard = mode == .off || volumeLow
-        let wanted = unheard || settings.alertOnSound
+        let wanted = cry ? unheard || settings.alertOnSound : settings.alertOnAnySound
         // With live sound at a good volume, the parent hears it. An alert on the open app is noise then.
         let appOpen = UIApplication.shared.applicationState == .active
-        guard wanted, !(appOpen && !unheard), Date().timeIntervalSince(lastSoundAlert) > 60 else { return }
+        guard wanted, !(appOpen && !unheard), cryAlertEpisode != episode.id else { return }
+        if !cry, soundAlertEpisode == episode.id { return }
+        // "Pláče" after "se ozývá" of the same episode replaces its card: no rate limit for that.
+        let upgrade = cry && soundAlertEpisode == episode.id
+        guard upgrade || Date().timeIntervalSince(lastSoundAlert) > 60 else { return }
         lastSoundAlert = Date()
-        NurseryAlerts.postSound(at: episode.start)
+        let level = RoomLevel(max(episode.peak, meter)).title.lowercased()
+        if cry {
+            cryAlertEpisode = episode.id
+            NurseryAlerts.postCry(episode: episode.id, since: episode.start, level: level)
+        } else {
+            soundAlertEpisode = episode.id
+            NurseryAlerts.postSound(episode: episode.id, at: episode.start, level: level)
+        }
+        Log.shared.add(cry ? "notification: cry" : "notification: sound")
     }
 
     // MARK: Night mode
@@ -1121,9 +1151,11 @@ final class MonitorEngine: ObservableObject {
             if next == .cry, event != nil { activityLog.markCurrentCried() }
         }
         guard next != roomState else { return }
+        let old = roomState
         roomState = next
         roomStateSince = Self.isDemo ? now : roomMachine.since ?? now
         Log.shared.add("room: \(next.title)")
+        roomStateChanged(from: old, to: next)
     }
 
     private func updateStatus(force: Bool, lastAudio: Date? = nil) {
@@ -1144,7 +1176,7 @@ final class MonitorEngine: ObservableObject {
             if lostSince == nil { lostSince = Date() }
             if !alerted, let since = lostSince, Date().timeIntervalSince(since) > 20 {
                 alerted = true
-                NurseryAlerts.postLoss()
+                NurseryAlerts.postLoss(at: since)
             }
         } else {
             lostSince = nil
