@@ -275,6 +275,10 @@ final class MonitorEngine: ObservableObject {
             timer?.tolerance = 0.03          // iOS may then join the wake-ups with other work.
         }
         if Self.isDemo { startDemo(); return }
+        // A fresh start: a "stopped watching" alert that an earlier run left (iOS or Xcode ended
+        // it in the background) is false now. Without this it fired 2.5 min after the new start,
+        // because the first scene phase is .active and no change calls sceneBecameActive().
+        NurseryAlerts.disarmWatchdog()
         activateAudioSession()
         nowPlaying.configure()
         applyMode()
