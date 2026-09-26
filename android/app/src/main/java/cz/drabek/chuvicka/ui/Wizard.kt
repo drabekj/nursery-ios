@@ -49,6 +49,8 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.core.content.ContextCompat
 import cz.drabek.chuvicka.App
+import cz.drabek.chuvicka.Go2rtc
+import cz.drabek.chuvicka.HomeDefaults
 import cz.drabek.chuvicka.Net
 import cz.drabek.chuvicka.PairLink
 import cz.drabek.chuvicka.Settings
@@ -535,7 +537,7 @@ private fun ServerStep(frame: Frame, next: () -> Unit) {
             Settings.set(Settings.source, "source", Settings.Source.CAMERA)
             next()
         }) {
-        Field(host, { host = it }, "Adresa serveru", "Například 192.168.0.136", KeyboardType.Uri)
+        Field(host, { host = it }, "Adresa serveru", "Například ${HomeDefaults.SERVER_HOST.ifEmpty { "192.168.0.10" }}", KeyboardType.Uri)
         Field(main, { main = it }, "Hlavní stream", "Obraz ve vysoké kvalitě")
         Field(small, { small = it }, "Malý stream", "Pro režim Jen zvuk a pro fotku")
     }
@@ -617,7 +619,7 @@ private fun RemoteStep(frame: Frame, startOpen: Boolean, next: () -> Unit) {
                 here = withContext(Dispatchers.IO) { Net.hasTailscale() }
                 if (Settings.source.value == Settings.Source.CAMERA) {
                     val h = Settings.remoteHost.value.trim()
-                    serverOk = h.isNotEmpty() && withContext(Dispatchers.IO) { RtspClient.canConnect(h, 8554) }
+                    serverOk = h.isNotEmpty() && withContext(Dispatchers.IO) { RtspClient.canConnect(h, Go2rtc.RTSP_PORT) }
                 } else if (n % 5 == 0 && !Settings.babyAddresses.value.any { RtspClient.isTailscale(it.substringBeforeLast(":")) }) {
                     // The phone at the baby tells its new addresses when we connect: ask it now and then.
                     withContext(Dispatchers.IO) { refreshBabyAddresses(context) }

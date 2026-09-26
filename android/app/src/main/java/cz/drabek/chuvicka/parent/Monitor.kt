@@ -3,6 +3,8 @@ package cz.drabek.chuvicka.parent
 import android.content.Context
 import android.media.AudioManager
 import cz.drabek.chuvicka.App
+import cz.drabek.chuvicka.Go2rtc
+import cz.drabek.chuvicka.HomeDefaults
 import cz.drabek.chuvicka.Log
 import cz.drabek.chuvicka.Settings
 import cz.drabek.chuvicka.proto.AccessUnit
@@ -207,7 +209,7 @@ object Monitor {
             }
             val home = Settings.host.value.trim()
             val remote = Settings.remoteHost.value.trim()
-            val host = if (remote.isNotEmpty() && remote != home && !RtspClient.canConnect(home, 8554)) remote else home
+            val host = if (remote.isNotEmpty() && remote != home && !RtspClient.canConnect(home, Go2rtc.RTSP_PORT)) remote else home
             if (Settings.activeHost.value != host) Log.add("server: ${if (host == home) "home" else "Tailscale"} $host")
             Settings.activeHost.value = host
             viaTailscale.value = host != home
@@ -342,7 +344,7 @@ object Monitor {
         if (App.demo) return null
         val url = if (Settings.source.value == Settings.Source.CAMERA) {
             if (Settings.cameraKind.value == Settings.KIND_RTSP) return null      // An IP camera gives no photo here.
-            "http://${Settings.serverHost}:1984/api/frame.jpeg?src=${Settings.encode(Settings.streamSmall.value.trim().ifEmpty { "nursery_sd" })}"
+            "http://${Settings.serverHost}:${Go2rtc.API_PORT}/api/frame.jpeg?src=${Settings.encode(Settings.streamSmall.value.trim().ifEmpty { HomeDefaults.STREAM_SMALL })}"
         } else {
             val (host, port) = babyDirect ?: BabyFinder.resolve(context, Settings.babyName.value) ?: return null
             "http://$host:$port/${Settings.babyCode.value}/frame.jpeg"
