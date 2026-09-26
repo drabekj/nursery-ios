@@ -5,6 +5,7 @@ import cz.drabek.chuvicka.proto.RtspClient
 import kotlinx.coroutines.flow.MutableStateFlow
 import java.net.Inet4Address
 import java.net.NetworkInterface
+import java.net.URLDecoder
 
 /**
  * The pairing link in the QR code of the phone at the baby. The iOS app makes and reads the same:
@@ -16,20 +17,37 @@ object PairLink {
     fun build(name: String, code: String, addresses: List<String>): String =
         "chuvicka://pair?n=${Settings.encode(name)}&c=$code&a=${Settings.encode(addresses.joinToString(","))}"
 
-    fun parse(uri: Uri?): Info? {
-        if (uri == null || uri.scheme?.lowercase() != "chuvicka" || uri.host?.lowercase() != "pair") return null
+    fun parse(uri: Uri?): Info? = if (uri == null) null else parse(uri.toString())
+
+    /** Plain Kotlin, not android.net.Uri, so the unit tests run it. */
+    fun parse(text: String): Info? {
+        val link = text.trim()
+        val scheme = link.substringBefore("://", "")
+        if (!scheme.equals("chuvicka", ignoreCase = true)) return null
+        val rest = link.substring(scheme.length + 3).substringBefore('#')
+        if (!rest.substringBefore('?').substringBefore('/').equals("pair", ignoreCase = true)) return null
         return try {
-            val name = uri.getQueryParameter("n")?.trim() ?: return null
-            val code = uri.getQueryParameter("c")?.trim() ?: return null
+            val query = query(rest.substringAfter('?', ""))
+            val name = query["n"]?.trim() ?: return null
+            val code = query["c"]?.trim() ?: return null
             if (name.isEmpty() || code.length != 6 || !code.all(Char::isDigit)) return null
-            val addresses = (uri.getQueryParameter("a") ?: "").split(",").map { it.trim() }.filter { it.isNotEmpty() }
+            val addresses = (query["a"] ?: "").split(",").map { it.trim() }.filter { it.isNotEmpty() }
             Info(name, code, addresses)
         } catch (e: Exception) {
-            null            // Not a hierarchical URI, or bad encoding.
+            null            // Bad encoding.
         }
     }
 
-    fun parse(text: String): Info? = try { parse(Uri.parse(text.trim())) } catch (e: Exception) { null }
+    /** "n=a%20b&c=1" to its values, decoded. The first value of a key wins, as in Uri. */
+    private fun query(text: String): Map<String, String> {
+        val out = HashMap<String, String>()
+        for (item in text.split('&')) {
+            if (item.isEmpty()) continue
+            val key = URLDecoder.decode(item.substringBefore('='), "UTF-8")
+            if (key !in out) out[key] = URLDecoder.decode(item.substringAfter('=', ""), "UTF-8")
+        }
+        return out
+    }
 
     /** It saves the pairing: this phone now watches that phone at the baby. */
     fun apply(pair: Info) {

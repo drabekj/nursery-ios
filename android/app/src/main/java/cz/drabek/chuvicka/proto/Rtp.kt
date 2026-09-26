@@ -1,6 +1,5 @@
 package cz.drabek.chuvicka.proto
 
-import android.util.Base64
 import kotlin.math.log10
 import kotlin.math.max
 import kotlin.math.min
@@ -23,14 +22,14 @@ data class SdpTrack(
     val control: String,
     val fmtp: Map<String, String>,
 ) {
-    /** The SPS and the PPS from `sprop-parameter-sets`, if the SDP has them. */
+    /** The SPS and the PPS from `sprop-parameter-sets`, if the SDP has them. java.util.Base64, so the unit tests run it. */
     val h264ParameterSets: Pair<ByteArray, ByteArray>?
         get() {
             val sprop = fmtp["sprop-parameter-sets"] ?: return null
             var sps: ByteArray? = null
             var pps: ByteArray? = null
             for (part in sprop.split(",")) {
-                val bytes = try { Base64.decode(part.trim(), Base64.DEFAULT) } catch (e: IllegalArgumentException) { continue }
+                val bytes = try { java.util.Base64.getDecoder().decode(part.trim()) } catch (e: IllegalArgumentException) { continue }
                 if (bytes.isEmpty()) continue
                 when (bytes[0].toInt() and 0x1F) {
                     7 -> sps = bytes
