@@ -62,7 +62,9 @@ struct MonitorView: View {
             }
         }
         .overlay(alignment: .top) { toastView }
-        .confirmationDialog("Ukončit hlídání?", isPresented: $confirmStop, titleVisibility: .visible) {
+        // An alert, not a confirmation dialog: iOS shows the dialog as a popover and hides its
+        // cancel button there. The alert always shows "Zrušit".
+        .alert("Ukončit hlídání?", isPresented: $confirmStop) {
             Button("Ukončit hlídání", role: .destructive, action: stop)
             Button("Zrušit", role: .cancel) {}
         } message: {
