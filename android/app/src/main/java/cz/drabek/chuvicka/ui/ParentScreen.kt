@@ -1,6 +1,7 @@
 package cz.drabek.chuvicka.ui
 
 import androidx.compose.ui.platform.LocalConfiguration
+import android.app.Activity
 import android.content.Context
 import android.content.Intent
 import android.content.IntentFilter
@@ -23,9 +24,12 @@ import androidx.compose.animation.togetherWith
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
+import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.foundation.layout.*
+import androidx.compose.foundation.selection.selectable
+import androidx.compose.foundation.selection.selectableGroup
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
@@ -61,11 +65,14 @@ import androidx.compose.ui.draw.scale
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.graphics.vector.ImageVector
+import androidx.compose.ui.input.pointer.PointerEventPass
+import androidx.compose.ui.input.pointer.PointerEventType
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalView
 import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.semantics.Role
+import androidx.compose.ui.semantics.clearAndSetSemantics
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.onClick
 import androidx.compose.ui.semantics.role
@@ -77,6 +84,7 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.compose.ui.viewinterop.AndroidView
+import androidx.core.view.WindowCompat
 import cz.drabek.chuvicka.App
 import cz.drabek.chuvicka.Log
 import cz.drabek.chuvicka.R
@@ -85,6 +93,7 @@ import cz.drabek.chuvicka.parent.Connection
 import cz.drabek.chuvicka.parent.Monitor
 import cz.drabek.chuvicka.parent.PtzDirection
 import cz.drabek.chuvicka.parent.RoomLevel
+import cz.drabek.chuvicka.parent.RoomState
 import cz.drabek.chuvicka.parent.SoundMode
 import cz.drabek.chuvicka.parent.SoundStatus
 import cz.drabek.chuvicka.parent.VideoDecoder
@@ -97,6 +106,7 @@ import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.withContext
 import java.text.SimpleDateFormat
+import java.util.Calendar
 import java.util.Date
 import java.util.Locale
 
@@ -132,25 +142,69 @@ fun ParentScreen(openSettings: () -> Unit, openHelp: () -> Unit, pip: Boolean, e
             }
         }
     }
+    // The field: the glance view is the state colour, edge to edge. After 30 s untouched it dims;
+    // only Pláče or a touch lights it again (a sigh does not double the light in the room).
+    val state by Monitor.roomState.collectAsState()
+    var touches by remember { mutableIntStateOf(0) }
+    var dim by remember { mutableStateOf(false) }
+    val crying = state == RoomState.CRY
+    LaunchedEffect(touches, crying, soundView, night) {
+        dim = false
+        if (soundView && !night && !crying) { delay(30_000); dim = true }
+    }
+    val onField = soundView && !night
+    val p = colors
+    val fieldColor by animateColorAsState(p.field(state, dim), tween(600), label = "field")
+    val reduce = reduceMotion()
+    // The status bar icons follow the field: dark only on the bright amber. Light on black in Night mode.
+    val activity = view.context as? Activity
+    val darkIcons = when {
+        night -> false
+        onField && !paused -> p.onField(state, dim) != Color.White
+        else -> !p.dark
+    }
+    LaunchedEffect(darkIcons, p.dark) {
+        activity?.window?.let { WindowCompat.getInsetsController(it, view).isAppearanceLightStatusBars = darkIcons }
+    }
+    val appIcons by rememberUpdatedState(!p.dark)
+    DisposableEffect(Unit) {
+        onDispose { activity?.window?.let { WindowCompat.getInsetsController(it, view).isAppearanceLightStatusBars = appIcons } }
+    }
+    NightSuggestion(night || paused, snackbar)
     if (paused) {
         PausedScreen { Monitor.paused.value = false; cz.drabek.chuvicka.parent.ParentService.start(context) }
         return
     }
-    Box(Modifier.fillMaxSize().background(colors.sky)) {
-        Column(Modifier.fillMaxSize().systemBarsPadding().padding(horizontal = 16.dp)) {
-            TopRow(openSettings, openHelp, requestStop = { confirmStop = true })
-            ViewSwitch(soundView) { on ->
-                Settings.set(Settings.soundView, "soundView", on)
-                Monitor.reconnect(if (on) "sound view" else "picture view")
+    Box(Modifier.fillMaxSize()
+        .then(if (onField) Modifier.fieldBackground(fieldColor) else Modifier.background(p.sky))
+        // Every touch counts for the dimming. It does not take the touch from the buttons.
+        .pointerInput(Unit) {
+            awaitPointerEventScope {
+                while (true) {
+                    if (awaitPointerEvent(PointerEventPass.Initial).type == PointerEventType.Press) touches++
+                }
             }
-            Spacer(Modifier.height(16.dp))
-            AnimatedContent(soundView, Modifier.weight(1f), transitionSpec = { fadeIn(tween(350)) togetherWith fadeOut(tween(200)) }, label = "view") { sound ->
-                if (sound) SoundStage() else PictureStage(enterPip, aiming && !night, snackbar) { aiming = false }
+        }) {
+        CompositionLocalProvider(LocalOnField provides if (onField) OnField(p.onField(state, dim), fieldColor) else null) {
+            Column(Modifier.fillMaxSize().systemBarsPadding().padding(horizontal = 16.dp)) {
+                TopRow(openSettings, openHelp, requestStop = { confirmStop = true })
+                ViewSwitch(soundView) { on ->
+                    Settings.set(Settings.soundView, "soundView", on)
+                    Monitor.reconnect(if (on) "sound view" else "picture view")
+                }
+                Spacer(Modifier.height(16.dp))
+                // Nothing moves under Night mode or with "Remove animations".
+                val animate = !night && !reduce
+                AnimatedContent(soundView, Modifier.weight(1f), transitionSpec = { fadeIn(tween(350)) togetherWith fadeOut(tween(200)) }, label = "view") { sound ->
+                    if (sound) SoundStage(dim, animate, announce = !night)
+                    else PictureStage(enterPip, aiming && !night, snackbar, animate, announce = !night) { aiming = false }
+                }
+                Spacer(Modifier.height(12.dp))
+                // In the glance view the volume is a ribbon under the word.
+                if (!soundView) VolumeWarning()
+                ControlBar(aiming) { aiming = !aiming }
+                Spacer(Modifier.height(8.dp))
             }
-            Spacer(Modifier.height(12.dp))
-            VolumeWarning()
-            ControlBar(aiming) { aiming = !aiming }
-            Spacer(Modifier.height(8.dp))
         }
         // Above the control bar; Night mode covers it.
         SnackbarHost(snackbar, Modifier.align(Alignment.BottomCenter).navigationBarsPadding().padding(start = 16.dp, end = 16.dp, bottom = 88.dp))
@@ -168,6 +222,44 @@ fun ParentScreen(openSettings: () -> Unit, openHelp: () -> Unit, pip: Boolean, e
     )
 }
 
+/** On a field: the type colour and the field colour. Null on the plain page (the picture view). */
+private data class OnField(val on: Color, val field: Color)
+
+private val LocalOnField = compositionLocalOf<OnField?> { null }
+
+/** Glass on a field: translucent white. No brand yellow on a field. */
+private val FieldGlass = Color.White.copy(alpha = 0.18f)
+
+/**
+ * "Je noc. Zapnout Noční režim?": after 21:00, on the charger, the monitor up 3 min. Once an evening.
+ * The parent will not look for the Noční button at 2 a.m.
+ */
+@Composable
+private fun NightSuggestion(off: Boolean, snackbar: SnackbarHostState) {
+    val context = androidx.compose.ui.platform.LocalContext.current
+    LaunchedEffect(off) {
+        if (off || App.demo) return@LaunchedEffect
+        delay(180_000)
+        val prefs = context.getSharedPreferences("settings", Context.MODE_PRIVATE)
+        while (true) {
+            val cal = Calendar.getInstance()
+            val hour = cal.get(Calendar.HOUR_OF_DAY)
+            if (hour >= 21 || hour < 5) {
+                if (hour < 5) cal.add(Calendar.DAY_OF_YEAR, -1)        // After midnight: still the same evening.
+                val evening = "${cal.get(Calendar.YEAR)}-${cal.get(Calendar.DAY_OF_YEAR)}"
+                if (prefs.getString("nightSuggested", null) != evening && batteryNow(context).second) {
+                    prefs.edit().putString("nightSuggested", evening).apply()
+                    val r = snackbar.showSnackbar("Je noc. Zapnout Noční režim?", actionLabel = "Zapnout",
+                        withDismissAction = true, duration = SnackbarDuration.Long)
+                    if (r == SnackbarResult.ActionPerformed) { Monitor.night.value = true; Monitor.reconnect("night mode") }
+                    break
+                }
+            }
+            delay(60_000)
+        }
+    }
+}
+
 @Composable
 private fun TopRow(openSettings: () -> Unit, openHelp: () -> Unit, requestStop: () -> Unit) {
     val connection by Monitor.connection.collectAsState()
@@ -178,18 +270,22 @@ private fun TopRow(openSettings: () -> Unit, openHelp: () -> Unit, requestStop: 
         Connection.Connecting, Connection.Idle -> "Připojování" to colors.warn
         is Connection.Retrying -> (if (c.failures >= 2) "Nedostupné" else "Obnovování spojení") to (if (c.failures >= 2) colors.neutral else colors.warn)
     }
+    // On a field: glass pills; the dot and the type in the field's type colour.
+    val f = LocalOnField.current
+    val pill = if (f != null) FieldGlass else colors.card
+    val ink = f?.on ?: colors.ink
     Row(Modifier.fillMaxWidth().padding(vertical = 8.dp), verticalAlignment = Alignment.CenterVertically) {
-        Row(Modifier.clip(RoundedCornerShape(50)).background(colors.card).padding(horizontal = 14.dp, vertical = 8.dp),
+        Row(Modifier.clip(RoundedCornerShape(50)).background(pill).padding(horizontal = 14.dp, vertical = 8.dp),
             verticalAlignment = Alignment.CenterVertically) {
-            Box(Modifier.size(9.dp).clip(CircleShape).background(color))
+            Box(Modifier.size(9.dp).clip(CircleShape).background(f?.on ?: color))
             Spacer(Modifier.width(8.dp))
-            Text(text, fontWeight = FontWeight.SemiBold, fontSize = 15.sp, color = colors.ink)
+            Text(text, fontWeight = FontWeight.SemiBold, fontSize = 15.sp, color = ink)
         }
-        Text("Chůvička", Modifier.weight(1f), textAlign = TextAlign.Center, fontWeight = FontWeight.SemiBold, fontSize = 18.sp, color = colors.ink)
+        Text("Chůvička", Modifier.weight(1f), textAlign = TextAlign.Center, fontWeight = FontWeight.SemiBold, fontSize = 18.sp, color = ink)
         var menu by remember { mutableStateOf(false) }
         Box {
-            IconButton(onClick = { menu = true }, Modifier.clip(CircleShape).background(colors.card)) {
-                Icon(Icons.Filled.MoreVert, "Další volby", tint = colors.accent)
+            IconButton(onClick = { menu = true }, Modifier.clip(CircleShape).background(pill)) {
+                Icon(Icons.Filled.MoreVert, "Další volby", tint = f?.on ?: colors.accent)
             }
             DropdownMenu(menu, onDismissRequest = { menu = false }, Modifier.background(colors.card)) {
                 DropdownMenuItem(text = { Text("Nastavení") }, onClick = { menu = false; openSettings() })
@@ -208,10 +304,15 @@ private fun stopWatching(context: Context) {
     cz.drabek.chuvicka.parent.ParentService.stop(context)
 }
 
-/** "Obraz | Jen zvuk". The chosen side is filled with the moon colour. */
+/**
+ * "Obraz | Jen zvuk". The chosen side is filled with the moon colour; on a field, with the type
+ * colour at 90 % and the field colour as the label.
+ */
 @Composable
 fun ViewSwitch(soundView: Boolean, choose: (Boolean) -> Unit) {
-    Row(Modifier.fillMaxWidth().wrapContentWidth().clip(RoundedCornerShape(50)).background(colors.card).padding(4.dp)) {
+    val f = LocalOnField.current
+    Row(Modifier.fillMaxWidth().wrapContentWidth().clip(RoundedCornerShape(50)).background(if (f != null) FieldGlass else colors.card)
+        .selectableGroup().padding(4.dp)) {
         Segment(!soundView, Icons.Filled.Videocam, "Obraz") { choose(false) }
         Segment(soundView, Icons.Filled.GraphicEq, "Jen zvuk") { choose(true) }
     }
@@ -219,23 +320,30 @@ fun ViewSwitch(soundView: Boolean, choose: (Boolean) -> Unit) {
 
 @Composable
 private fun Segment(selected: Boolean, icon: ImageVector, title: String, onClick: () -> Unit) {
-    val bg by animateColorAsState(if (selected) colors.moon else Color.Transparent, tween(250), label = "segment")
-    Row(Modifier.clip(RoundedCornerShape(50)).background(bg).clickable(enabled = !selected, onClick = onClick)
+    val f = LocalOnField.current
+    val bg by animateColorAsState(if (selected) f?.on?.copy(alpha = 0.9f) ?: colors.moon else Color.Transparent, tween(250), label = "segment")
+    val ink = if (selected) f?.field ?: Color.Black else f?.on ?: colors.ink
+    // A tab for TalkBack, with its selected state. A tap on the chosen side does nothing.
+    Row(Modifier.clip(RoundedCornerShape(50)).background(bg)
+        .selectable(selected = selected, role = Role.Tab, onClick = { if (!selected) onClick() })
         .padding(horizontal = 18.dp, vertical = 9.dp), verticalAlignment = Alignment.CenterVertically) {
-        Icon(icon, null, Modifier.size(18.dp), tint = if (selected) Color.Black else colors.ink)
+        Icon(icon, null, Modifier.size(18.dp), tint = ink)
         Spacer(Modifier.width(8.dp))
-        Text(title, fontWeight = FontWeight.SemiBold, color = if (selected) Color.Black else colors.ink)
+        Text(title, fontWeight = FontWeight.SemiBold, color = ink)
     }
 }
 
 // MARK: The picture view
 
 @Composable
-private fun PictureStage(enterPip: () -> Unit, aiming: Boolean, snackbar: SnackbarHostState, closeAim: () -> Unit) {
+private fun PictureStage(enterPip: () -> Unit, aiming: Boolean, snackbar: SnackbarHostState, animate: Boolean, announce: Boolean,
+                         closeAim: () -> Unit) {
     val (w, h) = Monitor.videoSize.collectAsState().value
     val pictureLive by Monitor.pictureLive.collectAsState()
+    val state by Monitor.roomState.collectAsState()
+    val frame by animateColorAsState(colors.field(state), tween(600), label = "frame")
     Column {
-        Box(Modifier.fillMaxWidth().aspectRatio(w.toFloat() / maxOf(h, 1)).clip(RoundedCornerShape(26.dp)).background(Color.Black)) {
+        Box(Modifier.fillMaxWidth().aspectRatio(w.toFloat() / maxOf(h, 1)).clip(RoundedCornerShape(28.dp)).background(Color.Black)) {
             VideoSurface(Modifier.fillMaxSize())
             if (!pictureLive) VideoPlaceholder()
             // A plain if: AnimatedVisibility in a Box inside a Column resolves to the Column's version.
@@ -245,12 +353,28 @@ private fun PictureStage(enterPip: () -> Unit, aiming: Boolean, snackbar: Snackb
                     Icon(Icons.Filled.PictureInPictureAlt, "Obraz v obraze", tint = Color.White)
                 }
             }
+            // The frame light: a 4 dp inner stroke in the state colour, on top of the picture.
+            Box(Modifier.matchParentSize().border(4.dp, frame, RoundedCornerShape(28.dp)))
         }
-        Spacer(Modifier.height(20.dp))
-        RoomWords(center = false)
+        Spacer(Modifier.height(16.dp))
+        Band(animate, announce)
         Spacer(Modifier.height(14.dp))
-        Waveform(Monitor.history.collectAsState().value, Modifier.height(80.dp), dim = Monitor.status.collectAsState().value.let { it != SoundStatus.LISTENING && it != SoundStatus.SILENT })
+        PictureWaveform()
     }
+}
+
+/** The band on its own: it recomposes once a second, the picture above does not. */
+@Composable
+private fun Band(animate: Boolean, announce: Boolean) {
+    StateBand(roomView(), animate, announce = announce)
+}
+
+/** The waveform on its own: it recomposes 10 times a second. */
+@Composable
+private fun PictureWaveform() {
+    val history by Monitor.history.collectAsState()
+    val status by Monitor.status.collectAsState()
+    Waveform(history, Modifier.height(60.dp), dim = status != SoundStatus.LISTENING && status != SoundStatus.SILENT)
 }
 
 /** The decoder draws straight on this surface. In the demo, a still picture. */
@@ -416,58 +540,59 @@ private fun AimArrow(icon: ImageVector, label: String, modifier: Modifier, step:
     }
 }
 
-// MARK: The sound view
+// MARK: The sound view (the glance view)
 
+/**
+ * The lamp: the field (drawn by the screen, edge to edge), the glyph, the word, the line, the
+ * ribbon; under them the glass cards; then the bar. No photo card here: the field gets the space.
+ */
 @Composable
-private fun SoundStage() {
+private fun SoundStage(dim: Boolean, animate: Boolean, announce: Boolean) {
+    val on = LocalOnField.current?.on ?: colors.ink
     Column(horizontalAlignment = Alignment.CenterHorizontally) {
-        Box(Modifier.weight(1f).fillMaxWidth(), contentAlignment = Alignment.Center) {
-            // Only a picture: the Zvuk button below is the one way to mute.
-            Orb(Modifier.fillMaxHeight().aspectRatio(1f).widthIn(max = 280.dp).semantics { contentDescription = "Zvuk v pokojíčku" })
-        }
+        Field(dim, animate, announce, Modifier.weight(1f).fillMaxWidth())
         Spacer(Modifier.height(12.dp))
-        RoomWords(center = true)
-        Spacer(Modifier.height(18.dp))
-        PeekCard()
+        SoundCards(on)
     }
 }
 
-/** The room as one calm shape: rings that ripple with the sound, a slow breath when quiet. */
+/** The field on its own: it recomposes once a second (the durations), the cards do not. */
 @Composable
-private fun Orb(modifier: Modifier) {
+private fun Field(dim: Boolean, animate: Boolean, announce: Boolean, modifier: Modifier) {
+    StateField(roomView(), dim, animate, raiseVolume = { Monitor.raiseVolume() }, modifier, announce = announce)
+}
+
+/** The up-close layer: glass (white 12 %) over the field, the waveform and the last sound. */
+@Composable
+private fun SoundCards(on: Color) {
     val history by Monitor.history.collectAsState()
     val status by Monitor.status.collectAsState()
     val soundNow by Monitor.soundNow.collectAsState()
-    val p = colors
-    val breath by rememberInfiniteTransition(label = "breath").animateFloat(0.975f, 1.035f,
-        infiniteRepeatable(tween(5000), RepeatMode.Reverse), label = "breath")
+    val lastSound by Monitor.lastSound.collectAsState()
+    var now by remember { mutableLongStateOf(System.currentTimeMillis()) }
+    LaunchedEffect(Unit) { while (true) { delay(1000); now = System.currentTimeMillis() } }
     val hears = status == SoundStatus.LISTENING || status == SoundStatus.SILENT
-    fun value(ago: Int) = if (hears) history[history.size - 1 - ago] else 0f
-    fun color(v: Float) = when (status) {
-        SoundStatus.LOST, SoundStatus.MUTED -> p.alarm
-        SoundStatus.CONNECTING -> p.neutral
-        else -> p.level(v)
-    }
-    Box(modifier.scale(if (soundNow || !hears) 1f else breath), contentAlignment = Alignment.Center) {
-        Canvas(Modifier.fillMaxSize()) {
-            val d = size.minDimension
-            val core = d * 0.44f
-            for (i in 3 downTo 1) {
-                val v = value((i - 1) * 4)
-                val spread = (d - core) * i / 3f * (0.4f + 0.6f * v)
-                drawCircle(color(v).copy(alpha = 0.2f - i * 0.045f), radius = (core + spread) / 2)
+    Column(Modifier.fillMaxWidth().clip(RoundedCornerShape(24.dp)).background(Color.White.copy(alpha = 0.12f))) {
+        // Bars in the type colour: teal bars on a teal field would not show. The height is the level.
+        Waveform(history, Modifier.padding(horizontal = 16.dp, vertical = 12.dp).height(36.dp), dim = !hears, tint = on)
+        HorizontalDivider(color = on.copy(alpha = 0.15f))
+        // The one line about the last sound: there is no hour strip on Android.
+        Row(Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 12.dp), verticalAlignment = Alignment.CenterVertically) {
+            if (soundNow) {
+                Box(Modifier.size(8.dp).clip(CircleShape).background(on))
+                Spacer(Modifier.width(8.dp))
             }
-            drawCircle(color(value(0)).copy(alpha = 0.3f), radius = core / 2)
+            Text(when {
+                soundNow -> "Právě se ozývá"
+                lastSound != null -> "Poslední zvuk ${ago(lastSound!!, now)}"
+                else -> "Zatím ticho"
+            }, fontSize = 15.sp, fontWeight = FontWeight.SemiBold, color = on)
         }
-        Icon(when (status) {
-            SoundStatus.MUTED -> Icons.AutoMirrored.Filled.VolumeOff
-            SoundStatus.LOST -> Icons.Filled.WifiOff
-            else -> if (soundNow) Icons.Filled.GraphicEq else Icons.Filled.Bedtime
-        }, null, Modifier.fillMaxSize(0.14f), tint = if (status == SoundStatus.MUTED || status == SoundStatus.LOST) p.alarm else p.ink.copy(alpha = 0.55f))
     }
 }
 
-/** One photo of the cot, on request: no live picture, no battery cost. */
+
+/** One photo of the cot, on request: no live picture, no battery cost. Not in Jen zvuk now; kept for later. */
 @Composable
 private fun PeekCard() {
     var image by remember { mutableStateOf<android.graphics.Bitmap?>(null) }
@@ -509,54 +634,7 @@ private fun PeekCard() {
     }
 }
 
-// MARK: The words, the controls, the warnings
-
-@Composable
-private fun RoomWords(center: Boolean) {
-    val status by Monitor.status.collectAsState()
-    val room by Monitor.roomLevel.collectAsState()
-    val mode by Monitor.mode.collectAsState()
-    val soundNow by Monitor.soundNow.collectAsState()
-    val lastSound by Monitor.lastSound.collectAsState()
-    val loudness by Settings.loudness.collectAsState()
-    // The level word lags; while a sound goes on, it says at least "Slabé zvuky", not "Ticho".
-    val heard = if (soundNow && (status == SoundStatus.LISTENING || status == SoundStatus.SILENT)) maxOf(room, RoomLevel.SOME) else room
-    val headline = when (status) {
-        SoundStatus.LISTENING, SoundStatus.SILENT, SoundStatus.MUTED -> heard.title
-        SoundStatus.CONNECTING -> "Připojování"
-        SoundStatus.LOST -> "Zvuk vypadl"
-    }
-    // Only a state that is not the usual one gets a line.
-    val sub = when (status) {
-        SoundStatus.LISTENING -> if (loudness == Settings.Loudness.NORMAL) "" else "Zesílený zvuk"
-        SoundStatus.SILENT, SoundStatus.MUTED -> "Ztlumeno · při pláči přijde upozornění"
-        SoundStatus.CONNECTING -> "Spouštění živého zvuku…"
-        SoundStatus.LOST -> "Obnovování spojení…"
-    }
-    var now by remember { mutableStateOf(System.currentTimeMillis()) }
-    LaunchedEffect(Unit) { while (true) { delay(1000); now = System.currentTimeMillis() } }
-    val headColor = when (status) { SoundStatus.LOST -> colors.alarm; SoundStatus.CONNECTING -> colors.muted; else -> colors.ink }
-    Column(Modifier.fillMaxWidth(), horizontalAlignment = if (center) Alignment.CenterHorizontally else Alignment.Start) {
-        AnimatedContent(headline, transitionSpec = { fadeIn(tween(350)) togetherWith fadeOut(tween(350)) }, label = "headline") {
-            Text(it, fontSize = 32.sp, fontWeight = FontWeight.SemiBold, color = headColor, textAlign = if (center) TextAlign.Center else TextAlign.Start)
-        }
-        if (sub.isNotEmpty()) Text(sub, color = colors.muted, textAlign = if (center) TextAlign.Center else TextAlign.Start)
-        Spacer(Modifier.height(6.dp))
-        // The one line about the last sound: there is no hour strip on Android.
-        if (soundNow) {
-            Row(verticalAlignment = Alignment.CenterVertically) {
-                Box(Modifier.size(8.dp).clip(CircleShape).background(colors.warn))
-                Spacer(Modifier.width(6.dp))
-                Text("Právě se ozývá", fontSize = 14.sp, fontWeight = FontWeight.SemiBold, color = colors.warn)
-            }
-        } else {
-            // "Zatím ticho" only when the room is quiet, and not under "Ticho" in the sound view.
-            val last = lastSound?.let { "Poslední zvuk ${ago(it, now)}" } ?: if (room > RoomLevel.QUIET || center) null else "Zatím ticho"
-            if (last != null) Text(last, fontSize = 14.sp, fontWeight = FontWeight.SemiBold,
-                color = colors.ink.copy(alpha = if (mode == SoundMode.OFF) 0.4f else 0.8f))
-        }
-    }
-}
+// MARK: The controls, the warnings
 
 /** The iPhone cannot raise the volume for the parent. Android can: the card has a button. */
 @Composable
@@ -586,13 +664,18 @@ private fun ControlBar(aiming: Boolean, toggleAim: () -> Unit) {
     val soundView by Settings.soundView.collectAsState()
     // Only for a camera that turns (ONVIF), and only with the picture. The demo shows it for the screenshot.
     val canAim = ((ptzReady && source == Settings.Source.CAMERA) || App.demo) && !soundView
+    // On a field: glass buttons with the field's type colour. Muted is the type colour at 90 %
+    // with the field colour as the label, like the chosen segment. No brand yellow on a field.
+    val f = LocalOnField.current
+    val muted = mode == SoundMode.OFF
     Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(10.dp)) {
         Box(Modifier.weight(1f)) {
             BarButton(
                 title = when (mode) { SoundMode.LIVE -> "Zvuk"; SoundMode.OFF -> "Ztlumeno" },
                 icon = when (mode) { SoundMode.LIVE -> Icons.AutoMirrored.Filled.VolumeUp; SoundMode.OFF -> Icons.AutoMirrored.Filled.VolumeOff },
-                fill = if (mode == SoundMode.OFF) colors.warn else colors.moon,     // Muted is amber: a chosen, safe state. Red is for a fault.
-                ink = Color.Black,               // Black on amber reads in both light and dark.
+                // Muted is amber: a chosen, safe state. Red is for a fault. Black on amber reads in both light and dark.
+                fill = when { f != null && muted -> f.on.copy(alpha = 0.9f); f != null -> FieldGlass; muted -> colors.warn; else -> colors.moon },
+                ink = when { f != null && muted -> f.field; f != null -> f.on; else -> Color.Black },
                 modifier = Modifier.semantics { stateDescription = if (mode == SoundMode.OFF) "Ztlumeno" else "Živý zvuk" },
                 onClick = { Monitor.setMode(if (mode == SoundMode.OFF) SoundMode.LIVE else SoundMode.OFF) },
             )
@@ -605,7 +688,7 @@ private fun ControlBar(aiming: Boolean, toggleAim: () -> Unit) {
             }
         }
         Box(Modifier.weight(1f)) {
-            BarButton("Noční", Icons.Filled.Bedtime, colors.card, colors.ink,
+            BarButton("Noční", Icons.Filled.Bedtime, if (f != null) FieldGlass else colors.card, f?.on ?: colors.ink,
                 onClick = { Monitor.night.value = true; Monitor.reconnect("night mode") })
         }
     }
@@ -614,7 +697,7 @@ private fun ControlBar(aiming: Boolean, toggleAim: () -> Unit) {
 @Composable
 private fun BarButton(title: String, icon: ImageVector, fill: Color, ink: Color, modifier: Modifier = Modifier, onClick: () -> Unit) {
     Column(modifier.fillMaxWidth().height(68.dp).clip(RoundedCornerShape(24.dp)).background(fill)
-        .clickable(onClick = onClick),
+        .clickable(role = Role.Button, onClick = onClick),
         horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.Center) {
         Icon(icon, null, tint = ink)
         Spacer(Modifier.height(4.dp))
@@ -636,11 +719,12 @@ fun NightScreen(close: () -> Unit, requestStop: () -> Unit) {
     val soundNow by Monitor.soundNow.collectAsState()
     val volume by Monitor.volume.collectAsState()
     val mode by Monitor.mode.collectAsState()
+    val state by Monitor.roomState.collectAsState()
     val view = LocalView.current
     val context = androidx.compose.ui.platform.LocalContext.current
+    val window = (view.context as? android.app.Activity)?.window
     DisposableEffect(Unit) {
         // The brightness of this window only: the phone's own setting stays as it is.
-        val window = (view.context as? android.app.Activity)?.window
         if (window != null && !App.demo) {
             window.attributes = window.attributes.apply { screenBrightness = 0.01f }
         }
@@ -648,6 +732,29 @@ fun NightScreen(close: () -> Unit, requestStop: () -> Unit) {
             window?.attributes = window?.attributes?.apply {
                 screenBrightness = android.view.WindowManager.LayoutParams.BRIGHTNESS_OVERRIDE_NONE
             }
+        }
+    }
+    // Pláče lights the lamp a little: 0.01 → 0.08 in 2 s, back to 0.01 30 s after the cry.
+    // Not when the parent changed the phone's brightness during this night.
+    val crying = state == RoomState.CRY
+    val startBrightness = remember { systemBrightness(context) }
+    var brightness by remember { mutableFloatStateOf(0.01f) }
+    LaunchedEffect(crying) {
+        val w = window ?: return@LaunchedEffect
+        if (App.demo) return@LaunchedEffect
+        suspend fun ramp(to: Float) {
+            val from = brightness
+            for (i in 1..20) {
+                brightness = from + (to - from) * i / 20f
+                w.attributes = w.attributes.apply { screenBrightness = brightness }
+                delay(100)
+            }
+        }
+        if (crying) {
+            if (systemBrightness(context) == startBrightness) ramp(0.08f)
+        } else if (brightness > 0.011f) {
+            delay(30_000)
+            ramp(0.01f)
         }
     }
     var time by remember { mutableStateOf(Date()) }
@@ -668,14 +775,12 @@ fun NightScreen(close: () -> Unit, requestStop: () -> Unit) {
         Column(Modifier.fillMaxSize().alpha(if (explain) 0f else 1f).systemBarsPadding().padding(24.dp),
             horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.Center) {
             Text(SimpleDateFormat("H:mm", Locale("cs")).format(time), fontSize = 72.sp, fontWeight = FontWeight.Thin, color = DarkPalette.moon.copy(alpha = 0.22f))
-            Spacer(Modifier.height(24.dp))
-            Box(Modifier.alpha(if (soundNow) 0.95f else 0.55f)) { Waveform(history, Modifier.height(90.dp).padding(horizontal = 16.dp), dim = !soundNow) }
-            Spacer(Modifier.height(24.dp))
+            Spacer(Modifier.height(16.dp))
             val low = volume < 0.2f && status == SoundStatus.LISTENING
-            // Silent is muted but hearing: the cry alert still comes.
-            Text(when { low -> "Hlasitost telefonu je nízká"; soundNow -> "Ozývá se"; status == SoundStatus.SILENT -> "Ztlumeno · na pláč upozorní"; else -> status.title },
-                color = when { status == SoundStatus.LOST -> DarkPalette.alarm; low -> DarkPalette.warn.copy(alpha = 0.8f); else -> Color.White.copy(alpha = if (soundNow) 0.6f else 0.28f) })
-            Spacer(Modifier.height(60.dp))
+            NightState(low, muted = mode == SoundMode.OFF, animate = crying && !reduceMotion())
+            Spacer(Modifier.height(20.dp))
+            Box(Modifier.alpha(if (soundNow) 0.95f else 0.55f)) { Waveform(history, Modifier.height(90.dp).padding(horizontal = 16.dp), dim = !soundNow) }
+            Spacer(Modifier.height(40.dp))
             Text(if (controls) "Klepnutím vedle tlačítek je skryjete" else "Klepnutím zobrazíte ovládání", fontSize = 12.sp,
                 color = Color.White.copy(alpha = 0.2f), textAlign = TextAlign.Center)
             val (percent, charging) = battery
@@ -727,6 +832,43 @@ private fun NightButton(title: String, icon: ImageVector, fill: Color, ink: Colo
         }
     }
 }
+
+/**
+ * The state at night: tint, not paint. Black stays black; the glyph (120 dp) at 45 % and the word
+ * (56 sp) at 60 % of the state colour. Pláče: the glyph at 65 % and the disc pulse. Nehlídá: alarm
+ * red at 60 %. The line under the word is the old status line.
+ */
+@Composable
+private fun NightState(low: Boolean, muted: Boolean, animate: Boolean) {
+    val view = roomView()
+    val state = view.state
+    val accent = nightAccent(state)
+    val glyphAlpha = when (state) { RoomState.CRY -> 0.65f; RoomState.LOST -> 0.6f; RoomState.CONNECTING -> 0.3f; else -> 0.45f }
+    val wordAlpha = if (state == RoomState.CONNECTING) 0.4f else 0.6f
+    // Silent is muted but hearing: the cry alert still comes.
+    val line = when { low -> "Hlasitost telefonu je nízká"; muted -> "Ztlumeno · na pláč upozorní"; else -> view.subline }
+    Column(Modifier.fillMaxWidth(), horizontalAlignment = Alignment.CenterHorizontally) {
+        Column(Modifier.fillMaxWidth().clearAndSetSemantics {
+            contentDescription = "Stav: ${view.word.lowercase(Locale("cs"))}, $line"
+            stateDescription = view.word
+        }, horizontalAlignment = Alignment.CenterHorizontally) {
+            StateGlyph(state, 120.dp, on = accent.copy(alpha = glyphAlpha), hole = Color.Black, animate = animate,
+                alert = DarkPalette.alarm.copy(alpha = 0.6f))
+            Spacer(Modifier.height(4.dp))
+            FitText(view.word, 56.sp, 32.sp, accent.copy(alpha = wordAlpha), Modifier.fillMaxWidth(), weight = FontWeight.SemiBold)
+            Text(line, Modifier.fillMaxWidth(), textAlign = TextAlign.Center, maxLines = 2, color = when {
+                state == RoomState.LOST -> DarkPalette.alarm.copy(alpha = 0.6f)
+                low -> DarkPalette.warn.copy(alpha = 0.8f)
+                else -> Color.White.copy(alpha = if (state == RoomState.CRY || state == RoomState.SOUND) 0.5f else 0.28f)
+            })
+        }
+        StateAnnouncer(state)
+    }
+}
+
+/** The phone's own brightness setting, to see if the parent changed it during the night. */
+private fun systemBrightness(context: Context): Int =
+    android.provider.Settings.System.getInt(context.contentResolver, android.provider.Settings.System.SCREEN_BRIGHTNESS, -1)
 
 /** The short explainer of Night mode, the same points as on the iPhone. */
 @Composable

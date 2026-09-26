@@ -251,7 +251,8 @@ fun FitText(text: String, maxSize: TextUnit, minSize: TextUnit, color: Color, mo
  * behind (full bleed, under the status bar too). [dim]: the dim tokens after 30 s untouched.
  */
 @Composable
-fun StateField(view: RoomView, dim: Boolean, animate: Boolean, raiseVolume: () -> Unit, modifier: Modifier = Modifier) {
+fun StateField(view: RoomView, dim: Boolean, animate: Boolean, raiseVolume: () -> Unit, modifier: Modifier = Modifier,
+               announce: Boolean = true) {
     val p = colors
     val on = p.onField(view.state, dim)
     Column(modifier, horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.Center) {
@@ -268,7 +269,8 @@ fun StateField(view: RoomView, dim: Boolean, animate: Boolean, raiseVolume: () -
             Text(view.subline, Modifier.fillMaxWidth().padding(horizontal = 8.dp), fontSize = 17.sp, lineHeight = 22.sp,
                 color = p.onFieldSecondary(view.state, dim), textAlign = TextAlign.Center, maxLines = 2, overflow = TextOverflow.Ellipsis)
         }
-        StateAnnouncer(view.state)
+        // Not under Night mode: Night mode has its own, and TalkBack would say it twice.
+        if (announce) StateAnnouncer(view.state)
         Spacer(Modifier.height(14.dp))
         // The slot keeps its height, so the word does not move when a ribbon comes.
         Box(Modifier.heightIn(min = 40.dp), contentAlignment = Alignment.Center) {
@@ -323,7 +325,7 @@ fun RibbonPill(ribbon: Ribbon, raiseVolume: () -> Unit, modifier: Modifier = Mod
  * the line under it. The same colours as the field (dim tokens in the dark appearance).
  */
 @Composable
-fun StateBand(view: RoomView, animate: Boolean, modifier: Modifier = Modifier) {
+fun StateBand(view: RoomView, animate: Boolean, modifier: Modifier = Modifier, announce: Boolean = true) {
     val p = colors
     val field = p.field(view.state)
     val on = p.onField(view.state)
@@ -346,6 +348,6 @@ fun StateBand(view: RoomView, animate: Boolean, modifier: Modifier = Modifier) {
                     maxLines = 2, overflow = TextOverflow.Ellipsis)
             }
         }
-        StateAnnouncer(view.state)
+        if (announce) StateAnnouncer(view.state)
     }
 }
