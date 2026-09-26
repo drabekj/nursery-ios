@@ -232,6 +232,124 @@ final class H264Depacketizer {
     }
 }
 
+/// The picture size in an H.264 SPS (ITU-T H.264, 7.3.2.1.1). It reads the fields up to the
+/// cropping, and not the rest. Pure, for the tests. The stream discovery uses it.
+enum H264SPS {
+    /// The profiles with the chroma format and the scaling matrix fields.
+    private static let highProfiles: Set<Int> = [100, 110, 122, 244, 44, 83, 86, 118, 128, 138, 139, 134, 135]
+
+    /// `sps` starts with the NAL header byte (type 7), as in the SDP and in the stream.
+    static func size(_ sps: [UInt8]) -> (width: Int, height: Int)? {
+        guard sps.count >= 4, sps[0] & 0x1F == 7 else { return nil }
+        // Remove the emulation prevention bytes: 00 00 03 is 00 00 in the real data.
+        var rbsp: [UInt8] = []
+        rbsp.reserveCapacity(sps.count)
+        var zeros = 0
+        for b in sps.dropFirst() {
+            if zeros >= 2 && b == 3 { zeros = 0; continue }
+            rbsp.append(b)
+            zeros = b == 0 ? zeros + 1 : 0
+        }
+        var r = BitReader(rbsp)
+        guard let profile = r.bits(8), r.bits(16) != nil, r.ue() != nil else { return nil }   // Constraints, level, id.
+        var chroma = 1
+        var separatePlanes = false
+        if highProfiles.contains(profile) {
+            guard let c = r.ue(), c <= 3 else { return nil }
+            chroma = c
+            if chroma == 3 { guard let s = r.bit() else { return nil }; separatePlanes = s == 1 }
+            guard r.ue() != nil, r.ue() != nil, r.bit() != nil, let matrix = r.bit() else { return nil }   // Bit depths, qpprime.
+            if matrix == 1 {
+                for i in 0..<(chroma == 3 ? 12 : 8) {
+                    guard let present = r.bit() else { return nil }
+                    if present == 1 { guard r.skipScalingList(i < 6 ? 16 : 64) else { return nil } }
+                }
+            }
+        }
+        guard r.ue() != nil, let pocType = r.ue() else { return nil }   // log2_max_frame_num_minus4.
+        if pocType == 0 {
+            guard r.ue() != nil else { return nil }
+        } else if pocType == 1 {
+            guard r.bit() != nil, r.se() != nil, r.se() != nil, let cycle = r.ue(), cycle <= 255 else { return nil }
+            for _ in 0..<cycle { guard r.se() != nil else { return nil } }
+        }
+        guard r.ue() != nil, r.bit() != nil,                            // Reference frames, gaps.
+              let widthMbs = r.ue(), let heightUnits = r.ue(), let frameMbsOnly = r.bit() else { return nil }
+        if frameMbsOnly == 0 { guard r.bit() != nil else { return nil } }   // mb_adaptive_frame_field.
+        guard r.bit() != nil, let cropping = r.bit() else { return nil }    // direct_8x8_inference.
+        var crop = (left: 0, right: 0, top: 0, bottom: 0)
+        if cropping == 1 {
+            guard let l = r.ue(), let rt = r.ue(), let t = r.ue(), let b = r.ue() else { return nil }
+            crop = (left: l, right: rt, top: t, bottom: b)
+        }
+        // The crop unit depends on the chroma format, and on frames or fields.
+        let fieldFactor = 2 - frameMbsOnly
+        let chromaType = separatePlanes ? 0 : chroma
+        let unitX = chromaType == 1 || chromaType == 2 ? 2 : 1
+        let unitY = (chromaType == 1 ? 2 : 1) * fieldFactor
+        let width = (widthMbs + 1) * 16 - unitX * (crop.left + crop.right)
+        let height = fieldFactor * (heightUnits + 1) * 16 - unitY * (crop.top + crop.bottom)
+        guard (1...16384).contains(width), (1...16384).contains(height) else { return nil }
+        return (width, height)
+    }
+
+    /// It reads the bits of the RBSP, the most significant bit first.
+    private struct BitReader {
+        let bytes: [UInt8]
+        var position = 0
+
+        init(_ bytes: [UInt8]) { self.bytes = bytes }
+
+        mutating func bit() -> Int? {
+            guard position < bytes.count * 8 else { return nil }
+            let value = Int(bytes[position >> 3] >> (7 - UInt8(position & 7))) & 1
+            position += 1
+            return value
+        }
+
+        mutating func bits(_ count: Int) -> Int? {
+            var value = 0
+            for _ in 0..<count {
+                guard let b = bit() else { return nil }
+                value = value << 1 | b
+            }
+            return value
+        }
+
+        /// Unsigned Exp-Golomb.
+        mutating func ue() -> Int? {
+            var zeros = 0
+            while true {
+                guard let b = bit() else { return nil }
+                if b == 1 { break }
+                zeros += 1
+                if zeros > 31 { return nil }
+            }
+            guard let rest = bits(zeros) else { return nil }
+            return (1 << zeros) - 1 + rest
+        }
+
+        /// Signed Exp-Golomb.
+        mutating func se() -> Int? {
+            guard let k = ue() else { return nil }
+            return k % 2 == 1 ? (k + 1) / 2 : -(k / 2)
+        }
+
+        /// scaling_list(): only the deltas are in the bits, and a next scale of 0 ends the list.
+        mutating func skipScalingList(_ size: Int) -> Bool {
+            var last = 8, next = 8
+            for _ in 0..<size {
+                if next != 0 {
+                    guard let delta = se() else { return false }
+                    next = (last + delta + 256) % 256
+                }
+                if next != 0 { last = next }
+            }
+            return true
+        }
+    }
+}
+
 // MARK: - G.711
 
 enum G711 {

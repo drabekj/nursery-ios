@@ -60,6 +60,8 @@ final class RTSPClient: @unchecked Sendable {
     private var keepAlive: DispatchSourceTimer?
     private var closed = false
     private var reported: [String] = []
+    /// It fails a connect() that still waits, when stop() comes first. Else the caller waits forever.
+    private var failConnect: ((Error) -> Void)?
     /// The addresses that the phone at the baby reported in DESCRIBE, for the time away from home.
     var serverAddresses: [String] { queue.sync { reported } }
 
@@ -176,6 +178,15 @@ final class RTSPClient: @unchecked Sendable {
         return tracks
     }
 
+    /// DESCRIBE only, then it closes: the tracks of the stream, with no SETUP and no PLAY.
+    /// The stream discovery uses it to read the picture size from the SDP.
+    func describe() async throws -> [SDPTrack] {
+        defer { stop() }
+        try await connect()
+        let r = try await request("DESCRIBE", url, ["Accept": "application/sdp"])
+        return SDP.parse(String(decoding: r.body, as: UTF8.self))
+    }
+
     func stop() {
         queue.async {
             guard !self.closed else { return }
@@ -193,6 +204,7 @@ final class RTSPClient: @unchecked Sendable {
     private func connect() async throws {
         try await withCheckedThrowingContinuation { (cont: CheckedContinuation<Void, Error>) in
             queue.async {
+                guard !self.closed else { cont.resume(throwing: Failure.closed); return }   // stop() came first.
                 let tcp = NWProtocolTCP.Options()
                 tcp.noDelay = true
                 tcp.connectionTimeout = 5
@@ -210,10 +222,14 @@ final class RTSPClient: @unchecked Sendable {
                 }
                 self.connection = conn
                 let once = ResumeOnce()
+                self.failConnect = { error in
+                    if !once.done { once.done = true; cont.resume(throwing: error) }
+                }
                 conn.stateUpdateHandler = { [weak self] state in
                     guard let self else { return }
                     switch state {
                     case .ready:
+                        self.failConnect = nil
                         if !once.done { once.done = true; cont.resume(); self.receive() }
                     case .waiting(let error):
                         // A "waiting" connection does not fail by itself. Stop it here.
@@ -254,6 +270,8 @@ final class RTSPClient: @unchecked Sendable {
         let waiting = pending
         pending = [:]
         waiting.values.forEach { $0(.failure(error ?? Failure.closed)) }
+        failConnect?(error ?? Failure.closed)
+        failConnect = nil
         connection?.stateUpdateHandler = nil
         connection?.cancel()
         connection = nil

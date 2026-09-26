@@ -161,7 +161,11 @@ final class ConnectionTest: ObservableObject {
                     break
                 }
             }
-            let url = settings.streamURL(audioOnly: false)
+            // go2rtc: learn the detail and the everyday stream first. Then the test plays the main stream.
+            if settings.source == .camera && settings.cameraKind == .go2rtc {
+                await StreamDiscovery.run(settings: settings)
+            }
+            let url = settings.streamURL(audioOnly: false, small: false)
             guard let client = try? RTSPClient(url: url, endpoint: endpoint) else {
                 finish(connection: .failed("Adresa není platná."))
                 return
@@ -183,7 +187,7 @@ final class ConnectionTest: ObservableObject {
                 let (v, a) = counts.values
                 picture = v > 0 ? .ok : .failed(wantsPicture ? "Obraz nepřišel." : "Jen zvuk.")
                 sound = a > 0 ? .ok : .failed(hasAudio ? "Zvuk nepřišel. Je v kameře zapnutý mikrofon?"
-                                                        : "Kamera neposílá zvuk ve formátu, který Chůvička umí (G.711).")
+                                                        : "Kamera posílá zvuk ve formátu, kterému Chůvička nerozumí. V aplikaci kamery přepněte zvuk na G.711.")
             } catch {
                 connection = .failed((error as? LocalizedError)?.errorDescription ?? error.localizedDescription)
                 picture = .failed(""); sound = .failed("")

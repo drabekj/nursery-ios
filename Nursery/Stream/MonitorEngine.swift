@@ -142,9 +142,6 @@ final class MonitorEngine: ObservableObject {
         settings.$sensitivity.sink { [weak self] s in self?.activityLog.margin = s.margin }.store(in: &bag)
 
         settings.$loudness.dropFirst().sink { [weak self] l in self?.audio.setGain(decibels: l.decibels) }.store(in: &bag)
-        settings.$quality.dropFirst().removeDuplicates().sink { [weak self] _ in
-            DispatchQueue.main.async { self?.reconnect(why: "quality changed") }
-        }.store(in: &bag)
         // A new source, or a new pairing: connect again.
         Publishers.CombineLatest3(settings.$source, settings.$babyName, settings.$babyCode)
             .dropFirst()
@@ -201,6 +198,11 @@ final class MonitorEngine: ObservableObject {
             MainActor.assumeIsolated { self?.thermalChanged() }
         }
         thermalChanged()
+        // Posted on a background queue. The .main queue brings it to the main thread.
+        center.addObserver(forName: .NSProcessInfoPowerStateDidChange, object: nil, queue: .main) { [weak self] _ in
+            MainActor.assumeIsolated { self?.lowPowerChanged() }
+        }
+        lowPowerChanged()
     }
 
     func soundOn() { mode = .live }
@@ -221,7 +223,8 @@ final class MonitorEngine: ObservableObject {
         activityLog.interrupt()
         NurseryAlerts.disarmWatchdog()
         NurseryAlerts.clearLoss()
-        activity.update(status: .muted, enabled: false)
+        activity.end()
+        detailActive = false
         MPNowPlayingInfoCenter.default().nowPlayingInfo = nil
     }
 
@@ -390,7 +393,7 @@ final class MonitorEngine: ObservableObject {
         guard !Self.isDemo, !suspended else { return }
         stopClient()
         if settings.source == .phone && (settings.babyName.isEmpty || settings.babyCode.isEmpty) {
-            connection = .retrying("Není spárovaný telefon u miminka. Spárujte ho v Nastavení → Zdroj.")
+            connection = .retrying("Není spárovaný telefon u miminka. Spárujte ho v Nastavení → Kamera.")
             failures = max(failures, 2)
             return
         }
@@ -408,8 +411,9 @@ final class MonitorEngine: ObservableObject {
             await self.chooseRoute()
             // A newer attempt started while this one looked for the way.
             guard gen == self.generation, !self.suspended else { return }
-            let url = self.streamURL(audioOnly: onlyAudio)
+            let (url, detail) = self.stream(audioOnly: onlyAudio)
             self.currentURL = url
+            if self.detailActive != detail { self.detailActive = detail }
             let client: RTSPClient
             do { client = try RTSPClient(url: url, endpoint: self.settings.babyEndpoint) } catch {
                 self.connection = .retrying("Adresa serveru není platná.")
@@ -418,7 +422,7 @@ final class MonitorEngine: ObservableObject {
             self.client = client
             // Not the URL: it carries the camera password or the pairing code, and the log is shared.
             let target = self.settings.source == .phone ? "the phone at the baby" : self.settings.cameraKind == .go2rtc ? "go2rtc \(self.settings.serverHost)" : "the camera \(self.settings.rtspHost)"
-            Log.shared.add("connect \(target)\(onlyAudio ? " (sound only)" : "")\(self.viaTailscale ? " over Tailscale" : "")")
+            Log.shared.add("connect \(target)\(onlyAudio ? " (sound only)" : detail ? " (main stream)" : "")\(self.viaTailscale ? " over Tailscale" : "")")
             client.onClose = Self.closeSink(engine: self, generation: gen)
             let prepare = Self.router(client: client, renderer: self.renderer, audio: self.audio, shared: self.shared)
             do {
@@ -698,14 +702,22 @@ final class MonitorEngine: ObservableObject {
         reconnect(why: why)
     }
 
-    /// The stream to ask for. The main stream only for a zoomed or full-screen picture (it has many
-    /// times the pixels of the sub stream, and it keeps the Wi-Fi and the decoder busy).
-    /// A hot phone gets the sub stream.
-    private func streamURL(audioOnly: Bool) -> String {
-        settings.streamURL(audioOnly: audioOnly, preferSmall: thermalHot || !wantsDetail)
+    /// The stream to ask for, as `StreamPolicy` decides: the main stream only for a big picture
+    /// on a phone that is not hot and not in Low Power Mode. Sound only is always the sub stream.
+    private func stream(audioOnly: Bool) -> (url: String, detail: Bool) {
+        let names = settings.streamNames
+        let inputs = StreamPolicy.Inputs(wantsDetail: wantsDetail, soundOnly: audioOnly, thermalHot: thermalHot,
+                                         lowPower: lowPower, detailStream: names.detail, everydayStream: names.everyday)
+        let detail = StreamPolicy.detail(inputs)
+        return (settings.streamURL(audioOnly: audioOnly, small: !detail), detail)
     }
 
-    /// A new stream if the wanted URL changed (detail or heat), with the same view.
+    private func streamURL(audioOnly: Bool) -> String { stream(audioOnly: audioOnly).url }
+
+    /// The main stream plays now. For the "Stav" row in the settings.
+    @Published private(set) var detailActive = false
+
+    /// A new stream if the wanted URL changed (detail, heat or Low Power Mode), with the same view.
     private func refreshStream(why: String) {
         if client != nil, streamURL(audioOnly: audioOnly) != currentURL { reconnect(why: why) }
     }
@@ -743,6 +755,19 @@ final class MonitorEngine: ObservableObject {
         thermalHot = hot
         Log.shared.add("thermal state \(state.rawValue): \(hot ? "sub stream until the phone cools" : "normal picture")")
         refreshStream(why: "thermal state changed")
+    }
+
+    // MARK: Low Power Mode
+
+    /// Low Power Mode is on. The app then asks for the sub stream, as for a hot phone.
+    private(set) var lowPower = false
+
+    private func lowPowerChanged() {
+        let on = ProcessInfo.processInfo.isLowPowerModeEnabled
+        guard on != lowPower else { return }
+        lowPower = on
+        Log.shared.add("low power mode \(on ? "on: sub stream" : "off: normal picture")")
+        refreshStream(why: "low power mode changed")
     }
 
     private func audioInterrupted(_ note: Notification) {
@@ -928,7 +953,7 @@ final class MonitorEngine: ObservableObject {
         // The alert. Only a loss that lasts 20 s gives a notification.
         if status == .lost {
             if lostSince == nil { lostSince = Date() }
-            if !alerted, settings.alertOnLoss, let since = lostSince, Date().timeIntervalSince(since) > 20 {
+            if !alerted, let since = lostSince, Date().timeIntervalSince(since) > 20 {
                 alerted = true
                 NurseryAlerts.postLoss()
             }
@@ -938,7 +963,7 @@ final class MonitorEngine: ObservableObject {
         }
 
         guard !Self.isDemo else { return }
-        activity.update(status: status, enabled: settings.liveActivity)
+        activity.update(status: status, enabled: true)
     }
 }
 

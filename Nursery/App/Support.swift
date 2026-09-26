@@ -77,14 +77,6 @@ final class Settings: ObservableObject {
         var margin: Float { switch self { case .low: 0.32; case .medium: 0.2; case .high: 0.12 } }
     }
 
-    enum Quality: String, CaseIterable, Identifiable {
-        case high, low
-        var id: String { rawValue }
-        /// `high` is the main stream only where it shows: zoomed in, or on the full screen.
-        /// Else the sub stream. `low` is always the sub stream.
-        var title: String { switch self { case .high: "Plné rozlišení při přiblížení"; case .low: "Vždy nižší rozlišení (úspora baterie)" } }
-    }
-
     /// What this iPhone does: it watches (the parent) or it is the camera at the baby.
     enum Role: String { case parent, baby }
 
@@ -125,16 +117,15 @@ final class Settings: ObservableObject {
     @Published var babyAddresses: [String] { didSet { d.set(babyAddresses, forKey: "babyAddresses") } }
     /// The address of the phone at the baby now, when the app does not use Bonjour. The engine sets it.
     @Published var babyDirect: String?
-    @Published var quality: Quality { didSet { d.set(quality.rawValue, forKey: "quality") } }
     @Published var loudness: Loudness { didSet { d.set(loudness.rawValue, forKey: "loudness") } }
     @Published var keepAwake: Bool { didSet { d.set(keepAwake, forKey: "keepAwake") } }
-    @Published var liveActivity: Bool { didSet { d.set(liveActivity, forKey: "liveActivity") } }
-    @Published var alertOnLoss: Bool { didSet { d.set(alertOnLoss, forKey: "alertOnLoss") } }
     @Published var alertOnSound: Bool { didSet { d.set(alertOnSound, forKey: "alertOnSound") } }
     @Published var sensitivity: Sensitivity { didSet { d.set(sensitivity.rawValue, forKey: "sensitivity") } }
     @Published var appearance: Appearance { didSet { d.set(appearance.rawValue, forKey: "appearance") } }
     @Published var role: Role { didSet { d.set(role.rawValue, forKey: "role") } }
     @Published var source: Source { didSet { d.set(source.rawValue, forKey: "source") } }
+    /// Pan, tilt and power through Home Assistant. Off in a public build (no `HomeDefaults.configPath`).
+    @Published var cameraControl: Bool { didSet { d.set(cameraControl, forKey: "cameraControl") } }
     /// On the parent: the Bonjour name of the iPhone at the baby, and its pairing code.
     @Published var babyName: String { didSet { d.set(babyName, forKey: "babyName") } }
     @Published var babyCode: String { didSet { d.set(babyCode, forKey: "babyCode") } }
@@ -166,16 +157,14 @@ final class Settings: ObservableObject {
         host = d.string(forKey: "host") ?? HomeDefaults.serverHost
         remoteHost = d.string(forKey: "remoteHost") ?? HomeDefaults.remoteHost
         babyAddresses = d.stringArray(forKey: "babyAddresses") ?? []
-        quality = Quality(rawValue: d.string(forKey: "quality") ?? "") ?? .high
         loudness = Loudness(rawValue: d.string(forKey: "loudness") ?? "") ?? .normal
         keepAwake = d.object(forKey: "keepAwake") as? Bool ?? true
-        liveActivity = d.object(forKey: "liveActivity") as? Bool ?? true
-        alertOnLoss = d.object(forKey: "alertOnLoss") as? Bool ?? true
         alertOnSound = d.object(forKey: "alertOnSound") as? Bool ?? false
         sensitivity = Sensitivity(rawValue: d.string(forKey: "sensitivity") ?? "") ?? .medium
-        appearance = Appearance(rawValue: d.string(forKey: "appearance") ?? "") ?? .light
+        appearance = Appearance(rawValue: d.string(forKey: "appearance") ?? "") ?? .automatic
         role = Role(rawValue: d.string(forKey: "role") ?? "") ?? .parent
         source = Source(rawValue: d.string(forKey: "source") ?? "") ?? .camera
+        cameraControl = d.object(forKey: "cameraControl") as? Bool ?? !HomeDefaults.configPath.isEmpty
         babyName = d.string(forKey: "babyName") ?? ""
         babyCode = d.string(forKey: "babyCode") ?? ""
         unitName = d.string(forKey: "unitName") ?? "Pokojíček"
@@ -194,6 +183,8 @@ final class Settings: ObservableObject {
         soundView = MonitorEngine.isDemo ? d.string(forKey: "demoScreen")?.hasPrefix("sound") == true : d.bool(forKey: "soundView")
         // The code stays the same after a restart, so the parents stay paired.
         if !MonitorEngine.isDemo, d.string(forKey: "unitCode") == nil { d.set(unitCode, forKey: "unitCode") }
+        // The picture quality is automatic now (StreamPolicy). The old setting is not used.
+        d.removeObject(forKey: "quality")
     }
 
     var trimmedHost: String { host.trimmingCharacters(in: .whitespacesAndNewlines) }
@@ -212,10 +203,21 @@ final class Settings: ObservableObject {
         return BabyLink.endpoint(name: babyName)
     }
 
-    /// The RTSP stream: the go2rtc restream, or the iPhone at the baby. The query "?audio" asks go2rtc for the sound only.
-    /// `preferSmall`: the sub stream also where the setting allows the main stream
-    /// (the picture is small, or the phone is hot).
-    func streamURL(audioOnly: Bool, preferSmall: Bool = false) -> String {
+    /// The detail (main) and the everyday (sub) stream of the source, for `StreamPolicy`.
+    /// The same value when the source has one stream only.
+    var streamNames: (detail: String, everyday: String) {
+        switch source {
+        case .phone: return ("", "")
+        case .camera where cameraKind == .rtsp:
+            let p = rtspBrand.paths
+            return (p.main, p.small ?? p.main)
+        case .camera: return (streamMain, streamSmall)
+        }
+    }
+
+    /// The RTSP stream: the go2rtc restream, or the iPhone at the baby. The query "?audio" asks the phone for the sound only.
+    /// `small`: the everyday (sub) stream, as `StreamPolicy` decided. Sound only is always the sub stream.
+    func streamURL(audioOnly: Bool, small: Bool) -> String {
         if source == .phone {
             // The host is not used: the connection goes to the Bonjour service. The code is the path.
             return "rtsp://chuvicka/\(babyCode)" + (audioOnly ? "?audio" : "")
@@ -226,9 +228,9 @@ final class Settings: ObservableObject {
         // worked only while another phone watched the same stream, so the sound view, Night mode
         // and the background failed at random. Tested on 25 Sep 2026 with Tools/rtsp_check.py.
         // The Tapo sub stream (360p) costs about 0.3 Mbit/s.
-        let small = audioOnly || preferSmall || quality == .low
-        if cameraKind == .rtsp { return rtspURL(small: small) }
-        return "rtsp://\(serverHost):\(Go2rtc.rtspPort)/\(small ? streamSmall : streamMain)"
+        let sub = audioOnly || small
+        if cameraKind == .rtsp { return rtspURL(small: sub) }
+        return "rtsp://\(serverHost):\(Go2rtc.rtspPort)/\(sub ? streamSmall : streamMain)"
     }
 }
 
@@ -259,14 +261,23 @@ final class CameraControl: ObservableObject {
 
     init(settings: Settings) {
         self.settings = settings
-        ptzID = UserDefaults.standard.string(forKey: "ptzID")
-        powerID = UserDefaults.standard.string(forKey: "powerID")
+        ptzID = settings.cameraControl ? UserDefaults.standard.string(forKey: "ptzID") : nil
+        powerID = settings.cameraControl ? UserDefaults.standard.string(forKey: "powerID") : nil
         ptzReady = ptzID != nil          // The observers do not run in init.
         powerReady = powerID != nil
     }
 
     /// It reads `window.NURSERY_CONFIG = { ptzWebhook: '…', powerWebhook: '…' }`.
     func loadConfig() async {
+        // Camera control is off in the settings: no aim, no power button.
+        guard settings.cameraControl else {
+            if ptzID != nil || powerID != nil { Log.shared.add("camera control off") }
+            ptzID = nil
+            powerID = nil
+            UserDefaults.standard.removeObject(forKey: "ptzID")
+            UserDefaults.standard.removeObject(forKey: "powerID")
+            return
+        }
         // Only with go2rtc: a camera read directly has no config file, so there is nothing to ask.
         guard !HomeDefaults.configPath.isEmpty, settings.cameraKind == .go2rtc else { return }
         guard let url = URL(string: "http://\(settings.serverHost):\(Go2rtc.apiPort)/\(HomeDefaults.configPath)") else { return }
@@ -304,7 +315,7 @@ final class CameraControl: ObservableObject {
         }
         // A camera with no go2rtc gives no photo on request.
         guard settings.cameraKind == .go2rtc else { return nil }
-        let src = settings.quality == .high ? settings.streamMain : settings.streamSmall
+        let src = settings.streamMain          // Always the main stream: a photo should be sharp.
         guard let url = URL(string: "http://\(settings.serverHost):\(Go2rtc.apiPort)/api/frame.jpeg?src=\(src)") else { return nil }
         var req = URLRequest(url: url)
         req.timeoutInterval = 8          // go2rtc waits for a keyframe.
