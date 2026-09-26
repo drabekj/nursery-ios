@@ -73,6 +73,8 @@ struct ActivityView: View {
                     Legend()
                 } header: {
                     Text("Posledních 12 hodin")
+                } footer: {
+                    Text("Šedá: Chůvička neposlouchala. To není totéž co ticho.")
                 }
 
                 Section {
@@ -186,7 +188,8 @@ private struct EpisodeRow: View {
                         Circle().fill(episode.kind == .cry ? Theme.loud : Theme.middle).frame(width: 8, height: 8)
                         Text(live ? "Právě teď" : episode.title).font(.headline)
                     }
-                    Text("\(timeText(episode.start)) · \(durationText(episode.duration))")
+                    // A running episode has no length yet: a length made it look finished.
+                    Text(live ? "od \(timeText(episode.start))" : "\(timeText(episode.start)) · \(durationText(episode.duration))")
                         .font(.subheadline).foregroundStyle(.secondary).monospacedDigit()
                 }
                 Spacer()
@@ -291,10 +294,11 @@ struct HourStrip: View {
         guard let last = episodes.first else {
             // Nothing in this hour. An older sound still says how long the quiet lasts.
             guard let lastSound = activity.lastSound, let ago = agoText(lastSound) else { return "Klid" }
-            return "Klid · poslední zvuk před \(ago)"
+            return "Klid · před \(ago)"
         }
+        // Short, so it fits next to the title: "1× · před 18 min".
         let minutes = Int(Date().timeIntervalSince(last.end) / 60)
-        return "\(eventsText(episodes.count)) · naposledy před \(max(minutes, 1)) min"
+        return "\(episodes.count)× · před \(max(minutes, 1)) min"
     }
 
     /// "12 min", "3 h". Nil after a day: so old a sound says nothing about tonight.

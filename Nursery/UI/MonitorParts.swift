@@ -196,9 +196,11 @@ struct PiPButton: View {
 enum RoomWords {
     static func hearsRoom(_ e: MonitorEngine) -> Bool { e.soundStatus == .listening || e.soundStatus == .silent }
 
+    /// A sound now is at least "Slabé zvuky". The words wait a moment before they change,
+    /// and "Ticho" over "Právě se ozývá" asked the parent: is it crying or not?
     static func headline(_ e: MonitorEngine) -> String {
         switch e.soundStatus {
-        case .listening, .silent: e.roomLevel.title
+        case .listening, .silent: (e.activityLog.current != nil ? max(e.roomLevel, RoomLevel.some) : e.roomLevel).title
         case .connecting: "Připojování"
         case .lost: "Zvuk vypadl"
         }
@@ -227,13 +229,15 @@ enum RoomWords {
 struct RoomPanel: View {
     @EnvironmentObject private var engine: MonitorEngine
     @EnvironmentObject private var settings: Settings
+    /// For the headline: a sound now changes the words. It changes at most once a second.
+    @ObservedObject var activity: SoundActivity
 
     var body: some View {
         let sub = RoomWords.subline(engine, settings)
         VStack(alignment: .leading, spacing: 16) {
             VStack(alignment: .leading, spacing: 4) {
                 Text(RoomWords.headline(engine))
-                    .font(.system(size: 34, weight: .semibold, design: .rounded))
+                    .font(.system(.largeTitle, design: .rounded).weight(.semibold))
                     .foregroundStyle(RoomWords.color(engine))
                     .contentTransition(.opacity)
                     .animation(.easeInOut(duration: 0.35), value: RoomWords.headline(engine))
@@ -305,9 +309,10 @@ struct ControlBar: View {
             Haptics.firm()
             if engine.mode == .off { engine.soundOn() } else { engine.mode = .off }
         } label: {
-            // Off is red: a parent must see at a glance that nothing plays.
+            // Off is amber: a parent sees at a glance that nothing plays. Not red: muted is
+            // a chosen, safe state (the alerts go on), and red means a fault.
             BarLabel(title: soundTitle, symbol: engine.mode.symbol, isOn: true,
-                     tint: engine.mode == .off ? Theme.alarm : Theme.moon,
+                     tint: engine.mode == .off ? Theme.warn : Theme.moon,
                      onForeground: engine.mode == .off ? .white : .black)
         }
         .buttonStyle(PressScale())
@@ -386,6 +391,7 @@ struct FullScreenMonitor: View {
                             GlassCircleButton(symbol: "arrow.down.right.and.arrow.up.left", size: 40, label: "Zrušit přiblížení") { zoom.reset() }
                         }
                         PiPButton(pip: pip)
+                        moreMenu
                         GlassCircleButton(symbol: "xmark", size: 40, label: "Zavřít celou obrazovku") {
                             Orientation.request(.portrait)
                         }
@@ -400,7 +406,7 @@ struct FullScreenMonitor: View {
                         GlassGroup(spacing: 10) {
                             HStack(spacing: 10) {
                                 GlassCircleButton(symbol: engine.mode.symbol, size: 50,
-                                                  tint: engine.mode == .off ? Theme.alarm : Theme.moon, label: "Zvuk") {
+                                                  tint: engine.mode == .off ? Theme.warn : Theme.moon, label: "Zvuk") {
                                     Haptics.firm()
                                     if engine.mode == .off { engine.soundOn() } else { engine.mode = .off }
                                     scheduleHide()
@@ -426,6 +432,28 @@ struct FullScreenMonitor: View {
         .environment(\.colorScheme, .dark)
         .onAppear(perform: scheduleHide)
         .animation(.easeInOut(duration: 0.25), value: chrome)
+    }
+
+    /// The same menu as the ⋯ on the main screen, and Noční, which the bar here does not have.
+    private var moreMenu: some View {
+        Menu {
+            Button { actions.openSheet(.activity) } label: { Label("Přehled", systemImage: "chart.bar.xaxis") }
+            Button { actions.openSheet(.settings) } label: { Label("Nastavení", systemImage: "gearshape") }
+            Button { actions.openSheet(.help) } label: { Label("Nápověda", systemImage: "questionmark.circle") }
+            Button {
+                Orientation.request(.portrait)
+                actions.night()
+            } label: { Label("Noční", systemImage: "moon.fill") }
+            Divider()
+            Button(role: .destructive, action: actions.stop) { Label("Ukončit hlídání", systemImage: "stop.circle") }
+        } label: {
+            Image(systemName: "ellipsis")
+                .font(.system(size: 40 * 0.42, weight: .semibold))
+                .foregroundStyle(.primary)
+                .frame(width: 40, height: 40)
+                .glass(in: Circle(), interactive: true)
+        }
+        .accessibilityLabel("Další")
     }
 
     private func toggleChrome() {

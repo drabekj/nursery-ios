@@ -20,6 +20,8 @@ struct MonitorView: View {
     @State private var toast: String?
     @State private var flash = false
     @State private var askAlerts = false
+    /// "Ukončit hlídání?" Each way to stop asks first: one tap in the dark must not end the monitoring.
+    @State private var confirmStop = false
 
     enum Sheet: String, Identifiable { case settings, activity, help; var id: String { rawValue } }
 
@@ -48,10 +50,8 @@ struct MonitorView: View {
             if night {
                 NightView(activity: engine.activityLog,
                           onClose: { withAnimation(.easeInOut(duration: 0.5)) { night = false } },
-                          onStop: {
-                              night = false
-                              withAnimation(.easeInOut(duration: 0.4)) { engine.pause(why: "night mode") }
-                          })
+                          // Night mode stays under the question. It ends only with the stop.
+                          onStop: { confirmStop = true })
                     .transition(.opacity)
                     .zIndex(5)
             }
@@ -62,6 +62,12 @@ struct MonitorView: View {
             }
         }
         .overlay(alignment: .top) { toastView }
+        .confirmationDialog("Ukončit hlídání?", isPresented: $confirmStop, titleVisibility: .visible) {
+            Button("Ukončit hlídání", role: .destructive, action: stop)
+            Button("Zrušit", role: .cancel) {}
+        } message: {
+            Text("Chůvička přestane poslouchat a nepřijde žádné upozornění.")
+        }
         .sheet(item: $sheet) { s in
             switch s {
             case .settings: SettingsView()
@@ -86,7 +92,8 @@ struct MonitorView: View {
     }
 
     private var actions: MonitorActions {
-        MonitorActions(snapshot: snapshot, night: { enterNight() }, move: move)
+        MonitorActions(snapshot: snapshot, night: { enterNight() }, move: move,
+                       openSheet: { sheet = $0 }, stop: { confirmStop = true })
     }
 
     private func setSoundView(_ on: Bool) {
@@ -137,31 +144,19 @@ struct MonitorView: View {
                 .padding(.horizontal, 8)
                 .transition(stageTransition)
 
-                RoomPanel()
+                RoomPanel(activity: engine.activityLog)
                     .padding(.horizontal, 20)
                     .padding(.top, 22)
                     .transition(.opacity)
             }
 
-            HourStrip(activity: engine.activityLog) { sheet = .activity }
+            stripSlot
                 .padding(.horizontal, 16)
                 .padding(.top, soundView ? 12 : 20)
 
             // The spacer must stay a plain Spacer. Wrapped in a frame, it took half of the free
             // height from the picture, and the picture shrank to 60 % of the width.
             if soundView { Spacer().frame(height: 16) } else { Spacer(minLength: 12) }
-
-            if engine.volumeLow {
-                VolumeWarning(volume: engine.systemVolume)
-                    .padding(.horizontal, 16)
-                    .padding(.bottom, 12)
-                    .transition(.move(edge: .bottom).combined(with: .opacity))
-            } else if askAlerts {
-                AlertOffer(allow: allowAlerts, dismiss: { withAnimation { dismissAlerts() } })
-                    .padding(.horizontal, 16)
-                    .padding(.bottom, 12)
-                    .transition(.move(edge: .bottom).combined(with: .opacity))
-            }
 
             ControlBar(aiming: $aiming, actions: actions, pictureTools: !soundView)
                 .padding(.horizontal, 16)
@@ -185,23 +180,33 @@ struct MonitorView: View {
                 if soundView {
                     if canPeek { PeekCard() }
                 } else {
-                    RoomPanel()
+                    RoomPanel(activity: engine.activityLog)
                 }
-                if vSize != .compact {
-                    HourStrip(activity: engine.activityLog) { sheet = .activity }
-                }
+                stripSlot
                 Spacer(minLength: 0)
-                if engine.volumeLow {
-                    VolumeWarning(volume: engine.systemVolume)
-                } else if askAlerts {
-                    AlertOffer(allow: allowAlerts, dismiss: dismissAlerts)
-                }
                 ControlBar(aiming: $aiming, actions: actions, pictureTools: !soundView)
             }
             .frame(width: 360)
         }
         .padding(.horizontal, 24)
         .padding(.bottom, vSize == .compact ? 8 : 24)
+        .animation(.spring(response: 0.45, dampingFraction: 0.85), value: engine.volumeLow)
+    }
+
+    /// A banner takes the place of the hour strip while it shows. Then the picture keeps its size:
+    /// a banner added under the strip made the baby smaller at the moment the app had something to say.
+    @ViewBuilder private var stripSlot: some View {
+        if engine.volumeLow {
+            VolumeWarning(volume: engine.systemVolume)
+                .transition(.opacity)
+        } else if askAlerts {
+            AlertOffer(allow: allowAlerts, dismiss: { withAnimation { dismissAlerts() } })
+                .transition(.opacity)
+        } else if !wide || vSize != .compact {
+            // Landscape (the sound view) has no room for the strip.
+            HourStrip(activity: engine.activityLog) { sheet = .activity }
+                .transition(.opacity)
+        }
     }
 
     @ToolbarContentBuilder
@@ -215,10 +220,7 @@ struct MonitorView: View {
                 Button { sheet = .settings } label: { Label("Nastavení", systemImage: "gearshape") }
                 Button { sheet = .help } label: { Label("Nápověda", systemImage: "questionmark.circle") }
                 Divider()
-                Button(role: .destructive) {
-                    night = false
-                    withAnimation(.easeInOut(duration: 0.4)) { engine.pause(why: "menu") }
-                } label: { Label("Ukončit hlídání", systemImage: "stop.circle") }
+                Button(role: .destructive) { confirmStop = true } label: { Label("Ukončit hlídání", systemImage: "stop.circle") }
             } label: {
                 Image(systemName: "ellipsis")
                     .accessibilityLabel("Další")
@@ -250,6 +252,12 @@ struct MonitorView: View {
             withAnimation(.easeIn(duration: 0.35)) { flash = false }
             shared = SharedImage(image: image)
         }
+    }
+
+    /// After "Ukončit hlídání" in the question. It leaves Night mode too.
+    private func stop() {
+        night = false
+        withAnimation(.easeInOut(duration: 0.4)) { engine.pause(why: "user stopped") }
     }
 
     private func enterNight() {
@@ -298,7 +306,7 @@ struct MonitorView: View {
         askAlerts = false
     }
 
-    /// `-demoScreen aim|night|night-controls|activity|settings|remote|help|alerts|paused` opens a screen
+    /// `-demoScreen aim|night|night-controls|activity|settings|remote|help|alerts|paused|stop` opens a screen
     /// at launch, for the screenshots. NightView and SettingsView read the value too.
     private func applyDemoScreen() {
         guard MonitorEngine.isDemo else { return }
@@ -311,6 +319,12 @@ struct MonitorView: View {
         case "help": sheet = .help
         case "alerts": askAlerts = true
         case "paused": engine.pause(why: "demo")
+        case "stop":
+            // A moment after the launch: a dialog asked for before the screen is up does not show.
+            Task {
+                try? await Task.sleep(for: .seconds(1))
+                confirmStop = true
+            }
         default: break
         }
     }
@@ -320,6 +334,9 @@ struct MonitorActions {
     let snapshot: () -> Void
     let night: () -> Void
     let move: (CameraControl.Direction) -> Void
+    let openSheet: (MonitorView.Sheet) -> Void
+    /// It asks first ("Ukončit hlídání?"), and stops only after the yes.
+    let stop: () -> Void
 }
 
 // MARK: - The ambient light

@@ -149,27 +149,18 @@ struct SoundStage: View {
     }
 
     var body: some View {
-        let sub = engine.mode == .off ? "Ztlumeno · při pláči přijde upozornění\nKlepnutím na kruh zvuk zapnete"
-                                      : RoomWords.subline(engine, settings)
+        let sub = engine.mode == .off ? "Ztlumeno · při pláči přijde upozornění" : RoomWords.subline(engine, settings)
         VStack(spacing: 14) {
-            Button {
-                // The orb looks like a button, so it is one: a tap mutes the sound or turns it on,
-                // the same as the Zvuk button.
-                Haptics.firm()
-                if engine.mode == .off { engine.soundOn() } else { engine.mode = .off }
-            } label: {
-                LiveOrb(levels: engine.levels, status: engine.soundStatus, soundNow: activity.current != nil)
-            }
-            .buttonStyle(PressScale())
-            .accessibilityLabel("Zvuk")
-            .accessibilityValue("\(engine.mode.title). \(RoomWords.headline(engine))")
-            .accessibilityHint("Dvojitým klepnutím zvuk zapnete nebo ztlumíte.")
-            .frame(maxWidth: 280, maxHeight: 280)
+            // Only a picture, not a button: a hand that brushed it muted the monitor. The Zvuk button
+            // in the bar is the one way to mute. The words under it say the same for VoiceOver.
+            LiveOrb(levels: engine.levels, status: engine.soundStatus, soundNow: activity.current != nil)
+                .accessibilityHidden(true)
+                .frame(maxWidth: 280, maxHeight: 280)
                 .frame(maxHeight: .infinity)
                 .layoutPriority(-1)          // The orb gives way on a small screen. The words do not.
             VStack(spacing: 4) {
                 Text(RoomWords.headline(engine))
-                    .font(.system(size: 34, weight: .semibold, design: .rounded))
+                    .font(.system(.largeTitle, design: .rounded).weight(.semibold))
                     .foregroundStyle(RoomWords.color(engine))
                     .contentTransition(.opacity)
                     .animation(.easeInOut(duration: 0.35), value: RoomWords.headline(engine))
