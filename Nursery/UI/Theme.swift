@@ -18,6 +18,7 @@ extension Color {
 /// Two palettes. Light ("morning nursery"): a soft dawn blue-grey with a warm amber accent.
 /// Dark ("night"): deep navy with warm moonlight; the screen is often the only light in a bedroom.
 /// The picture area and Night mode are always dark. Red means a fault, never a normal state.
+/// The state of the room has its own colours (teal, amber, wine, graphite): see `field(for:dim:)`.
 enum Theme {
     static let skyTop = Color(light: 0xF6F8FC, dark: 0x090E1F)
     static let skyBottom = Color(light: 0xE9EDF6, dark: 0x121831)
@@ -39,12 +40,89 @@ enum Theme {
         LinearGradient(colors: [skyTop, skyBottom], startPoint: .top, endPoint: .bottom).ignoresSafeArea()
     }
 
-    /// The colour of one bar of the waveform. A louder sound is warmer.
+    /// The colour of one bar of the waveform: teal, amber, wine, the same hues as the state fields.
+    /// So the waveform and the field agree.
     static func level(_ v: Float) -> Color {
         switch v {
-        case ..<0.35: return calm
-        case ..<0.7: return middle
-        default: return loud
+        case ..<0.35: return stateCalm
+        case ..<0.7: return stateSound
+        default: return stateCry
+        }
+    }
+
+    // MARK: The state of the room
+
+    // One colour per state. The field is the whole background of the glance view, the band in the
+    // picture view, the frame of the video. Red (`alarm`) stays for a fault: the cry is wine.
+    // Light: the bright set, for a lit room. Dark appearance and auto-dim: a darker set with white
+    // type on all fields, so a sigh at night never doubles the light in the room.
+
+    /// The state hues on a page without a field (waveform bars, the hour strip, marks).
+    static let stateCalm = Color(light: 0x00A1A0, dark: 0x2BB5B3)
+    static let stateSound = Color(light: 0xE8A92A, dark: 0xFBC040)
+    static let stateCry = Color(light: 0xA81233, dark: 0xC64B70)
+    /// Dark type on the amber field. White there is about 2:1, ink is 10:1.
+    static let ink = Color(uiColor: UIColor(hex: 0x1B1B1F))
+    /// The ribbon under the word: muted, volume low, a short gap. Never a field colour.
+    static let ribbon = Color(uiColor: UIColor(hex: 0x5C6B8A))
+    /// The wifi glyph of "Nehlídá": the dark-mode alarm red, 4:1 on graphite.
+    static let lostGlyph = Color(uiColor: UIColor(hex: 0xFF6B6B))
+
+    private static func fieldHex(_ state: RoomState, dim: Bool) -> UInt32 {
+        switch state {
+        case .calm: dim ? 0x117376 : 0x00A1A0
+        case .sound: dim ? 0x78662E : 0xFBC040
+        case .cry: dim ? 0x570F29 : 0xA81233
+        case .lost, .connecting: dim ? 0x2A2C33 : 0x3A3D45
+        }
+    }
+
+    /// The field colour of a state. `dim` is true in the dark appearance and after auto-dim.
+    /// Not a dynamic colour on purpose: the views on a field override the colour scheme
+    /// (white type = dark scheme), and the field must not follow that.
+    static func field(for state: RoomState, dim: Bool) -> Color {
+        Color(uiColor: UIColor(hex: fieldHex(state, dim: dim)))
+    }
+
+    /// The core of the field: 8 % lighter. The field is one static radial gradient from it.
+    static func fieldCore(for state: RoomState, dim: Bool) -> Color {
+        let hex = fieldHex(state, dim: dim)
+        func up(_ c: UInt32) -> CGFloat { let v = CGFloat(c & 0xFF) / 255; return v + (1 - v) * 0.08 }
+        return Color(uiColor: UIColor(red: up(hex >> 16), green: up(hex >> 8), blue: up(hex), alpha: 1))
+    }
+
+    /// True when the type on the field is dark (only the bright amber). The status bar and the
+    /// colour scheme of the controls on the field follow it.
+    static func fieldIsLight(_ state: RoomState, dim: Bool) -> Bool { state == .sound && !dim }
+
+    /// The glyph, the word and the labels on a field: white, or ink on the bright amber.
+    static func onField(for state: RoomState, dim: Bool = false) -> Color {
+        fieldIsLight(state, dim: dim) ? ink : .white
+    }
+
+    /// Small text on a field: white 90 %, ink 70 % on amber. About 4.5:1.
+    static func onFieldSecondary(for state: RoomState, dim: Bool = false) -> Color {
+        fieldIsLight(state, dim: dim) ? ink.opacity(0.7) : .white.opacity(0.9)
+    }
+
+    /// The state colour on black, for Night mode. The cry is a lighter wine there, else it is lost in black.
+    static func nightAccent(for state: RoomState) -> Color {
+        switch state {
+        case .calm: Color(uiColor: UIColor(hex: 0x00A1A0))
+        case .sound: Color(uiColor: UIColor(hex: 0xFBC040))
+        case .cry: Color(uiColor: UIColor(hex: 0xC64B70))
+        case .lost: lostGlyph
+        case .connecting: .white
+        }
+    }
+
+    /// The glyph of a state. The silhouette around it (ring, bare bars, disc) is in `StateGlyph`.
+    static func symbol(for state: RoomState) -> String {
+        switch state {
+        case .connecting: "antenna.radiowaves.left.and.right"
+        case .calm: "moon.zzz.fill"
+        case .sound, .cry: "waveform"
+        case .lost: "wifi.exclamationmark"
         }
     }
 

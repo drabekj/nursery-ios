@@ -104,6 +104,8 @@ final class ZoomScrollView: UIScrollView {
 struct Waveform: View {
     let history: [Float]
     var dim = false
+    /// One colour for all bars, for a waveform on a state field (white or ink). Nil: `Theme.level`.
+    var tint: Color?
 
     var body: some View {
         Canvas { ctx, size in
@@ -118,7 +120,7 @@ struct Waveform: View {
                 // The older bars fade. This gives a sense of time.
                 let age = Double(i) / Double(n)
                 let opacity = (dim ? 0.45 : 1) * (0.35 + 0.65 * age)
-                ctx.fill(Path(roundedRect: rect, cornerRadius: barWidth / 2), with: .color(Theme.level(v).opacity(opacity)))
+                ctx.fill(Path(roundedRect: rect, cornerRadius: barWidth / 2), with: .color((tint ?? Theme.level(v)).opacity(opacity)))
             }
         }
         .accessibilityElement()
@@ -136,9 +138,10 @@ struct LiveWaveform: View {
     /// Only the last values, for a narrow waveform.
     var last: Int?
     var dim = false
+    var tint: Color?
 
     var body: some View {
-        Waveform(history: last.map { Array(levels.history.suffix($0)) } ?? levels.history, dim: dim)
+        Waveform(history: last.map { Array(levels.history.suffix($0)) } ?? levels.history, dim: dim, tint: tint)
     }
 }
 

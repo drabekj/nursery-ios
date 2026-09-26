@@ -1,8 +1,9 @@
 import SwiftUI
 
 /// The main screen. It has two views, and the switch at the top chooses:
-/// - Obraz: the picture, the room below it, and the controls at the thumb.
-/// - Jen zvuk: no picture. The room fills the screen, and the picture tools go away.
+/// - Obraz: the picture with the frame light, the state band under it, and the controls at the thumb.
+/// - Jen zvuk (the glance view): no picture. The state field fills the screen, edge to edge,
+///   and the picture tools go away.
 ///
 /// Each view adapts to three shapes: iPhone portrait, landscape (the picture fills the screen),
 /// and iPad (the stage on the left, the room and the controls on the right).
@@ -10,9 +11,14 @@ struct MonitorView: View {
     @EnvironmentObject private var engine: MonitorEngine
     @EnvironmentObject private var camera: CameraControl
     @EnvironmentObject private var settings: Settings
+    @EnvironmentObject private var battery: BatteryMonitor
     @Environment(\.verticalSizeClass) private var vSize
     @Environment(\.horizontalSizeClass) private var hSize
+    /// The real appearance. The views on a field override the colour scheme below this view.
+    @Environment(\.colorScheme) private var scheme
+    @Environment(\.dynamicTypeSize) private var typeSize
     @StateObject private var zoom = ZoomState()
+    @StateObject private var dimmer = FieldDimmer()
     @State private var aiming = false
     @State private var night = false
     @State private var sheet: Sheet?
@@ -20,6 +26,7 @@ struct MonitorView: View {
     @State private var toast: String?
     @State private var flash = false
     @State private var askAlerts = false
+    @State private var offerNight = false
     /// "Ukončit hlídání?" Each way to stop asks first: one tap in the dark must not end the monitoring.
     @State private var confirmStop = false
 
@@ -28,15 +35,32 @@ struct MonitorView: View {
     private var soundView: Bool { settings.soundView }
     private var wide: Bool { hSize == .regular || vSize == .compact }
 
+    // MARK: The state colours
+
+    private var state: RoomState { engine.roomState }
+    /// The dark tokens: in the dark appearance, and after 30 s untouched (auto-dim).
+    private var fieldDim: Bool { dimmer.dimmed || scheme == .dark }
+    /// The glance view draws the field behind the whole page, also behind the status bar.
+    private var onField: Bool { soundView }
+    private var fieldColor: Color { Theme.field(for: state, dim: fieldDim) }
+    private var onFieldColor: Color { Theme.onField(for: state, dim: fieldDim) }
+    /// White type on the field = the dark scheme for the controls on it; ink (bright amber) = light.
+    /// The status bar follows (light content on teal, wine, graphite; dark content on amber).
+    private var fieldScheme: ColorScheme { Theme.fieldIsLight(state, dim: fieldDim) ? .light : .dark }
+
     var body: some View {
         ZStack {
             // Night mode covers everything. Then the monitor under it is not built at all:
             // behind the black screen it redrew and animated all night for nobody.
             if !night {
-                AmbientBackground(room: engine.roomLevel, status: engine.soundStatus)
                 if vSize == .compact && !soundView {
                     FullScreenMonitor(zoom: zoom, pip: engine.pip, aiming: $aiming, actions: actions)
                 } else {
+                    if onField {
+                        StateFieldBackground(state: state, dim: fieldDim)
+                    } else {
+                        Theme.background
+                    }
                     mainLayout
                 }
             } else {
@@ -60,6 +84,8 @@ struct MonitorView: View {
             }
         }
         .overlay(alignment: .top) { toastView }
+        // Any touch brings the bright field back and starts the 30 s again.
+        .simultaneousGesture(TapGesture().onEnded { dimmer.touch() })
         // An alert, not a confirmation dialog: iOS shows the dialog as a popover and hides its
         // cancel button there. The alert always shows "Zrušit".
         .alert("Ukončit hlídání?", isPresented: $confirmStop) {
@@ -90,6 +116,9 @@ struct MonitorView: View {
             }
         }
         .onChange(of: wantsDetail, initial: true) { _, on in engine.setDetail(on) }
+        .onChange(of: engine.roomState, initial: true) { _, s in dimmer.state(s) }
+        .onChange(of: night) { _, on in if on { dimmer.stop() } else { dimmer.touch() } }
+        .task(id: night) { await suggestNight() }
         .onAppear(perform: applyDemoScreen)
     }
 
@@ -115,7 +144,9 @@ struct MonitorView: View {
     private var mainLayout: some View {
         NavigationStack {
             VStack(spacing: 0) {
-                ViewSwitch(soundView: soundView, choose: setSoundView)
+                ViewSwitch(soundView: soundView,
+                           field: onField ? fieldColor : nil, onField: onField ? onFieldColor : nil,
+                           choose: setSoundView)
                     .padding(.top, 4)
                     .padding(.bottom, wide ? 12 : 16)
                 if wide { wideContent } else { phoneContent }
@@ -123,8 +154,11 @@ struct MonitorView: View {
             .toolbar { toolbar }
             .navigationTitle("Chůvička")
             .navigationBarTitleDisplayMode(.inline)
-            .toolbarBackground(.hidden, for: .navigationBar)
+            .modifier(FieldBars(scheme: onField ? fieldScheme : nil))
         }
+        // The controls on a field take its type colour: white on teal, wine, graphite; ink on amber.
+        .environment(\.colorScheme, onField ? fieldScheme : scheme)
+        .tint(onField ? onFieldColor : Theme.accent)
     }
 
     private var stageTransition: AnyTransition {
@@ -135,62 +169,94 @@ struct MonitorView: View {
     private var phoneContent: some View {
         VStack(spacing: 0) {
             if soundView {
-                SoundStage(activity: engine.activityLog)
-                    .padding(.horizontal, 20)
+                if typeSize.isAccessibilitySize {
+                    // Large text: the field and the cards scroll, nothing is cut.
+                    ScrollView {
+                        VStack(spacing: 20) {
+                            StateField(dim: fieldDim)
+                                .padding(.top, 8)
+                            glanceCards
+                        }
+                        .padding(.bottom, 12)
+                    }
                     .transition(stageTransition)
-                // Every source gives a photo, also a camera read directly.
-                PeekCard()
-                    .padding(.horizontal, 16)
-                    .padding(.top, 22)
-                    .transition(.opacity)
+                } else {
+                    // The glyph and the word sit in the free space above the cards: the upper 60 %
+                    // of the screen, clear of a glass of water in front of the phone.
+                    StateField(dim: fieldDim)
+                        .frame(maxHeight: .infinity)
+                        .transition(stageTransition)
+                    glanceCards
+                        .padding(.bottom, 12)
+                }
             } else {
                 VideoHero(zoom: zoom, pip: engine.pip, aiming: $aiming, onMove: move, fullScreen: {
                     Orientation.request(.landscapeRight)
-                })
+                }, frameColor: Theme.field(for: state, dim: fieldDim))
                 .padding(.horizontal, 8)
                 .transition(stageTransition)
 
-                RoomPanel(activity: engine.activityLog)
-                    .padding(.horizontal, 20)
-                    .padding(.top, 22)
+                StateBand(dim: fieldDim)
+                    .padding(.horizontal, 16)
+                    .padding(.top, 16)
                     .transition(.opacity)
+                LiveWaveform(levels: engine.levels, dim: !RoomWords.hearsRoom(engine))
+                    .frame(height: 60)
+                    .padding(.horizontal, 20)
+                    .padding(.top, 14)
+                stripSlot
+                    .padding(.horizontal, 16)
+                    .padding(.top, 14)
+
+                // The spacer must stay a plain Spacer. Wrapped in a frame, it took half of the free
+                // height from the picture, and the picture shrank to 60 % of the width.
+                Spacer(minLength: 12)
             }
 
-            stripSlot
-                .padding(.horizontal, 16)
-                .padding(.top, soundView ? 12 : 20)
-
-            // The spacer must stay a plain Spacer. Wrapped in a frame, it took half of the free
-            // height from the picture, and the picture shrank to 60 % of the width.
-            if soundView { Spacer().frame(height: 16) } else { Spacer(minLength: 12) }
-
-            ControlBar(aiming: $aiming, actions: actions, pictureTools: !soundView)
+            controlBar
                 .padding(.horizontal, 16)
                 .padding(.bottom, 8)
         }
         .animation(.spring(response: 0.45, dampingFraction: 0.85), value: engine.volumeLow)
     }
 
+    /// The glance view, at arm's length: the waveform and the last hour (or a banner) on glass.
+    private var glanceCards: some View {
+        VStack(spacing: 12) {
+            SoundWaveCard(dim: fieldDim)
+            stripSlot
+        }
+        .padding(.horizontal, 16)
+    }
+
+    private var controlBar: some View {
+        ControlBar(aiming: $aiming, actions: actions, pictureTools: !soundView,
+                   field: onField ? fieldColor : nil, onField: onField ? onFieldColor : nil)
+    }
+
     // iPad, and the sound view in landscape.
     private var wideContent: some View {
         HStack(alignment: .top, spacing: 24) {
             if soundView {
-                SoundStage(activity: engine.activityLog)
+                StateField(dim: fieldDim, compact: vSize == .compact)
                     .frame(maxWidth: .infinity, maxHeight: .infinity)
                     .transition(stageTransition)
             } else {
-                VideoHero(zoom: zoom, pip: engine.pip, aiming: $aiming, onMove: move, fullScreen: nil)
+                VideoHero(zoom: zoom, pip: engine.pip, aiming: $aiming, onMove: move, fullScreen: nil,
+                          frameColor: Theme.field(for: state, dim: fieldDim))
                     .transition(stageTransition)
             }
             VStack(spacing: 20) {
                 if soundView {
-                    PeekCard()
+                    SoundWaveCard(dim: fieldDim)
                 } else {
-                    RoomPanel(activity: engine.activityLog)
+                    StateBand(dim: fieldDim)
+                    LiveWaveform(levels: engine.levels, dim: !RoomWords.hearsRoom(engine))
+                        .frame(height: 60)
                 }
                 stripSlot
                 Spacer(minLength: 0)
-                ControlBar(aiming: $aiming, actions: actions, pictureTools: !soundView)
+                controlBar
             }
             .frame(width: 360)
         }
@@ -208,9 +274,15 @@ struct MonitorView: View {
         } else if askAlerts {
             AlertOffer(allow: allowAlerts, dismiss: { withAnimation { dismissAlerts() } })
                 .transition(.opacity)
+        } else if offerNight {
+            NightOffer(accept: {
+                withAnimation { offerNight = false }
+                enterNight()
+            }, dismiss: { withAnimation { offerNight = false } })
+                .transition(.opacity)
         } else if !wide || vSize != .compact {
             // Landscape (the sound view) has no room for the strip.
-            HourStrip(activity: engine.activityLog) { sheet = .activity }
+            HourStrip(activity: engine.activityLog, state: state, onField: onField) { sheet = .activity }
                 .transition(.opacity)
         }
     }
@@ -218,7 +290,7 @@ struct MonitorView: View {
     @ToolbarContentBuilder
     private var toolbar: some ToolbarContent {
         ToolbarItem(placement: .topBarLeading) {
-            StatusBadge(overall: engine.overall, pictureLive: engine.pictureLive)
+            StatusBadge(overall: engine.overall, pictureLive: engine.pictureLive, dot: onField ? onFieldColor : nil)
         }
         ToolbarItem(placement: .topBarTrailing) {
             Menu {
@@ -312,19 +384,52 @@ struct MonitorView: View {
         askAlerts = false
     }
 
-    /// `-demoScreen aim|night|night-controls|activity|settings|remote|help|alerts|paused|stop` opens a screen
-    /// at launch, for the screenshots. NightView and SettingsView read the value too.
+    // MARK: The night suggestion
+
+    /// The evening that a time belongs to: 1:30 at night is still the evening before.
+    private static func evening(_ date: Date = Date()) -> String {
+        let shifted = Calendar.current.date(byAdding: .hour, value: -6, to: date) ?? date
+        return shifted.formatted(.iso8601.year().month().day())
+    }
+
+    /// After 21:00 (until 6:00), on the charger, the monitor up for 3 min: offer Night mode, once
+    /// per evening. Not tied to a touch: at 2 a.m. nobody touches the screen first.
+    private func suggestNight() async {
+        guard !night, !MonitorEngine.isDemo else { return }
+        try? await Task.sleep(for: .seconds(180))
+        while !Task.isCancelled {
+            let hour = Calendar.current.component(.hour, from: Date())
+            let evening = Self.evening()
+            if (hour >= 21 || hour < 6), battery.charging, !engine.paused, !offerNight,
+               UserDefaults.standard.string(forKey: "nightSuggestedDay") != evening {
+                UserDefaults.standard.set(evening, forKey: "nightSuggestedDay")
+                Log.shared.add("night mode suggested")
+                withAnimation(.spring(response: 0.5, dampingFraction: 0.85)) { offerNight = true }
+                return
+            }
+            try? await Task.sleep(for: .seconds(60))
+        }
+    }
+
+    // MARK: The demo
+
+    /// `-demoScreen aim|night|night-controls|night-cry|activity|settings|remote|help|alerts|paused|stop`
+    /// opens a screen at launch, for the screenshots. NightView and SettingsView read the value too.
+    /// The state screens (`klid`, `sound-cry`, `sound-lost`, `sound-connecting`, `sound-muted`,
+    /// `main-cry`): the engine sets `roomState` (and the muted mode) from the name; here only the view is chosen.
+    /// `sound…` opens the sound view already (Settings), `main…` the picture view.
     private func applyDemoScreen() {
         guard MonitorEngine.isDemo else { return }
         Log.shared.add("demo screen \(UserDefaults.standard.string(forKey: "demoScreen") ?? "none")")
         switch UserDefaults.standard.string(forKey: "demoScreen") {
         case "aim": aiming = true
-        case "night", "night-controls": night = true
+        case "night", "night-controls", "night-cry": night = true
         case "activity": sheet = .activity
         case "settings", "remote", "settings-advanced": sheet = .settings
         case "help": sheet = .help
         case "alerts": askAlerts = true
         case "paused": engine.pause(why: "demo")
+        case "klid": engine.setSoundView(true)
         case "stop":
             // A moment after the launch: a dialog asked for before the screen is up does not show.
             Task {
@@ -332,6 +437,26 @@ struct MonitorView: View {
                 confirmStop = true
             }
         default: break
+        }
+    }
+}
+
+/// The navigation bar on a field: its colour scheme follows the type on the field, and the status
+/// bar with it. SwiftUI applies the bar's colour scheme only with a visible bar background, so the
+/// background is "visible" but clear: the field shows through.
+private struct FieldBars: ViewModifier {
+    let scheme: ColorScheme?
+
+    @ViewBuilder
+    func body(content: Content) -> some View {
+        if let scheme {
+            content
+                .toolbarBackground(Color.clear, for: .navigationBar)
+                .toolbarBackground(.visible, for: .navigationBar)
+                .toolbarColorScheme(scheme, for: .navigationBar)
+        } else {
+            content
+                .toolbarBackground(.hidden, for: .navigationBar)
         }
     }
 }
@@ -345,46 +470,16 @@ struct MonitorActions {
     let stop: () -> Void
 }
 
-// MARK: - The ambient light
-
-/// A soft glow behind the room panel. It follows the loudness, so the whole screen breathes
-/// with the room. It is dim on purpose: this screen is often the only light at night.
-/// The glow follows the loudness words (Ticho, Slabé zvuky…), which change a few times a minute,
-/// not the 10 Hz level: a full-screen gradient under the glass panels made all of them blur again
-/// on each tick, and its 0.35 s animation never ended.
-struct AmbientBackground: View {
-    let room: RoomLevel
-    let status: NurseryActivityAttributes.Status
-    private var level: Float { room.value }
-    @Environment(\.accessibilityReduceMotion) private var reduceMotion
-
-    var body: some View {
-        ZStack {
-            Theme.skyTop.ignoresSafeArea()
-            RadialGradient(colors: [glow.opacity(0.10 + Double(level) * 0.28), .clear],
-                           center: UnitPoint(x: 0.5, y: 0.62), startRadius: 10, endRadius: 420)
-                .ignoresSafeArea()
-                .animation(reduceMotion ? nil : .easeInOut(duration: 0.8), value: room)
-        }
-    }
-
-    private var glow: Color {
-        switch status {
-        case .lost: Theme.alarm
-        case .connecting: Theme.glowNeutral
-        default: Theme.level(level)
-        }
-    }
-}
-
 // MARK: - The status badge
 
 struct StatusBadge: View {
     let overall: MonitorEngine.Overall
     let pictureLive: Bool
+    /// On a state field the dot is `onField` (white or ink): green on teal or amber would not show.
+    var dot: Color?
     var body: some View {
         HStack(spacing: 7) {
-            PulseDot(color: color, animated: overall == .live || overall == .soundOnly)
+            PulseDot(color: dot ?? color, animated: overall == .live || overall == .soundOnly)
             Text(text)
                 .font(.subheadline.weight(.semibold))
         }
@@ -436,8 +531,43 @@ struct AlertOffer: View {
                     Text("Povolit").fontWeight(.semibold).foregroundStyle(.black)
                 }
                 .buttonStyle(.borderedProminent)
+                .tint(Theme.moon)          // Dark text needs the yellow, also over a field (tint white or ink there).
                 .controlSize(.small)
                 Button("Později", action: dismiss).font(.caption).foregroundStyle(.secondary)
+            }
+        }
+        .padding(14)
+        .glass(in: RoundedRectangle(cornerRadius: 22, style: .continuous))
+    }
+}
+
+/// After 21:00, on the charger, with the monitor up for 3 min: the persona will not look for
+/// the Noční button at 2 a.m., so the app offers it. Once per evening.
+struct NightOffer: View {
+    let accept: () -> Void
+    let dismiss: () -> Void
+
+    var body: some View {
+        HStack(spacing: 14) {
+            Image(systemName: "moon.stars.fill")
+                .font(.title2)
+                .foregroundStyle(Color.primary)
+            VStack(alignment: .leading, spacing: 2) {
+                Text("Je noc — zapnout Noční režim?").font(.subheadline.weight(.semibold))
+                    .fixedSize(horizontal: false, vertical: true)
+                Text("Displej bude skoro černý. Zvuk i upozornění běží dál.")
+                    .font(.caption).foregroundStyle(Color.primary.opacity(0.8))
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+            Spacer(minLength: 0)
+            VStack(spacing: 6) {
+                Button(action: accept) {
+                    Text("Zapnout").fontWeight(.semibold).foregroundStyle(.black)
+                }
+                .buttonStyle(.borderedProminent)
+                .tint(Theme.moon)
+                .controlSize(.small)
+                Button("Teď ne", action: dismiss).font(.caption).foregroundStyle(Color.primary.opacity(0.8))
             }
         }
         .padding(14)

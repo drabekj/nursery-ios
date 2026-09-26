@@ -1,18 +1,25 @@
 import SwiftUI
 import UIKit
 
-// The sound view: the parent only listens. There is no picture, so the screen leaves out
-// everything that belongs to the picture (aim, zoom, photo, the small window) and gives
-// the room itself the space: a calm orb that breathes with the sound, the words, and a peek.
+// The sound view ("Jen zvuk"), the glance view: the parent only listens. There is no picture,
+// so the screen leaves out everything that belongs to the picture (aim, zoom, photo, the small
+// window) and gives the state of the room the whole screen: the field in the state colour,
+// the glyph, the word, the subline (`StateField`). Under it two glass cards for arm's length:
+// the waveform and the last hour. No photo card: the field gets the space.
 //
 // Why a parent chooses it: it saves the battery and the Wi-Fi, the phone stays cool,
-// and a dark bedroom gets less light from the screen than from a live picture.
+// and it reads from across the room.
 
 // MARK: - The switch
 
 /// "Obraz | Jen zvuk" at the top of the main screen. The pill slides to the chosen side.
 struct ViewSwitch: View {
     let soundView: Bool
+    /// On a state field: the field colour and the colour on it (white or ink). No brand yellow on
+    /// a field: the active segment is `onField` at 90 % with the field colour as its label.
+    /// Nil on the plain page: the yellow pill with dark text, as before.
+    var field: Color?
+    var onField: Color?
     let choose: (Bool) -> Void
     @Namespace private var ns
 
@@ -37,12 +44,13 @@ struct ViewSwitch: View {
             Label(title, systemImage: symbol)
                 .font(.subheadline.weight(.semibold))
                 .labelStyle(.titleAndIcon)
-                .foregroundStyle(selected ? Color.black : Color.primary)
+                .foregroundStyle(selected ? (field ?? Color.black) : (onField ?? Color.primary))
                 .padding(.horizontal, 16)
                 .frame(height: 36)
                 .background {
                     if selected {
-                        Capsule().fill(Theme.moon).matchedGeometryEffect(id: "pill", in: ns)
+                        Capsule().fill(field == nil ? Theme.moon : (onField ?? .white).opacity(0.9))
+                            .matchedGeometryEffect(id: "pill", in: ns)
                     }
                 }
                 .contentShape(Capsule())
@@ -52,253 +60,21 @@ struct ViewSwitch: View {
     }
 }
 
-// MARK: - The room orb
+// MARK: - The cards
 
-/// The room as one calm shape. The core shows the state. Three rings show the sound:
-/// the inner ring the sound now, the outer rings the sound a moment ago, so a cry spreads out
-/// like a ripple on water. When the room is quiet, the orb breathes slowly.
-/// The orb of the room now. Only this view watches the meter.
-struct LiveOrb: View {
-    @ObservedObject var levels: LevelMeter
-    let status: NurseryActivityAttributes.Status
-    let soundNow: Bool
-
-    var body: some View { RoomOrb(history: levels.history, status: status, soundNow: soundNow) }
-}
-
-struct RoomOrb: View {
-    let history: [Float]
-    let status: NurseryActivityAttributes.Status
-    let soundNow: Bool
-    @Environment(\.accessibilityReduceMotion) private var reduceMotion
-
-    private var hears: Bool { status == .listening || status == .silent }
-
-    var body: some View {
-        GeometryReader { g in
-            let d = min(g.size.width, g.size.height)
-            let core = d * 0.44
-            ZStack {
-                ForEach([3, 2, 1], id: \.self) { i in
-                    let v = value(ago: (i - 1) * 4)
-                    let spread = (d - core) * CGFloat(i) / 3 * CGFloat(0.4 + 0.6 * v)
-                    Circle()
-                        .fill(color(v).opacity(0.2 - Double(i) * 0.045))
-                        .frame(width: core + spread, height: core + spread)
-                }
-                // A plain fill, not glass: glass blurs what is behind it again on each change,
-                // and the core changes 10 times a second.
-                Circle()
-                    .fill(color(value(ago: 0)).opacity(0.3))
-                    .overlay { Circle().strokeBorder(.white.opacity(0.35), lineWidth: 1) }
-                    .frame(width: core, height: core)
-                    .overlay { symbol.font(.system(size: core * 0.3, weight: .semibold)) }
-            }
-            .frame(width: g.size.width, height: g.size.height)
-            // No implicit animation on the history: it changes each 0.1 s, so each animation
-            // started before the last one ended, and the orb never stopped drawing.
-        }
-        .aspectRatio(1, contentMode: .fit)
-        .phaseAnimator([false, true]) { view, inhale in
-            // The breath: 5 s in, 5 s out. It stops while a sound goes on, so the sound is clear.
-            view.scaleEffect(reduceMotion || soundNow || !hears ? 1 : (inhale ? 1.035 : 0.975))
-        } animation: { _ in .easeInOut(duration: 5) }
-        .accessibilityHidden(true)
-    }
-
-    /// The level `ago` ticks back (a tick is 0.1 s), 0 when the app does not hear the room.
-    private func value(ago: Int) -> Float {
-        guard hears, history.count > ago else { return 0 }
-        return history[history.count - 1 - ago]
-    }
-
-    private func color(_ v: Float) -> Color {
-        switch status {
-        case .lost: Theme.alarm
-        case .connecting: Theme.glowNeutral
-        default: Theme.level(v)
-        }
-    }
-
-    @ViewBuilder private var symbol: some View {
-        switch status {
-        case .connecting:
-            ProgressView().controlSize(.large)
-        case .lost:
-            Image(systemName: "wifi.exclamationmark").foregroundStyle(Theme.alarm)
-        case .listening, .silent:
-            Image(systemName: soundNow ? "waveform" : (status == .silent ? "bell.fill" : "moon.zzz.fill"))
-                .foregroundStyle(soundNow ? Theme.level(value(ago: 0)) : Color.primary.opacity(0.55))
-                .contentTransition(.symbolEffect(.replace))
-                .symbolEffect(.variableColor.iterative, isActive: soundNow)
-        }
-    }
-}
-
-// MARK: - The stage
-
-/// The orb and the words. The card of the last hour under it opens the Overview.
-struct SoundStage: View {
+/// The waveform of the room now, 36 pt, on a glass card over the field. The bars take the colour
+/// on the field (white or ink): teal bars on a teal field would not show.
+struct SoundWaveCard: View {
     @EnvironmentObject private var engine: MonitorEngine
-    @EnvironmentObject private var settings: Settings
-    @ObservedObject var activity: SoundActivity
-
-    private var offline: Bool {
-        if case .offline = engine.overall { return true }
-        return false
-    }
+    let dim: Bool
 
     var body: some View {
-        let sub = engine.mode == .off ? "Ztlumeno · při pláči přijde upozornění" : RoomWords.subline(engine, settings)
-        VStack(spacing: 14) {
-            // Only a picture, not a button: a hand that brushed it muted the monitor. The Zvuk button
-            // in the bar is the one way to mute. The words under it say the same for VoiceOver.
-            LiveOrb(levels: engine.levels, status: engine.soundStatus, soundNow: activity.current != nil)
-                .accessibilityHidden(true)
-                .frame(maxWidth: 280, maxHeight: 280)
-                .frame(maxHeight: .infinity)
-                .layoutPriority(-1)          // The orb gives way on a small screen. The words do not.
-            VStack(spacing: 4) {
-                Text(RoomWords.headline(engine))
-                    .font(.system(.largeTitle, design: .rounded).weight(.semibold))
-                    .foregroundStyle(RoomWords.color(engine))
-                    .contentTransition(.opacity)
-                    .animation(.easeInOut(duration: 0.35), value: RoomWords.headline(engine))
-                if !sub.isEmpty {
-                    Text(sub)
-                        .font(.subheadline)
-                        .foregroundStyle(.secondary)
-                }
-            }
-            .multilineTextAlignment(.center)
-            .accessibilityElement(children: .combine)
-            if offline {
-                Button("Zkusit znovu") { engine.reconnect(why: "user asked") }
-                    .buttonStyle(.bordered)
-                    .controlSize(.small)
-            }
-        }
-    }
-}
-
-// MARK: - The peek
-
-/// One photo of the cot, on request. The parent sees the baby without the live picture:
-/// no stream, no battery cost. A tap takes a new photo. The switch above opens the live picture.
-struct PeekCard: View {
-    @EnvironmentObject private var camera: CameraControl
-    @State private var image: UIImage?
-    @State private var taken: Date?
-    @State private var loading = false
-    @State private var failed = false
-    @State private var enlarged = false
-
-    var body: some View {
-        HStack(spacing: 14) {
-            Button(action: peek) {
-                HStack(spacing: 14) {
-                    thumbnail
-                    VStack(alignment: .leading, spacing: 3) {
-                        Text("Fotka z postýlky")
-                            .font(.subheadline.weight(.semibold))
-                        subtitle
-                            .font(.caption)
-                            .foregroundStyle(failed ? Theme.alarm : .secondary)
-                    }
-                    Spacer(minLength: 0)
-                }
-                .contentShape(Rectangle())
-            }
-            .buttonStyle(.plain)
-            .disabled(loading)
-            .accessibilityHint("Pořídí novou fotku z kamery")
-        }
-        .padding(12)
-        .glass(in: RoundedRectangle(cornerRadius: 24, style: .continuous))
-        .sheet(isPresented: $enlarged) {
-            if let image { PeekPhoto(image: image, taken: taken ?? Date()) }
-        }
-        .task {
-            if MonitorEngine.isDemo { peek() }
-        }
-    }
-
-    @ViewBuilder private var thumbnail: some View {
-        let shape = RoundedRectangle(cornerRadius: 12, style: .continuous)
-        ZStack {
-            shape.fill(Color.secondary.opacity(0.12))
-            if let image {
-                Image(uiImage: image).resizable().scaledToFill()
-                    .transition(.opacity)
-                    .onTapGesture { enlarged = true }
-            } else if !loading {
-                Image(systemName: "eye.fill").font(.title3).foregroundStyle(.secondary)
-            }
-            if loading {
-                ProgressView()
-            }
-        }
-        .frame(width: 96, height: 54)
-        .clipShape(shape)
-        .animation(.easeInOut(duration: 0.3), value: image == nil)
-    }
-
-    @ViewBuilder private var subtitle: some View {
-        if failed {
-            Text("Kamera neodpověděla. Zkuste to znovu.")
-        } else if loading {
-            Text("Fotím…")
-        } else if let taken {
-            TimelineView(.periodic(from: .now, by: 1)) { _ in
-                Text("\(taken.formatted(.relative(presentation: .numeric, unitsStyle: .abbreviated).locale(Locale(identifier: "cs_CZ")))) · klepnutím obnovíte")
-                    .monospacedDigit()
-            }
-        } else {
-            Text("Jedna fotka, bez živého obrazu")
-        }
-    }
-
-    private func peek() {
-        guard !loading else { return }
-        Haptics.tap()
-        loading = true
-        failed = false
-        Task {
-            let photo = await camera.snapshot()
-            withAnimation {
-                loading = false
-                if let photo {
-                    image = photo
-                    taken = Date()
-                } else {
-                    failed = true
-                    Haptics.error()
-                }
-            }
-        }
-    }
-}
-
-private struct PeekPhoto: View {
-    let image: UIImage
-    let taken: Date
-    @Environment(\.dismiss) private var dismiss
-
-    var body: some View {
-        NavigationStack {
-            ZStack {
-                Color.black.ignoresSafeArea()
-                Image(uiImage: image).resizable().scaledToFit()
-            }
-            .navigationTitle("Fotka v \(taken.formatted(.dateTime.hour().minute().locale(Locale(identifier: "cs_CZ"))))")
-            .navigationBarTitleDisplayMode(.inline)
-            .toolbar {
-                ToolbarItem(placement: .confirmationAction) { Button("Hotovo") { dismiss() } }
-                ToolbarItem(placement: .topBarLeading) {
-                    ShareLink(item: Image(uiImage: image), preview: SharePreview("Chůvička", image: Image(uiImage: image)))
-                }
-            }
-            .environment(\.colorScheme, .dark)
-        }
+        LiveWaveform(levels: engine.levels, dim: !RoomWords.hearsRoom(engine),
+                     tint: Theme.onField(for: engine.roomState, dim: dim))
+            .frame(height: 36)
+            .padding(.horizontal, 16)
+            .padding(.vertical, 12)
+            .frame(maxWidth: .infinity)
+            .glass(in: RoundedRectangle(cornerRadius: 24, style: .continuous))
     }
 }

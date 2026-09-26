@@ -51,7 +51,7 @@ struct SettingsView: View {
                 } header: {
                     Text("Zvuk")
                 } footer: {
-                    Text("Citlivost: co se počítá jako zvuk. Zesílená hlasitost se hodí do tichého pokoje.")
+                    Text("Citlivost: co se počítá jako zvuk. Citlivost ovlivňuje i to, kdy Chůvička poslouchá, jestli jde o pláč. Zesílená hlasitost se hodí do tichého pokoje.")
                 }
 
                 Section {
@@ -139,6 +139,15 @@ struct SettingsView: View {
             }
         }
         .onChange(of: settings.alertOnSound) { _, on in if on { NurseryAlerts.requestPermission() } }
+        // "Miminko se ozývá" for each sound, not only for a cry. Off by default: a sigh must not wake the parent.
+        Toggle(isOn: $settings.alertOnAnySound) {
+            VStack(alignment: .leading, spacing: 2) {
+                Text("Upozornit i na každý zvuk")
+                Text("Bez toho přijde upozornění jen na pláč.")
+                    .font(.caption).foregroundStyle(.secondary)
+            }
+        }
+        .onChange(of: settings.alertOnAnySound) { _, on in if on { NurseryAlerts.requestPermission() } }
         Toggle("Nevypínat displej", isOn: $settings.keepAwake)
         Picker("Vzhled", selection: $settings.appearance) {
             ForEach(Settings.Appearance.allCases) { Text($0.title).tag($0) }

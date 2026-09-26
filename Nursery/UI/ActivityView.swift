@@ -106,13 +106,23 @@ struct ActivityView: View {
     }
 }
 
-/// The listening time as a light band, and each episode as a mark: amber for fussing, coral for crying.
-/// A grey gap means that Chůvička did not listen then. That is not the same as quiet.
+/// The listening time as a light band, and each episode as a mark: amber for a sound, wine for a cry,
+/// the colours of the state field. A grey gap means that Chůvička did not listen then.
+/// That is not the same as quiet.
 struct Timeline: View {
     @ObservedObject var activity: SoundActivity
     let since: Date
     var height: CGFloat = 40
     var hourLabels = false
+    /// On a state field the hues would vanish (teal on teal): the band and the marks take the
+    /// type colour of the field (`.primary` there is white or ink) in three strengths.
+    var onField = false
+
+    private var listened: Color { onField ? Color.primary.opacity(0.22) : Theme.stateCalm.opacity(0.28) }
+    private func mark(_ kind: SoundActivity.Episode.Kind) -> Color {
+        if onField { return kind == .cry ? Color.primary : Color.primary.opacity(0.6) }
+        return kind == .cry ? Theme.stateCry : Theme.stateSound
+    }
 
     var body: some View {
         let now = Date()
@@ -124,13 +134,13 @@ struct Timeline: View {
                 .foregroundStyle(Color.secondary.opacity(0.12))
             ForEach(Array(spans.enumerated()), id: \.offset) { _, span in
                 RectangleMark(xStart: .value("Od", span.start), xEnd: .value("Do", span.end), yStart: .value("y", 0.0), yEnd: .value("y", 1.0))
-                    .foregroundStyle(Theme.calm.opacity(0.28))
+                    .foregroundStyle(listened)
             }
             ForEach(episodes) { e in
                 RectangleMark(xStart: .value("Od", e.start),
                               xEnd: .value("Do", max(e.end, e.start.addingTimeInterval(minWidth))),
                               yStart: .value("y", 0.0), yEnd: .value("y", 1.0))
-                    .foregroundStyle(e.kind == .cry ? Theme.loud : Theme.middle)
+                    .foregroundStyle(mark(e.kind))
             }
         }
         .chartXScale(domain: since...now)
@@ -154,11 +164,11 @@ private struct Legend: View {
     var body: some View {
         Grid(alignment: .leading, horizontalSpacing: 18, verticalSpacing: 8) {
             GridRow {
-                item(Theme.middle, "Zafňukání")
-                item(Theme.loud, "Pláč")
+                item(Theme.stateSound, "Zafňukání")
+                item(Theme.stateCry, "Pláč")
             }
             GridRow {
-                item(Theme.calm.opacity(0.5), "Poslouchala")
+                item(Theme.stateCalm.opacity(0.5), "Poslouchala")
                 item(Color.secondary.opacity(0.25), "Neposlouchala")
             }
         }
@@ -185,7 +195,7 @@ private struct EpisodeRow: View {
                 thumbnail
                 VStack(alignment: .leading, spacing: 3) {
                     HStack(spacing: 6) {
-                        Circle().fill(episode.kind == .cry ? Theme.loud : Theme.middle).frame(width: 8, height: 8)
+                        Circle().fill(episode.kind == .cry ? Theme.stateCry : Theme.stateSound).frame(width: 8, height: 8)
                         Text(live ? "Právě teď" : episode.title).font(.headline)
                     }
                     // A running episode has no length yet: a length made it look finished.
@@ -249,7 +259,14 @@ private struct PhotoView: View {
 /// Its title line is the one place on the main screen that says when the last sound was.
 struct HourStrip: View {
     @ObservedObject var activity: SoundActivity
+    /// The state of the room: "Právě pláče" while it is `.cry`.
+    var state: RoomState?
+    /// On a state field (the glance view): the text and the marks take the type colour of the field.
+    var onField = false
     let open: () -> Void
+
+    /// Small text on a field: 90 %, not the system secondary (about 60 %), for 4.5:1.
+    private var secondary: Color { onField ? Color.primary.opacity(0.9) : Color.secondary }
 
     var body: some View {
         let since = Date().addingTimeInterval(-3600)
@@ -258,25 +275,28 @@ struct HourStrip: View {
                 HStack(alignment: .firstTextBaseline) {
                     Text("Poslední hodina").font(.subheadline.weight(.semibold))
                     Spacer()
-                    if activity.current != nil {
+                    if state == .cry || activity.current != nil {
+                        let crying = state == .cry
+                        let color = onField ? Color.primary : (crying ? Theme.stateCry : Theme.warn)
                         HStack(spacing: 7) {
-                            PulseDot(color: Theme.warn)
-                            Text("Právě se ozývá")
+                            PulseDot(color: color)
+                            Text(crying ? "Právě pláče" : "Právě se ozývá")
                         }
                         .font(.footnote.weight(.semibold))
-                        .foregroundStyle(Theme.warn)
+                        .foregroundStyle(color)
                     } else {
-                        Text(summary(since: since)).font(.footnote).foregroundStyle(.secondary)
+                        Text(summary(since: since)).font(.footnote).foregroundStyle(secondary)
                     }
-                    Image(systemName: "chevron.right").font(.caption.weight(.semibold)).foregroundStyle(.tertiary)
+                    Image(systemName: "chevron.right").font(.caption.weight(.semibold))
+                        .foregroundStyle(onField ? Color.primary.opacity(0.7) : Color(uiColor: .tertiaryLabel))
                 }
-                Timeline(activity: activity, since: since, height: 28)
+                Timeline(activity: activity, since: since, height: 28, onField: onField)
                 HStack {
                     Text("před hodinou")
                     Spacer()
                     Text("teď")
                 }
-                .font(.caption2).foregroundStyle(.tertiary)
+                .font(.caption2).foregroundStyle(onField ? Color.primary.opacity(0.8) : Color(uiColor: .tertiaryLabel))
             }
             .padding(16)
             .glass(in: RoundedRectangle(cornerRadius: 24, style: .continuous), interactive: true)
@@ -288,6 +308,7 @@ struct HourStrip: View {
     }
 
     private func summary(since: Date) -> String {
+        if state == .cry { return "Právě pláče" }
         if activity.current != nil { return "Právě se ozývá" }
         let episodes = activity.episodes(since: since)
         if activity.listened(since: since) < 60 { return "Zatím bez záznamu" }

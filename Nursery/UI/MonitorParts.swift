@@ -10,6 +10,9 @@ struct VideoHero: View {
     @Binding var aiming: Bool
     let onMove: (CameraControl.Direction) -> Void
     let fullScreen: (() -> Void)?
+    /// The "frame light": a 4 pt inner stroke in the state colour. At 4 m it is a coloured
+    /// rectangle the size of the video, where the dark video alone says nothing.
+    var frameColor: Color?
 
     var body: some View {
         ZStack {
@@ -28,6 +31,14 @@ struct VideoHero: View {
         }
         .aspectRatio(engine.videoSize.width / max(engine.videoSize.height, 1), contentMode: .fit)
         .clipShape(RoundedRectangle(cornerRadius: 28, style: .continuous))
+        .overlay {
+            if let frameColor {
+                RoundedRectangle(cornerRadius: 28, style: .continuous)
+                    .strokeBorder(frameColor, lineWidth: 4)
+                    .allowsHitTesting(false)
+                    .animation(.easeInOut(duration: 0.6), value: frameColor)
+            }
+        }
         .overlay(alignment: .bottomLeading) {
             if zoom.scale > 1.05, !aiming {
                 Button {
@@ -191,69 +202,11 @@ struct PiPButton: View {
 
 // MARK: - The room
 
-/// The words for the state of the room. The picture view and the sound view say the same thing.
+/// The state of the room in words is `StateText` (StateField.swift). This is what is left here.
 @MainActor
 enum RoomWords {
+    /// The app hears the room now (live or muted). Else the waveform is dim.
     static func hearsRoom(_ e: MonitorEngine) -> Bool { e.soundStatus == .listening || e.soundStatus == .silent }
-
-    /// A sound now is at least "Slabé zvuky". The words wait a moment before they change,
-    /// and "Ticho" over "Právě se ozývá" asked the parent: is it crying or not?
-    static func headline(_ e: MonitorEngine) -> String {
-        switch e.soundStatus {
-        case .listening, .silent: (e.activityLog.current != nil ? max(e.roomLevel, RoomLevel.some) : e.roomLevel).title
-        case .connecting: "Připojování"
-        case .lost: "Zvuk vypadl"
-        }
-    }
-
-    static func color(_ e: MonitorEngine) -> Color {
-        switch e.soundStatus {
-        case .lost: Theme.alarm
-        case .connecting: .secondary
-        default: .primary
-        }
-    }
-
-    /// Only a state that is not the usual one gets a line. Live sound says nothing: the button already does.
-    static func subline(_ e: MonitorEngine, _ settings: Settings) -> String {
-        switch e.soundStatus {
-        case .listening: settings.loudness == .normal ? "" : "Zesílený zvuk"
-        case .silent: "Ztlumeno · při pláči přijde upozornění"
-        case .connecting: "Spouštění živého zvuku…"
-        case .lost: "Obnovování spojení…"
-        }
-    }
-}
-
-/// The state of the room, in large words, and the last 6 seconds of sound.
-struct RoomPanel: View {
-    @EnvironmentObject private var engine: MonitorEngine
-    @EnvironmentObject private var settings: Settings
-    /// For the headline: a sound now changes the words. It changes at most once a second.
-    @ObservedObject var activity: SoundActivity
-
-    var body: some View {
-        let sub = RoomWords.subline(engine, settings)
-        VStack(alignment: .leading, spacing: 16) {
-            VStack(alignment: .leading, spacing: 4) {
-                Text(RoomWords.headline(engine))
-                    .font(.system(.largeTitle, design: .rounded).weight(.semibold))
-                    .foregroundStyle(RoomWords.color(engine))
-                    .contentTransition(.opacity)
-                    .animation(.easeInOut(duration: 0.35), value: RoomWords.headline(engine))
-                if !sub.isEmpty {
-                    Text(sub)
-                        .font(.subheadline)
-                        .foregroundStyle(.secondary)
-                }
-            }
-            .frame(maxWidth: .infinity, alignment: .leading)
-            .accessibilityElement(children: .combine)
-
-            LiveWaveform(levels: engine.levels, dim: !RoomWords.hearsRoom(engine))
-                .frame(height: 84)
-        }
-    }
 }
 
 // MARK: - The control bar
@@ -268,6 +221,17 @@ struct ControlBar: View {
     let actions: MonitorActions
     /// Aim and Photo need the picture. The sound view has no picture, so it leaves them out.
     var pictureTools = true
+    /// On a state field: the field colour and the colour on it. No brand yellow on a field: the
+    /// buttons are glass with the `onField` label, and an "on" button (muted) is `onField` at 90 %
+    /// with the field colour as its label.
+    var field: Color?
+    var onField: Color?
+
+    /// The fill of an "on" button and its label.
+    private func onStyle(_ tint: Color, _ label: Color = .black) -> (Color, Color) {
+        guard let field else { return (tint, label) }
+        return ((onField ?? .white).opacity(0.9), field)
+    }
 
     var body: some View {
         GlassGroup(spacing: 10) {
@@ -307,9 +271,12 @@ struct ControlBar: View {
         } label: {
             // Off is amber: a parent sees at a glance that nothing plays. Not red: muted is
             // a chosen, safe state (the alerts go on), and red means a fault.
-            BarLabel(title: soundTitle, symbol: engine.mode.symbol, isOn: true,
-                     tint: engine.mode == .off ? Theme.warn : Theme.moon,
-                     onForeground: engine.mode == .off ? .white : .black)
+            // On a field, live sound is plain glass and only muted is filled: the field
+            // already carries the colour.
+            let muted = engine.mode == .off
+            let style = onStyle(muted ? Theme.warn : Theme.moon, muted ? .white : .black)
+            BarLabel(title: soundTitle, symbol: engine.mode.symbol, isOn: field == nil || muted,
+                     tint: style.0, onForeground: style.1)
         }
         .buttonStyle(PressScale())
         .accessibilityLabel("Zvuk")
@@ -394,10 +361,6 @@ struct FullScreenMonitor: View {
                     }
                     Spacer()
                     HStack(alignment: .bottom) {
-                        LiveWaveform(levels: engine.levels, last: 30, dim: !RoomWords.hearsRoom(engine))
-                            .frame(width: 150, height: 36)
-                            .padding(12)
-                            .glass(in: RoundedRectangle(cornerRadius: 18, style: .continuous))
                         Spacer()
                         GlassGroup(spacing: 10) {
                             HStack(spacing: 10) {
@@ -419,6 +382,19 @@ struct FullScreenMonitor: View {
                 }
                 .padding(20)
                 .transition(.opacity)
+            }
+
+            // The state stays when the controls hide: the one thing the parent must always see.
+            if !aiming {
+                VStack {
+                    Spacer()
+                    HStack {
+                        StatePill()
+                        Spacer()
+                    }
+                }
+                .padding(20)
+                .allowsHitTesting(false)
             }
         }
         .persistentSystemOverlays(.hidden)
