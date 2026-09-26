@@ -45,7 +45,7 @@ object Settings {
         NORMAL("Normální", 0f), LOUD("Zesílená", 12f), MAX("Maximální", 20f)
     }
     enum class Appearance(val title: String) { LIGHT("Světlý"), DARK("Tmavý"), AUTO("Automaticky") }
-    /** The RTSP paths of the common IP cameras: the main stream and the small one. */
+    /** The RTSP paths of the common IP cameras: the main stream and the sub stream. */
     enum class CameraBrand(val title: String, val main: String, val small: String) {
         TAPO("Tapo", "stream1", "stream2"),
         HIKVISION("Hikvision", "Streaming/Channels/101", "Streaming/Channels/102"),
@@ -87,6 +87,7 @@ object Settings {
     val onboarded = MutableStateFlow(true)
     /** The camera source: "go2rtc" (a server) or "rtsp" (an IP camera read directly). */
     val cameraKind = MutableStateFlow(KIND_GO2RTC)
+    /** The go2rtc stream names: the camera's main (high) stream and its sub (low) stream. */
     val streamMain = MutableStateFlow(HomeDefaults.STREAM_MAIN)
     val streamSmall = MutableStateFlow(HomeDefaults.STREAM_SMALL)
     /** The IP camera's streams, full RTSP URLs without the user and the password. */
@@ -156,7 +157,7 @@ object Settings {
     /** The stream URL: go2rtc on the Pi, or the IP camera directly (with its user and password). */
     fun cameraUrl(soundOnly: Boolean): String {
         if (cameraKind.value == KIND_RTSP) {
-            // Sound only: the small stream, if the camera has one. Never "?audio".
+            // Sound only: the sub stream, if the camera has one. Never "?audio".
             val url = if (soundOnly && rtspUrlSmall.value.isNotBlank()) rtspUrlSmall.value else rtspUrl.value
             return withCredentials(url.trim(), rtspUser.value, rtspPassword)
         }
@@ -164,8 +165,8 @@ object Settings {
     }
 
     fun go2rtcUrl(server: String, soundOnly: Boolean): String {
-        // Sound only: the 360p stream with its picture, which the app does not draw. Not "?audio":
-        // go2rtc then asks the Tapo camera for the sound track only, and the camera sends nothing.
+        // Sound only: the sub stream with its picture, which the app does not draw. Not "?audio":
+        // some cameras (e.g. Tapo through go2rtc) send no packets on an audio-only request.
         val name = if (soundOnly) streamSmall.value.trim().ifEmpty { HomeDefaults.STREAM_SMALL } else streamMain.value.trim().ifEmpty { HomeDefaults.STREAM_MAIN }
         return "rtsp://$server:${Go2rtc.RTSP_PORT}/$name"
     }

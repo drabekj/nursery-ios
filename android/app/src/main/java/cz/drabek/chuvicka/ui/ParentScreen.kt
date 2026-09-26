@@ -80,7 +80,7 @@ fun ParentScreen(openSettings: () -> Unit, pip: Boolean, enterPip: () -> Unit) {
         view.keepScreenOn = true
         onDispose { view.keepScreenOn = false }
     }
-    // 2K only sideways, where the picture is big; not in the small window. Up after 0.6 s,
+    // The main stream only sideways, where the picture is big; not in the small window. Up after 0.6 s,
     // down after 10 s, so a quick turn does not switch twice (each switch is a reconnect).
     val big = LocalConfiguration.current.orientation == Configuration.ORIENTATION_LANDSCAPE && !pip
     LaunchedEffect(big) { delay(if (big) 600 else 10_000); Monitor.setDetail(big) }

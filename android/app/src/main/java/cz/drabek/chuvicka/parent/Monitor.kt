@@ -92,14 +92,14 @@ object Monitor {
 
     val soundOnly get() = Settings.soundView.value || night.value
 
-    /** The picture is big (the phone turned sideways). Only then the 2K stream: it has about
-     *  16 times the pixels of 360p and keeps the Wi-Fi and the decoder busy. */
+    /** The picture is big (the phone turned sideways). Only then the main stream: the main stream
+     *  has many times the pixels of the sub stream and keeps the Wi-Fi and the decoder busy. */
     @Volatile private var detail = false
 
     fun setDetail(on: Boolean) {
         if (detail == on) return
         detail = on
-        if (Settings.source.value == Settings.Source.CAMERA && !soundOnly) reconnect(if (on) "detail: 2K picture" else "no detail: 360p picture")
+        if (Settings.source.value == Settings.Source.CAMERA && !soundOnly) reconnect(if (on) "detail: main stream" else "no detail: sub stream")
     }
 
     fun start(context: Context) {
