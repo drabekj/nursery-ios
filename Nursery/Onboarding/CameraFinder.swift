@@ -21,6 +21,18 @@ enum CameraFinder {
 
     /// All devices that answer on `port`, in about 3 s.
     static func scan(port: UInt16) async -> [Found] {
+        let open = await openHosts(port: port)
+        var found: [Found] = []
+        for host in open {
+            let answer = port == 554 ? await rtspAnswer(host: host) : nil
+            found.append(Found(host: host, brand: answer.flatMap(brand(in:)), label: answer.flatMap(label(in:))))
+        }
+        Log.shared.add("camera search on port \(port): \(found.count) found")
+        return found
+    }
+
+    /// The addresses on the home network that accept a TCP connection on `port`, in order.
+    private static func openHosts(port: UInt16) async -> [String] {
         guard let (own, prefix) = homeNetwork() else { return [] }
         let hosts = (1...254).map { "\(prefix).\($0)" }.filter { $0 != own }
         var open: [String] = []
@@ -41,35 +53,41 @@ enum CameraFinder {
                 }
             }
         }
-        var found: [Found] = []
-        for host in open.sorted(by: { lastPart($0) < lastPart($1) }) {
-            let answer = port == 554 ? await rtspAnswer(host: host) : nil
-            found.append(Found(host: host, brand: answer.flatMap(brand(in:)), label: answer.flatMap(label(in:))))
-        }
-        Log.shared.add("camera search on port \(port): \(found.count) found")
-        return found
+        return open.sorted { lastPart($0) < lastPart($1) }
     }
 
-    /// The Wi-Fi address and its first three parts ("192.168.0"). Wi-Fi (en0) first,
-    /// else any private address. Nil with no home network.
+    /// The phone's home network address and its first three parts ("192.168.0"). Nil with no home network.
     static func homeNetwork() -> (own: String, prefix: String)? {
         var list: UnsafeMutablePointer<ifaddrs>?
         guard getifaddrs(&list) == 0, let first = list else { return nil }
         defer { freeifaddrs(list) }
-        var wifi: String?
-        var other: String?
+        var candidates: [(name: String, ip: String)] = []
         var p: UnsafeMutablePointer<ifaddrs>? = first
         while let a = p {
             defer { p = a.pointee.ifa_next }
             guard let sa = a.pointee.ifa_addr, sa.pointee.sa_family == UInt8(AF_INET) else { continue }
+            guard Int32(a.pointee.ifa_flags) & IFF_UP != 0 else { continue }
             var host = [CChar](repeating: 0, count: Int(NI_MAXHOST))
             guard getnameinfo(sa, socklen_t(sa.pointee.sa_len), &host, socklen_t(host.count), nil, 0, NI_NUMERICHOST) == 0 else { continue }
-            let ip = String(cString: host)
-            guard isPrivate(ip) else { continue }
-            if String(cString: a.pointee.ifa_name) == "en0" { wifi = ip } else if other == nil { other = ip }
+            candidates.append((name: String(cString: a.pointee.ifa_name), ip: String(cString: host)))
         }
-        guard let ip = wifi ?? other else { return nil }
-        return (ip, ip.split(separator: ".").prefix(3).joined(separator: "."))
+        return pick(candidates)
+    }
+
+    /// Which interface is the home network. Pure, for the tests.
+    /// 1. Wi-Fi (en0). 2. The phone's own Personal Hotspot (bridge100, or 172.20.10.x): then the
+    /// camera is a client of this phone, in 172.20.10.0/28, inside the /24 that the scan tries.
+    /// 3. Any other private address on an en* interface (USB or Ethernet adapters).
+    /// Never the mobile data (pdp_ip*) or a VPN (utun*, ipsec*, Tailscale is 100.64/10 anyway).
+    static func pick(_ candidates: [(name: String, ip: String)]) -> (own: String, prefix: String)? {
+        let usable = candidates.filter { c in
+            isPrivate(c.ip) && !c.name.hasPrefix("pdp_ip") && !c.name.hasPrefix("utun") && !c.name.hasPrefix("ipsec")
+        }
+        let best = usable.first { $0.name == "en0" }
+            ?? usable.first { $0.name.hasPrefix("bridge") || $0.ip.hasPrefix("172.20.10.") }
+            ?? usable.first { $0.name.hasPrefix("en") }
+        guard let best else { return nil }
+        return (best.ip, best.ip.split(separator: ".").prefix(3).joined(separator: "."))
     }
 
     /// 10/8, 172.16/12 and 192.168/16: the addresses of home networks.
@@ -80,6 +98,55 @@ enum CameraFinder {
     }
 
     private static func lastPart(_ ip: String) -> Int { Int(ip.split(separator: ".").last ?? "") ?? 0 }
+
+    // MARK: The camera moved
+
+    /// A direct camera does not answer at its saved address: the router gave it a new one.
+    /// It tries each device with the RTSP port open (not the saved address) with the saved brand
+    /// path, user and password. The first that gives the stream is the camera. Nil for "Jiná kamera".
+    @MainActor static func relocate(settings: Settings) async -> String? {
+        guard settings.rtspBrand != .other else { return nil }
+        let saved = settings.rtspHost.trimmingCharacters(in: .whitespaces)
+        let port = UInt16(exactly: settings.rtspPort) ?? 554
+        let path = settings.rtspBrand.paths.main
+        let user = settings.rtspUser
+        let password = CameraSecret.password
+        let candidates = await openHosts(port: port)
+        for host in candidates where host != saved {
+            let url = rtspURL(host: host, port: port, path: path, user: user, password: password)
+            if await answersStream(url: url) {
+                Log.shared.add("camera search: found at \(host)")
+                return host
+            }
+        }
+        Log.shared.add("camera search: not found")
+        return nil
+    }
+
+    /// The RTSP address with the login, encoded the same way as `Settings.rtspURL(small:)`.
+    static func rtspURL(host: String, port: UInt16, path: String, user: String, password: String) -> String {
+        let u = user.trimmingCharacters(in: .whitespaces)
+        var credentials = ""
+        if !u.isEmpty {
+            let allowed = CharacterSet.urlUserAllowed.subtracting(CharacterSet(charactersIn: ":@/"))
+            let eu = u.addingPercentEncoding(withAllowedCharacters: allowed) ?? u
+            let ep = password.addingPercentEncoding(withAllowedCharacters: allowed) ?? ""
+            credentials = "\(eu):\(ep)@"
+        }
+        return "rtsp://\(credentials)\(host):\(port)/\(path)"
+    }
+
+    /// DESCRIBE with the login, 4 s at most: the camera accepts the login and has a picture.
+    private static func answersStream(url: String) async -> Bool {
+        guard let client = try? RTSPClient(url: url) else { return false }
+        let timer = Task {
+            try? await Task.sleep(for: .seconds(4))
+            if !Task.isCancelled { client.stop() }
+        }
+        defer { timer.cancel() }
+        guard let tracks = try? await client.describe() else { return false }
+        return tracks.contains { $0.kind == .video }
+    }
 
     // MARK: Who is it
 

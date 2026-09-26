@@ -26,4 +26,41 @@ final class CameraFinderTests: XCTestCase {
         XCTAssertEqual(CameraFinder.label(in: other), "Rtsp Server 3.0")
         XCTAssertNil(CameraFinder.label(in: "RTSP/1.0 200 OK\r\nCSeq: 1\r\n\r\n"))
     }
+
+    // MARK: Which interface is home
+
+    func testWiFiWinsOverHotspot() {
+        let net = CameraFinder.pick([(name: "bridge100", ip: "172.20.10.1"), (name: "en0", ip: "192.168.0.12")])
+        XCTAssertEqual(net?.own, "192.168.0.12")
+        XCTAssertEqual(net?.prefix, "192.168.0")
+    }
+
+    func testHotspotWinsOverMobileData() {
+        let net = CameraFinder.pick([(name: "pdp_ip0", ip: "10.64.3.7"), (name: "bridge100", ip: "172.20.10.1")])
+        XCTAssertEqual(net?.own, "172.20.10.1")
+        XCTAssertEqual(net?.prefix, "172.20.10")
+    }
+
+    func testOtherEthernetIsUsed() {
+        let net = CameraFinder.pick([(name: "lo0", ip: "127.0.0.1"), (name: "en2", ip: "10.0.0.5")])
+        XCTAssertEqual(net?.own, "10.0.0.5")
+        XCTAssertEqual(net?.prefix, "10.0.0")
+    }
+
+    func testMobileDataOnlyIsNoHome() {
+        XCTAssertNil(CameraFinder.pick([(name: "pdp_ip0", ip: "10.64.3.7")]))
+    }
+
+    func testTailscaleIsIgnored() {
+        XCTAssertNil(CameraFinder.pick([(name: "utun4", ip: "100.100.1.1")]))
+        let net = CameraFinder.pick([(name: "utun4", ip: "100.100.1.1"), (name: "en0", ip: "192.168.1.20")])
+        XCTAssertEqual(net?.own, "192.168.1.20")
+    }
+
+    func testRelocateURLEncodesTheLogin() {
+        XCTAssertEqual(CameraFinder.rtspURL(host: "192.168.0.50", port: 554, path: "stream1", user: "u@x", password: "p:ss"),
+                       "rtsp://u%40x:p%3Ass@192.168.0.50:554/stream1")
+        XCTAssertEqual(CameraFinder.rtspURL(host: "192.168.0.50", port: 554, path: "stream1", user: " ", password: "x"),
+                       "rtsp://192.168.0.50:554/stream1")
+    }
 }
