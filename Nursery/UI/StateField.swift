@@ -291,16 +291,23 @@ struct StateField: View {
     let dim: Bool
     /// False when the view is not on screen or in Night mode.
     var motion = true
+    /// Landscape: less height, a smaller glyph.
+    var compact = false
     @Environment(\.dynamicTypeSize) private var typeSize
+
+    /// 160 pt ring (184 pt disc); 120 pt at most at the largest text sizes and in landscape.
+    private var diameter: CGFloat {
+        if compact { return 80 }
+        return typeSize >= .accessibility3 ? 104 : 160
+    }
 
     var body: some View {
         let state = engine.roomState
         let on = Theme.onField(for: state, dim: dim)
         VStack(spacing: 22) {
             VStack(spacing: 22) {
-                // At the largest text sizes the glyph gives the space to the text: 120 pt at most.
-                StateGlyph(state: state, diameter: typeSize >= .accessibility3 ? 104 : 160,
-                           color: on, motion: motion, levels: engine.levels)
+                // At the largest text sizes the glyph gives the space to the text.
+                StateGlyph(state: state, diameter: diameter, color: on, motion: motion, levels: engine.levels)
                     .id(state)
                 VStack(spacing: 6) {
                     Text(state.title)
