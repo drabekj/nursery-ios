@@ -416,7 +416,7 @@ struct MonitorView: View {
     /// `-demoScreen aim|night|night-controls|night-cry|activity|settings|remote|help|alerts|paused|stop`
     /// opens a screen at launch, for the screenshots. NightView and SettingsView read the value too.
     /// The state screens (`klid`, `sound-cry`, `sound-lost`, `sound-connecting`, `sound-muted`,
-    /// `main-cry`): the engine sets `roomState` from the name; here only the view is chosen.
+    /// `main-cry`): the engine sets `roomState` (and the muted mode) from the name; here only the view is chosen.
     /// `sound…` opens the sound view already (Settings), `main…` the picture view.
     private func applyDemoScreen() {
         guard MonitorEngine.isDemo else { return }
@@ -430,7 +430,6 @@ struct MonitorView: View {
         case "alerts": askAlerts = true
         case "paused": engine.pause(why: "demo")
         case "klid": engine.setSoundView(true)
-        case "sound-muted": engine.mode = .off
         case "stop":
             // A moment after the launch: a dialog asked for before the screen is up does not show.
             Task {
