@@ -21,21 +21,20 @@ struct RemoteAccessView: View {
             }
 
             if directCamera {
+                // A camera read directly: away from home the phone reaches the camera's home address
+                // through a Tailscale subnet route (set up on a computer or router at home).
                 Section {
-                    Text("Kamera sama se mimo domov připojit neumí. Mimo domov miminko uvidíte, když místo kamery použijete telefon u miminka, nebo vlastní server.")
-                        .font(.subheadline)
-                        .foregroundStyle(.secondary)
-                        .fixedSize(horizontal: false, vertical: true)
+                    hereRow
+                    checklistRow("Domácí síť přes Tailscale", ok: otherOK,
+                                 help: "Pro pokročilé: na počítači nebo routeru doma zapněte v Tailscale sdílení domácí sítě (subnet route) pro adresu kamery. Pak Chůvička mimo domov použije stejnou adresu kamery jako doma.") {
+                        EmptyView()
+                    }
+                } footer: {
+                    Text("Každý bod se zaškrtne sám, jakmile je hotový.\nOvěří se samo, až budete mimo domov.")
                 }
             } else {
                 Section {
-                    checklistRow("Tailscale v tomto telefonu", ok: hereOK,
-                                 help: "Nainstalujte Tailscale, přihlaste se a zapněte ho.") {
-                        if !hereOK {
-                            Link("Stáhnout Tailscale", destination: URL(string: "https://apps.apple.com/app/tailscale/id1470499037")!)
-                                .font(.subheadline.weight(.semibold))
-                        }
-                    }
+                    hereRow
                     other
                 } footer: {
                     Text("Každý bod se zaškrtne sám, jakmile je hotový.\nDoma se Chůvička připojuje přímo. Tailscale použije sama, až budete pryč.")
@@ -51,6 +50,16 @@ struct RemoteAccessView: View {
                 hereOK = MonitorEngine.isDemo || Reach.localAddresses().contains(where: Reach.isTailscale)
                 otherOK = await otherCheck()
                 try? await Task.sleep(for: .seconds(2))
+            }
+        }
+    }
+
+    private var hereRow: some View {
+        checklistRow("Tailscale v tomto telefonu", ok: hereOK,
+                     help: "Nainstalujte Tailscale, přihlaste se a zapněte ho.") {
+            if !hereOK {
+                Link("Stáhnout Tailscale", destination: URL(string: "https://apps.apple.com/app/tailscale/id1470499037")!)
+                    .font(.subheadline.weight(.semibold))
             }
         }
     }
@@ -87,8 +96,29 @@ struct RemoteAccessView: View {
             let host = settings.trimmedRemoteHost
             guard !host.isEmpty else { return false }
             return await Reach.canConnect(host: host, port: Go2rtc.rtspPort, timeout: 2)
-        case (.camera, .rtsp): return false
+        case (.camera, .rtsp): return await directRouteCheck()
         }
+    }
+
+    /// The camera answers at its home address while this phone is away from home, with Tailscale on.
+    /// At home it answers anyway, so it can be verified only away. Once seen, it is remembered.
+    private func directRouteCheck() async -> Bool {
+        let key = "directRemoteOK"
+        guard let camera = cameraAddress else { return false }
+        if UserDefaults.standard.string(forKey: key) == camera.host { return true }
+        let ownPrefix = CameraFinder.homeNetwork()?.prefix
+        let away = ownPrefix != camera.host.split(separator: ".").prefix(3).joined(separator: ".")
+        guard hereOK, away else { return false }
+        guard await Reach.canConnect(host: camera.host, port: camera.port, timeout: 2) else { return false }
+        UserDefaults.standard.set(camera.host, forKey: key)
+        Log.shared.add("camera reached away from home through Tailscale")
+        return true
+    }
+
+    /// The host and the port of the camera read directly, also for "Jiná kamera" (a full address).
+    private var cameraAddress: (host: String, port: UInt16)? {
+        guard let u = URLComponents(string: settings.rtspURL(small: false)), let host = u.host, !host.isEmpty else { return nil }
+        return (host, UInt16(exactly: u.port ?? 554) ?? 554)
     }
 
     private func applyRemote() {
