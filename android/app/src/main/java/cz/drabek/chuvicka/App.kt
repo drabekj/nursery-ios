@@ -5,6 +5,7 @@ import android.app.NotificationChannel
 import android.app.NotificationManager
 import android.content.Context
 import android.content.SharedPreferences
+import cz.drabek.chuvicka.parent.SoundMode
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import java.io.File
@@ -77,8 +78,11 @@ object Settings {
     val babyCode = MutableStateFlow("")
     val soundView = MutableStateFlow(false)
     val loudness = MutableStateFlow(Loudness.NORMAL)
-    val appearance = MutableStateFlow(Appearance.LIGHT)
-    val alertOnLoss = MutableStateFlow(true)
+    val appearance = MutableStateFlow(Appearance.AUTO)
+    /** Warn about every sound, also when the parent hears it. A muted or quiet phone warns always. */
+    val alertOnSound = MutableStateFlow(false)
+    /** Live sound or muted. It stays as the parent left it. */
+    val soundMode = MutableStateFlow(SoundMode.LIVE)
     val unitName = MutableStateFlow("Pokojíček")
     val unitCode = MutableStateFlow("")
     val unitVideo = MutableStateFlow(true)
@@ -118,8 +122,9 @@ object Settings {
         babyCode.value = p.getString("babyCode", "") ?: ""
         soundView.value = p.getBoolean("soundView", false)
         loudness.value = enumValueOrNull<Loudness>(p.getString("loudness", null)) ?: Loudness.NORMAL
-        appearance.value = enumValueOrNull<Appearance>(p.getString("appearance", null)) ?: Appearance.LIGHT
-        alertOnLoss.value = p.getBoolean("alertOnLoss", true)
+        appearance.value = enumValueOrNull<Appearance>(p.getString("appearance", null)) ?: Appearance.AUTO
+        alertOnSound.value = p.getBoolean("alertOnSound", false)
+        soundMode.value = enumValueOrNull<SoundMode>(p.getString("soundMode", null)) ?: SoundMode.LIVE
         unitName.value = p.getString("unitName", null) ?: "Pokojíček"
         unitCode.value = p.getString("unitCode", null) ?: newCode().also { p.edit().putString("unitCode", it).apply() }
         unitVideo.value = p.getBoolean("unitVideo", true)
@@ -154,20 +159,23 @@ object Settings {
 
     fun newCode() = "%06d".format(Random.nextInt(0, 1_000_000))
 
-    /** The stream URL: go2rtc on the Pi, or the IP camera directly (with its user and password). */
-    fun cameraUrl(soundOnly: Boolean): String {
+    /**
+     * The stream URL: go2rtc on the Pi, or the IP camera directly (with its user and password).
+     * Small: the everyday (sub) stream, else the detail (main) stream. StreamPolicy chooses.
+     */
+    fun cameraUrl(small: Boolean): String {
         if (cameraKind.value == KIND_RTSP) {
-            // Sound only: the sub stream, if the camera has one. Never "?audio".
-            val url = if (soundOnly && rtspUrlSmall.value.isNotBlank()) rtspUrlSmall.value else rtspUrl.value
+            // The sub stream, if the camera has one. Never "?audio", also for the sound only.
+            val url = if (small && rtspUrlSmall.value.isNotBlank()) rtspUrlSmall.value else rtspUrl.value
             return withCredentials(url.trim(), rtspUser.value, rtspPassword)
         }
-        return go2rtcUrl(serverHost, soundOnly)
+        return go2rtcUrl(serverHost, small)
     }
 
-    fun go2rtcUrl(server: String, soundOnly: Boolean): String {
-        // Sound only: the sub stream with its picture, which the app does not draw. Not "?audio":
+    fun go2rtcUrl(server: String, small: Boolean): String {
+        // The sound only uses the sub stream with its picture, which the app does not draw. Not "?audio":
         // some cameras (e.g. Tapo through go2rtc) send no packets on an audio-only request.
-        val name = if (soundOnly) streamSmall.value.trim().ifEmpty { HomeDefaults.STREAM_SMALL } else streamMain.value.trim().ifEmpty { HomeDefaults.STREAM_MAIN }
+        val name = if (small) streamSmall.value.trim().ifEmpty { HomeDefaults.STREAM_SMALL } else streamMain.value.trim().ifEmpty { HomeDefaults.STREAM_MAIN }
         return "rtsp://$server:${Go2rtc.RTSP_PORT}/$name"
     }
 

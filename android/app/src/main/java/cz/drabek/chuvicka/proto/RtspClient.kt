@@ -21,7 +21,8 @@ import kotlin.random.Random
  * An IP camera wants a user and a password: Digest (or Basic) authentication after a 401.
  */
 class RtspClient(url: String, private val host: String, private val port: Int,
-                 private val user: String = "", private val password: String = "") {
+                 private val user: String = "", private val password: String = "",
+                 private val timeoutMs: Int = 8000) {
     class Failure(message: String) : IOException(message)
 
     class Track(val sdp: SdpTrack, val channel: Int)
@@ -50,8 +51,8 @@ class RtspClient(url: String, private val host: String, private val port: Int,
         val s = Socket()
         s.tcpNoDelay = true
         s.keepAlive = true
-        s.connect(InetSocketAddress(host, port), 5000)
-        s.soTimeout = 8000               // No data for 8 s: the connection is dead.
+        s.connect(InetSocketAddress(host, port), minOf(5000, timeoutMs))
+        s.soTimeout = timeoutMs          // No data for 8 s (by default): the connection is dead.
         socket = s
         input = BufferedInputStream(s.getInputStream(), 256 * 1024)
         output = s.getOutputStream()

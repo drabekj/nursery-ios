@@ -23,6 +23,7 @@ import cz.drabek.chuvicka.App
 import cz.drabek.chuvicka.Log
 import cz.drabek.chuvicka.Settings
 import cz.drabek.chuvicka.parent.BabyFinder
+import cz.drabek.chuvicka.parent.StreamDiscovery
 import cz.drabek.chuvicka.proto.H264Depacketizer
 import cz.drabek.chuvicka.proto.RtpPacket
 import cz.drabek.chuvicka.proto.RtspClient
@@ -111,8 +112,8 @@ private fun CheckRow(check: TestCheck, title: String, why: String?) {
 /** The client for the chosen source, as the monitor makes it, but at home (no Tailscale switch). */
 fun testClient(context: Context): RtspClient {
     if (Settings.source.value == Settings.Source.CAMERA) {
-        val url = if (Settings.cameraKind.value == Settings.KIND_RTSP) Settings.cameraUrl(false)
-                  else Settings.go2rtcUrl(Settings.host.value.trim(), false)
+        val url = if (Settings.cameraKind.value == Settings.KIND_RTSP) Settings.cameraUrl(small = false)
+                  else Settings.go2rtcUrl(Settings.host.value.trim(), small = false)
         return RtspClient.forUrl(url)
     }
     val name = Settings.babyName.value
@@ -128,9 +129,11 @@ fun testClient(context: Context): RtspClient {
     return RtspClient("rtsp://chuvicka/$code", target.first, target.second)
 }
 
-/** It blocks for up to about 10 s. [partial] gets the state after the connection. */
+/** It blocks for up to about 10 s, more while it learns the go2rtc streams. [partial] gets the state after the connection. */
 fun connectionTest(context: Context, partial: (TestState) -> Unit): TestState {
     val phone = Settings.source.value == Settings.Source.PHONE
+    // go2rtc: learn its two streams first (the detail and the everyday one), then test the detail one.
+    if (!phone && Settings.cameraKind.value == Settings.KIND_GO2RTC && !App.demo) StreamDiscovery.run(Settings.host.value.trim())
     val client = try { testClient(context) } catch (e: Exception) {
         return TestState(connect = TestCheck.FAIL, error = friendly(e, phone))
     }
@@ -170,12 +173,12 @@ fun connectionTest(context: Context, partial: (TestState) -> Unit): TestState {
         Log.add("test: $frames frames, $sounds sound packets")
         val videoWhy = when {
             video == null && phone -> "Telefon u miminka je nastavený jen na zvuk."
-            video == null -> "Kamera neposílá obraz ve formátu H.264. Zapněte ho v nastavení kamery."
+            video == null -> "Kamera neposílá obraz ve formátu, kterému Chůvička rozumí (H.264). Zapněte ho v aplikaci kamery."
             else -> "Obraz nedorazil. Zkuste to znovu."
         }
         val audioWhy = when {
             audio == null && phone -> "Telefon u miminka neposílá zvuk."
-            audio == null -> "Kamera neposílá zvuk ve formátu G.711."
+            audio == null -> "Kamera posílá zvuk ve formátu, kterému Chůvička nerozumí. V aplikaci kamery přepněte zvuk na G.711."
             else -> "Zvuk nedorazil. Zkuste to znovu."
         }
         return TestState(

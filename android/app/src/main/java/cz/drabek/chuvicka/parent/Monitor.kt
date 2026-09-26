@@ -1,7 +1,13 @@
 package cz.drabek.chuvicka.parent
 
+import android.content.BroadcastReceiver
 import android.content.Context
+import android.content.Intent
+import android.content.IntentFilter
 import android.media.AudioManager
+import android.os.Build
+import android.os.PowerManager
+import androidx.core.content.ContextCompat
 import cz.drabek.chuvicka.App
 import cz.drabek.chuvicka.Go2rtc
 import cz.drabek.chuvicka.HomeDefaults
@@ -51,7 +57,7 @@ sealed interface Connection {
 object Monitor {
     val connection = MutableStateFlow<Connection>(Connection.Idle)
     val status = MutableStateFlow(SoundStatus.CONNECTING)
-    val mode = MutableStateFlow(SoundMode.LIVE)
+    val mode = MutableStateFlow(Settings.soundMode.value)
     val roomLevel = MutableStateFlow(RoomLevel.QUIET)
     val history = MutableStateFlow(List(60) { 0f })
     val pictureLive = MutableStateFlow(false)
@@ -67,6 +73,10 @@ object Monitor {
     val paused = MutableStateFlow(false)
     /** Night mode: the picture is not needed. */
     val night = MutableStateFlow(false)
+    /** The app is on the screen. MainActivity sets it. */
+    val foreground = MutableStateFlow(false)
+    /** The connection now uses the detail (main) stream of the camera. */
+    val detailActive = MutableStateFlow(false)
 
     /** The screen's video view, while it shows. */
     @Volatile var videoSink: ((AccessUnit, H264Depacketizer) -> Unit)? = null
@@ -95,18 +105,41 @@ object Monitor {
     /** The picture is big (the phone turned sideways). Only then the main stream: the main stream
      *  has many times the pixels of the sub stream and keeps the Wi-Fi and the decoder busy. */
     @Volatile private var detail = false
+    /** A hot phone and Battery Saver get the sub stream too. */
+    @Volatile private var thermalHot = false
+    @Volatile private var powerSave = false
+    /** The camera URL of the current connection, to see if a change needs a new stream. */
+    @Volatile private var currentUrl: String? = null
+    private var thermalListener: Any? = null
+    private var powerSaveReceiver: BroadcastReceiver? = null
 
     fun setDetail(on: Boolean) {
         if (detail == on) return
         detail = on
-        if (Settings.source.value == Settings.Source.CAMERA && !soundOnly) reconnect(if (on) "detail: main stream" else "no detail: sub stream")
+        refreshStream(if (on) "detail: main stream" else "no detail: sub stream")
+    }
+
+    private fun cameraInputs() = StreamPolicy.Inputs(
+        wantsDetail = detail, soundOnly = soundOnly, thermalHot = thermalHot, powerSave = powerSave,
+        detailStream = Settings.cameraUrl(small = false), everydayStream = Settings.cameraUrl(small = true),
+    )
+
+    /** A new stream only when the wanted camera URL differs from the current one. */
+    private fun refreshStream(why: String) {
+        if (Settings.source.value != Settings.Source.CAMERA || soundOnly || client == null) return
+        if (StreamPolicy.stream(cameraInputs()) != currentUrl) reconnect(why)
     }
 
     fun start(context: Context) {
         if (running) return
         this.context = context.applicationContext
         running = true
-        player = AudioPlayer().also { it.gainDb = Settings.loudness.value.decibels }
+        mode.value = Settings.soundMode.value
+        player = AudioPlayer().also {
+            it.gainDb = Settings.loudness.value.decibels
+            it.muted = mode.value != SoundMode.LIVE
+        }
+        watchPower()
         thread = Thread({ loop() }, "monitor").apply { start() }
         Log.add("monitor on")
     }
@@ -117,8 +150,54 @@ object Monitor {
         thread?.interrupt()
         player?.release()
         player = null
+        unwatchPower()
         connection.value = Connection.Idle
+        detailActive.value = false
         Log.add("monitor off")
+    }
+
+    /** The heat and Battery Saver, from the system. Both ask for the sub stream. */
+    private fun watchPower() {
+        val pm = context.getSystemService(PowerManager::class.java)
+        if (Build.VERSION.SDK_INT >= 29) {
+            thermalChanged(pm.currentThermalStatus)
+            val listener = PowerManager.OnThermalStatusChangedListener { thermalChanged(it) }
+            pm.addThermalStatusListener(listener)
+            thermalListener = listener
+        }
+        powerSaveChanged(pm.isPowerSaveMode)
+        val receiver = object : BroadcastReceiver() {
+            override fun onReceive(c: Context, intent: Intent) = powerSaveChanged(pm.isPowerSaveMode)
+        }
+        ContextCompat.registerReceiver(context, receiver, IntentFilter(PowerManager.ACTION_POWER_SAVE_MODE_CHANGED),
+            ContextCompat.RECEIVER_NOT_EXPORTED)
+        powerSaveReceiver = receiver
+    }
+
+    private fun unwatchPower() {
+        if (!::context.isInitialized) return        // The service stopped before it started the monitor.
+        val pm = context.getSystemService(PowerManager::class.java)
+        if (Build.VERSION.SDK_INT >= 29) {
+            (thermalListener as? PowerManager.OnThermalStatusChangedListener)?.let { pm.removeThermalStatusListener(it) }
+        }
+        thermalListener = null
+        powerSaveReceiver?.let { try { context.unregisterReceiver(it) } catch (_: IllegalArgumentException) {} }
+        powerSaveReceiver = null
+    }
+
+    private fun thermalChanged(status: Int) {
+        val hot = status >= PowerManager.THERMAL_STATUS_MODERATE
+        if (hot == thermalHot) return
+        thermalHot = hot
+        Log.add("thermal status $status: ${if (hot) "sub stream until the phone cools" else "normal picture"}")
+        refreshStream("thermal state changed")
+    }
+
+    private fun powerSaveChanged(on: Boolean) {
+        if (on == powerSave) return
+        powerSave = on
+        Log.add(if (on) "battery saver on: sub stream" else "battery saver off")
+        refreshStream("battery saver changed")
     }
 
     /** A new stream is needed: the view, the night mode, or the source changed. */
@@ -131,6 +210,7 @@ object Monitor {
     fun setMode(m: SoundMode) {
         mode.value = m
         player?.muted = m != SoundMode.LIVE
+        if (!App.demo) Settings.set(Settings.soundMode, "soundMode", m)
     }
 
     fun setGain(db: Float) { player?.gainDb = db }
@@ -205,7 +285,7 @@ object Monitor {
                 // An IP camera cannot run Tailscale: only at home.
                 Settings.activeHost.value = ""
                 viaTailscale.value = false
-                return RtspClient.forUrl(Settings.cameraUrl(soundOnly || !detail))
+                return openCamera()
             }
             val home = Settings.host.value.trim()
             val remote = Settings.remoteHost.value.trim()
@@ -213,8 +293,10 @@ object Monitor {
             if (Settings.activeHost.value != host) Log.add("server: ${if (host == home) "home" else "Tailscale"} $host")
             Settings.activeHost.value = host
             viaTailscale.value = host != home
-            return RtspClient.forUrl(Settings.cameraUrl(soundOnly || !detail))
+            return openCamera()
         }
+        currentUrl = null
+        detailActive.value = false
         val name = Settings.babyName.value
         val code = Settings.babyCode.value
         if (name.isEmpty() || code.isEmpty()) throw IOException("Není spárovaný telefon u miminka. Spárujte ho v Nastavení.")
@@ -233,6 +315,15 @@ object Monitor {
         babyDirect = target
         // The host in the URL is not used: the socket goes to the found address. The code is the path.
         return RtspClient("rtsp://chuvicka/$code" + if (soundOnly) "?audio" else "", target.first, target.second)
+    }
+
+    /** The camera stream that StreamPolicy chooses. The sound only always gets the sub stream. */
+    private fun openCamera(): RtspClient {
+        val inputs = cameraInputs()
+        val url = StreamPolicy.stream(inputs)
+        currentUrl = url
+        detailActive.value = StreamPolicy.detail(inputs)
+        return RtspClient.forUrl(url)
     }
 
     private fun awayHint(message: String): String {
@@ -278,7 +369,7 @@ object Monitor {
         // The alert. Only a loss that lasts 20 s gives a notification.
         if (s == SoundStatus.LOST) {
             if (lostSince == null) lostSince = now
-            if (!alerted && Settings.alertOnLoss.value && now - lostSince!! > 20_000) {
+            if (!alerted && now - lostSince!! > 20_000) {
                 alerted = true
                 Alerts.loss(context)
             }
@@ -318,7 +409,10 @@ object Monitor {
                 if (now - aboveSince!! >= 1000) {
                     soundNow.value = true
                     // Warn when the parent may not hear it: the sound muted, or the phone volume low.
-                    if (mode.value == SoundMode.OFF || volume.value < 0.2f) Alerts.sound(context)
+                    // With "every sound" on, warn also then, but not while the app is on the screen and heard.
+                    val unheard = mode.value == SoundMode.OFF || volume.value < 0.2f
+                    val wanted = unheard || Settings.alertOnSound.value
+                    if (wanted && !(foreground.value && !unheard)) Alerts.sound(context)
                 }
             }
             if (soundNow.value) lastSound.value = now
@@ -344,7 +438,7 @@ object Monitor {
         if (App.demo) return null
         val url = if (Settings.source.value == Settings.Source.CAMERA) {
             if (Settings.cameraKind.value == Settings.KIND_RTSP) return null      // An IP camera gives no photo here.
-            "http://${Settings.serverHost}:${Go2rtc.API_PORT}/api/frame.jpeg?src=${Settings.encode(Settings.streamSmall.value.trim().ifEmpty { HomeDefaults.STREAM_SMALL })}"
+            "http://${Settings.serverHost}:${Go2rtc.API_PORT}/api/frame.jpeg?src=${Settings.encode(Settings.streamMain.value.trim().ifEmpty { HomeDefaults.STREAM_MAIN })}"
         } else {
             val (host, port) = babyDirect ?: BabyFinder.resolve(context, Settings.babyName.value) ?: return null
             "http://$host:$port/${Settings.babyCode.value}/frame.jpeg"

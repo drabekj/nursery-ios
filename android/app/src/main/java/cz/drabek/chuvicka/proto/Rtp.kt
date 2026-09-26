@@ -256,6 +256,124 @@ class H264Depacketizer {
     }
 }
 
+/**
+ * The picture size from an H.264 SPS (ITU-T H.264, 7.3.2.1.1), after the cropping.
+ * Null when the bytes are not a readable SPS. The app uses it to tell the main stream from the sub stream.
+ */
+object H264Sps {
+    private val HIGH_PROFILES = setOf(100, 110, 122, 244, 44, 83, 86, 118, 128, 138, 139, 134, 135)
+
+    fun size(sps: ByteArray): Pair<Int, Int>? = try { parse(sps) } catch (_: IllegalArgumentException) { null }
+
+    private fun parse(sps: ByteArray): Pair<Int, Int> {
+        val r = Bits(unescape(sps))
+        require(r.bits(8) and 0x1F == 7)
+        val profile = r.bits(8)
+        r.bits(16)                                      // The constraint flags and level_idc.
+        r.ue()                                          // seq_parameter_set_id
+        var chroma = 1
+        var separatePlanes = 0
+        if (profile in HIGH_PROFILES) {
+            val c = r.ue()
+            require(c <= 3)
+            chroma = c.toInt()
+            if (chroma == 3) separatePlanes = r.bit()
+            r.ue(); r.ue()                              // The bit depths.
+            r.bit()                                     // qpprime_y_zero_transform_bypass_flag
+            if (r.bit() == 1) {                         // seq_scaling_matrix_present_flag
+                val lists = if (chroma != 3) 8 else 12
+                for (i in 0 until lists) {
+                    if (r.bit() == 1) skipScalingList(r, if (i < 6) 16 else 64)
+                }
+            }
+        }
+        r.ue()                                          // log2_max_frame_num_minus4
+        when (r.ue()) {                                 // pic_order_cnt_type
+            0L -> r.ue()                                // log2_max_pic_order_cnt_lsb_minus4
+            1L -> {
+                r.bit(); r.se(); r.se()
+                val cycle = r.ue()
+                require(cycle <= 255)
+                repeat(cycle.toInt()) { r.se() }
+            }
+            2L -> {}
+            else -> throw IllegalArgumentException("pic_order_cnt_type")
+        }
+        r.ue()                                          // max_num_ref_frames
+        r.bit()                                         // gaps_in_frame_num_value_allowed_flag
+        val widthMbs = r.ue() + 1
+        val heightMapUnits = r.ue() + 1
+        val frameMbsOnly = r.bit()
+        if (frameMbsOnly == 0) r.bit()                  // mb_adaptive_frame_field_flag
+        r.bit()                                         // direct_8x8_inference_flag
+        var left = 0L; var right = 0L; var top = 0L; var bottom = 0L
+        if (r.bit() == 1) { left = r.ue(); right = r.ue(); top = r.ue(); bottom = r.ue() }
+        // The crop unit: 1 pixel without chroma, else the chroma subsampling. Fields double it vertically.
+        val chromaType = if (separatePlanes == 1) 0 else chroma
+        val (subWidth, subHeight) = when (chromaType) { 1 -> 2 to 2; 2 -> 2 to 1; else -> 1 to 1 }
+        val cropX = subWidth
+        val cropY = subHeight * (2 - frameMbsOnly)
+        val width = widthMbs * 16 - cropX * (left + right)
+        val height = (2 - frameMbsOnly) * heightMapUnits * 16 - cropY * (top + bottom)
+        require(width in 1L..16384L && height in 1L..16384L)
+        return width.toInt() to height.toInt()
+    }
+
+    private fun skipScalingList(r: Bits, size: Int) {
+        var last = 8L
+        var next = 8L
+        repeat(size) {
+            if (next != 0L) next = ((last + r.se()) % 256 + 256) % 256
+            if (next != 0L) last = next
+        }
+    }
+
+    /** The SPS without the emulation prevention bytes: 00 00 03 is 00 00. */
+    internal fun unescape(b: ByteArray): ByteArray {
+        val out = ByteArray(b.size)
+        var n = 0
+        var zeros = 0
+        for (x in b) {
+            val v = x.toInt() and 0xFF
+            if (zeros >= 2 && v == 3) { zeros = 0; continue }
+            out[n++] = x
+            zeros = if (v == 0) zeros + 1 else 0
+        }
+        return out.copyOf(n)
+    }
+
+    /** A bit reader with Exp-Golomb codes. At the end of the data it throws IllegalArgumentException. */
+    private class Bits(private val b: ByteArray) {
+        private var pos = 0
+
+        fun bit(): Int {
+            require(pos < b.size * 8) { "end of the SPS" }
+            val v = (b[pos ushr 3].toInt() shr (7 - (pos and 7))) and 1
+            pos++
+            return v
+        }
+
+        fun bits(n: Int): Int {
+            var v = 0
+            repeat(n) { v = (v shl 1) or bit() }
+            return v
+        }
+
+        fun ue(): Long {
+            var zeros = 0
+            while (bit() == 0) { zeros++; require(zeros <= 32) }
+            var v = 0L
+            repeat(zeros) { v = (v shl 1) or bit().toLong() }
+            return (1L shl zeros) - 1 + v
+        }
+
+        fun se(): Long {
+            val k = ue()
+            return if (k and 1L == 1L) (k + 1) / 2 else -(k / 2)
+        }
+    }
+}
+
 /** It splits Annex-B output (start codes) into NAL units. MediaCodec gives this format. */
 fun splitAnnexB(b: ByteArray, offset: Int, length: Int): List<ByteArray> {
     val out = ArrayList<ByteArray>()
