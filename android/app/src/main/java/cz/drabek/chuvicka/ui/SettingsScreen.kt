@@ -39,7 +39,9 @@ import cz.drabek.chuvicka.PairLink
 import cz.drabek.chuvicka.Settings
 import cz.drabek.chuvicka.parent.BabyFinder
 import cz.drabek.chuvicka.parent.Monitor
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.launch
 
 /**
  * The settings: four cards for everyone, the rest under "Pro pokročilé" (collapsed).
@@ -59,6 +61,8 @@ fun SettingsScreen(back: () -> Unit, openLog: () -> Unit, becomeBaby: () -> Unit
     val alertOnSound by Settings.alertOnSound.collectAsState()
     val viaTailscale by Monitor.viaTailscale.collectAsState()
     val detailActive by Monitor.detailActive.collectAsState()
+    val ptzReady by Monitor.ptzReady.collectAsState()
+    val scope = rememberCoroutineScope()
     var hostField by remember { mutableStateOf(host) }
     var confirmBaby by remember { mutableStateOf(false) }
     // The demo screen "settings-advanced" shows the group open.
@@ -118,7 +122,13 @@ fun SettingsScreen(back: () -> Unit, openLog: () -> Unit, becomeBaby: () -> Unit
             Section("Stav") {
                 StateRow("Cesta", if (viaTailscale) "Mimo domov" else "Doma")
                 StateRow("Obraz", if (detailActive) "detail" else "běžný")
+                if (source == Settings.Source.CAMERA) StateRow("Ovládání kamery", if (ptzReady) "Připraveno" else "Nenalezeno")
                 TextButton(onClick = { Monitor.reconnect("settings") }, Modifier.padding(horizontal = 8.dp)) { Text("Znovu připojit") }
+                if (source == Settings.Source.CAMERA) {
+                    TextButton(onClick = { scope.launch(Dispatchers.IO) { Monitor.loadCameraControl() } }, Modifier.padding(horizontal = 8.dp)) {
+                        Text("Znovu načíst ovládání kamery")
+                    }
+                }
             }
             Section("Diagnostika") {
                 NavRow("Technický záznam", null, openLog)
@@ -137,8 +147,8 @@ fun SettingsScreen(back: () -> Unit, openLog: () -> Unit, becomeBaby: () -> Unit
     )
 }
 
-/** "rtsp://192.168.0.50:554/stream1" to "192.168.0.50". */
-private fun hostOf(url: String): String =
+/** "rtsp://192.168.0.50:554/stream1" to "192.168.0.50". Also for the "Mimo domov" page. */
+internal fun hostOf(url: String): String =
     url.substringAfter("://").substringBefore('/').substringAfterLast('@').substringBefore(':').ifEmpty { url }
 
 /** On the parent: find the phone at the baby with mDNS, and pair with its code. */

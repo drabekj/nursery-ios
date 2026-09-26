@@ -15,6 +15,7 @@ import androidx.compose.material.icons.filled.PhoneAndroid
 import androidx.compose.material.icons.filled.Public
 import androidx.compose.material.icons.filled.ScreenLockPortrait
 import androidx.compose.material.icons.filled.StopCircle
+import androidx.compose.material.icons.filled.Videocam
 import androidx.compose.material3.Icon
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
@@ -41,7 +42,7 @@ fun HelpScreen(back: () -> Unit) {
             "Upozornění fungují, jen když je povolíte. Aplikaci nezavírejte přejetím v přehledu aplikací, tím hlídání ukončíte.")
         Topic(Icons.Filled.GraphicEq, "Obraz, nebo jen zvuk",
             "Přepínač nahoře volí, co hlavní obrazovka ukazuje. Obraz ukazuje živé video z postýlky. Jen zvuk ukazuje jen pokojíček: kruh, který se rozvlní se zvukem, a slovy, co se děje. Obraz se nezobrazuje. Z kamery se přesto stahuje v nižším rozlišení, protože některé kamery (třeba Tapo) bez obrazu neposílají ani zvuk.",
-            "Jen zvuk šetří baterii i Wi-Fi a telefon méně hřeje. Na miminko se můžete kdykoli podívat klepnutím na Fotka z postýlky. Pořídí jednu fotku, bez živého obrazu.")
+            "Jen zvuk šetří baterii i Wi-Fi a telefon méně hřeje. Na miminko se můžete kdykoli podívat klepnutím na Fotka z postýlky. Pořídí jednu fotku, bez živého obrazu, z kamery i z druhého telefonu.")
         Topic(Icons.AutoMirrored.Filled.VolumeUp, "Hlasitost",
             "Chůvička hraje tak hlasitě, jak je nastavený telefon. Když je hlasitost telefonu pod 20 %, ukáže Chůvička upozornění a tlačítko Zesílit. Hlasitost Chůvičky můžete zvýšit v Nastavení → Hlasitost.")
         Topic(Icons.AutoMirrored.Filled.VolumeOff, "Ztlumeno",
@@ -54,9 +55,12 @@ fun HelpScreen(back: () -> Unit) {
         Topic(Icons.Filled.PhoneAndroid, "Dva telefony místo kamery",
             "Starší telefon s Androidem nebo iPhone může být kamerou u postýlky. Nainstalujte na něj Chůvičku a v průvodci zvolte Být u miminka. Na svém telefonu pak v Nastavení → Kamera zvolte Druhý telefon a naskenujte jeho QR kód. Spolu fungují všechny kombinace Androidu a iPhonu.",
             "Android u miminka vysílá obraz i zvuk i se zhasnutým displejem. iPhone u miminka musí mít Chůvičku otevřenou a nezamčenou. Oba nechte na nabíječce.")
+        Topic(Icons.Filled.Videocam, "Kamera v síti",
+            "Chůvička čte kameru přímo, bez serveru. Kamera zvládne jen několik telefonů najednou: když je jich moc, Chůvička to řekne a zkusí to za chvíli znovu. Když kamera dostane novou adresu, Chůvička ji sama najde.",
+            "Natočit funguje u kamer, které umí ONVIF (Tapo, Hikvision, Dahua, Reolink).")
         Topic(Icons.Filled.Public, "Mimo domov",
             "Doma se Chůvička připojuje přímo. Mimo domov jde šifrovaně přes vaši soukromou síť, kterou jednou nastavíte v Nastavení → Pro pokročilé → Mimo domov. Telefon u miminka ji musí mít také a jednou se k němu musíte připojit doma, aby si Chůvička zapamatovala jeho adresu.",
-            "IP kameru Chůvička ukáže jen doma. V Nastavení → Pro pokročilé → Stav vidíte, jestli jde spojení doma, nebo mimo domov.")
+            "Kameru v síti uvidíte mimo domov jen s Tailscale i doma (sdílení domácí sítě, pro pokročilé); jinak jen doma. V Nastavení → Pro pokročilé → Stav vidíte, jestli jde spojení doma, nebo mimo domov.")
         Topic(Icons.Filled.Lock, "Soukromí",
             "Obraz i zvuk zůstávají ve vaší domácí Wi-Fi, mimo domov jdou jen šifrovaně přes vaši soukromou síť. Nic se neposílá na cizí server. Párovací kód jde po Wi-Fi nešifrovaně, proto telefony párujte jen v síti, které věříte.",
             "Chůvička není zdravotnický prostředek. Nespoléhejte na ni jako na jediný dohled.")
