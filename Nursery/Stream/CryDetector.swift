@@ -129,11 +129,10 @@ final class CryDetector: @unchecked Sendable {
     /// The wanted window, or the nearest one that the classifier allows. A window it does not
     /// allow would make the request fail.
     private static func window(_ wanted: CMTime, within constraint: SNTimeDurationConstraint) -> CMTime {
-        switch constraint.type {
-        case .range:
-            return CMTimeClampToRange(wanted, range: constraint.durationRange)
-        case .enumerated:
-            let options = constraint.enumeratedDurations.map(\.timeValue)
+        switch constraint {
+        case .durationRange(let range):
+            return CMTimeClampToRange(wanted, range: range)
+        case .enumeratedDurations(let options):
             return options.min { abs(($0 - wanted).seconds) < abs(($1 - wanted).seconds) } ?? wanted
         @unknown default:
             return wanted
