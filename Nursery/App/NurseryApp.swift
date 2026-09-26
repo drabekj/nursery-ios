@@ -85,6 +85,11 @@ struct NurseryApp: App {
                         engine.suspend()
                         return
                     }
+                    // A phone on the go2rtc server moves to the camera read directly, once. Not in the demo.
+                    if !MonitorEngine.isDemo, settings.onboarded, settings.role == .parent,
+                       settings.source == .camera, settings.cameraKind == .go2rtc {
+                        _ = await ServerMigration.run(settings: settings)
+                    }
                     engine.start()
                     UIApplication.shared.isIdleTimerDisabled = settings.keepAwake
                     if settings.source == .camera { await camera.loadConfig() }
