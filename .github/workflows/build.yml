@@ -41,15 +41,29 @@ jobs:
             CODE_SIGNING_ALLOWED=NO 2>&1 | tee sim.log | grep -E ' error: |BUILD (SUCCEEDED|FAILED)' | sort -u || true
           grep -q 'BUILD SUCCEEDED' sim.log
 
-      - name: Screenshots of the demo mode
+      - name: Pick a simulator
         run: |
-          set -x
           UDID=$(xcrun simctl list devices available -j | python3 -c '
           import json,sys
           d=json.load(sys.stdin)["devices"]
           c=[x for k,v in d.items() if "iOS" in k for x in v if x["name"].startswith("iPhone") and "Pro" in x["name"] and "Max" not in x["name"]]
           print(sorted(c,key=lambda x:x["name"])[-1]["udid"])')
-          xcrun simctl boot "$UDID"
+          echo "UDID=$UDID" >> "$GITHUB_ENV"
+          echo "Simulator: $UDID"
+
+      - name: Unit tests
+        run: |
+          set -o pipefail
+          xcodebuild test -project Nursery.xcodeproj -scheme Nursery \
+            -destination "id=$UDID" -derivedDataPath build/sim \
+            CODE_SIGNING_ALLOWED=NO -only-testing:NurseryTests 2>&1 | tee test.log \
+            | grep -E ' error: |Test Case .*(passed|failed)|Executed|BUILD|TEST (SUCCEEDED|FAILED)' || true
+          grep -q 'TEST SUCCEEDED' test.log
+
+      - name: Screenshots of the demo mode
+        run: |
+          set -x
+          xcrun simctl boot "$UDID" || true   # The unit tests may have booted it already.
           xcrun simctl bootstatus "$UDID" -b
           xcrun simctl ui "$UDID" appearance light
           xcrun simctl status_bar "$UDID" override --time 21:41 --dataNetwork wifi --wifiMode active --wifiBars 3 --batteryState charged --batteryLevel 100 || true
@@ -85,3 +99,4 @@ jobs:
             shots/
             device.log
             sim.log
+            test.log
