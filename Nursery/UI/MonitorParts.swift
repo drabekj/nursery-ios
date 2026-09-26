@@ -284,7 +284,8 @@ struct ControlBar: View {
                     .disabled(engine.connection != .live)
                     .transition(.scale(scale: 0.8).combined(with: .opacity))
                 }
-                if pictureTools, canSnapshot {
+                // Every source gives a photo: the phone at the baby, go2rtc, and a camera read directly.
+                if pictureTools {
                     Button(action: actions.snapshot) {
                         BarLabel(title: "Fotka", symbol: "camera.fill", isOn: false, tint: Theme.moon)
                     }
@@ -297,11 +298,6 @@ struct ControlBar: View {
                 .buttonStyle(PressScale())
             }
         }
-    }
-
-    /// A plain RTSP camera has no photo. The demo shows the button.
-    private var canSnapshot: Bool {
-        MonitorEngine.isDemo || settings.source != .camera || settings.cameraKind != .rtsp
     }
 
     private var soundButton: some View {
@@ -416,10 +412,7 @@ struct FullScreenMonitor: View {
                                         aiming = true
                                     }
                                 }
-                                // A plain RTSP camera has no photo.
-                                if MonitorEngine.isDemo || settings.source != .camera || settings.cameraKind != .rtsp {
-                                    GlassCircleButton(symbol: "camera.fill", size: 50, label: "Fotka") { actions.snapshot() }
-                                }
+                                GlassCircleButton(symbol: "camera.fill", size: 50, label: "Fotka") { actions.snapshot() }
                             }
                         }
                     }

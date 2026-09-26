@@ -27,8 +27,6 @@ struct MonitorView: View {
 
     private var soundView: Bool { settings.soundView }
     private var wide: Bool { hSize == .regular || vSize == .compact }
-    /// A plain RTSP camera gives no photo, so the photo card has nothing to show.
-    private var canPeek: Bool { MonitorEngine.isDemo || settings.source != .camera || settings.cameraKind != .rtsp }
 
     var body: some View {
         ZStack {
@@ -84,6 +82,13 @@ struct MonitorView: View {
             if c == .live { Task { await offerAlerts() } }
         }
         .onChange(of: aiming) { _, on in Log.shared.add(on ? "aim on" : "aim off") }
+        // A short message from the engine, for example "Kamera nalezena na nové adrese".
+        .onChange(of: engine.notice) { _, n in
+            if let n {
+                show(n)
+                engine.clearNotice()
+            }
+        }
         .onChange(of: wantsDetail, initial: true) { _, on in engine.setDetail(on) }
         .onAppear(perform: applyDemoScreen)
     }
@@ -133,12 +138,11 @@ struct MonitorView: View {
                 SoundStage(activity: engine.activityLog)
                     .padding(.horizontal, 20)
                     .transition(stageTransition)
-                if canPeek {
-                    PeekCard()
-                        .padding(.horizontal, 16)
-                        .padding(.top, 22)
-                        .transition(.opacity)
-                }
+                // Every source gives a photo, also a camera read directly.
+                PeekCard()
+                    .padding(.horizontal, 16)
+                    .padding(.top, 22)
+                    .transition(.opacity)
             } else {
                 VideoHero(zoom: zoom, pip: engine.pip, aiming: $aiming, onMove: move, fullScreen: {
                     Orientation.request(.landscapeRight)
@@ -180,7 +184,7 @@ struct MonitorView: View {
             }
             VStack(spacing: 20) {
                 if soundView {
-                    if canPeek { PeekCard() }
+                    PeekCard()
                 } else {
                     RoomPanel(activity: engine.activityLog)
                 }
