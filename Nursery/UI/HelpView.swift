@@ -25,7 +25,7 @@ struct HelpList: View {
                   "Zvuk běží dál i se zamčenou obrazovkou a když přepnete do jiné aplikace. Video nebo hudba v jiné aplikaci Chůvičku nepřeruší, hrají spolu. Přeruší ji jen telefonát, po něm se hlídání obnoví samo. Na zamčené obrazovce je aktivita „Chůvička hlídá od 21:40“.",
                   footnote: "iOS nedovolí aplikacím, které na pozadí jen přehrávají zvuk, průběžně měnit aktivitu na zamčené obrazovce. Proto ukazuje hlavně to, že Chůvička hlídá a od kdy.")
             topic("stop.circle", "Jak hlídání vypnout",
-                  "Na zamčené obrazovce klepněte na Ukončit hlídání, nebo v aplikaci na tři tečky → Ukončit hlídání. V nočním režimu klepněte na displej a zvolte Ukončit hlídání. Hlídání skončí také, když aplikaci zavřete přejetím nahoru v přepínači aplikací.",
+                  "V aplikaci klepněte na tři tečky → Ukončit hlídání, na zamčené obrazovce na Ukončit hlídání, v nočním režimu klepněte na displej a zvolte Ukončit hlídání. Chůvička se vždy nejdřív zeptá.",
                   footnote: "Když hlídání vypnete vy, žádné upozornění nepřijde. Upozornění „Chůvička přestala hlídat“ přijde jen tehdy, když aplikaci ukončí iOS.")
             topic("bell.badge", "Když se něco pokazí",
                   "Když vypadne spojení s kamerou, přijde po 20 sekundách upozornění a Chůvička se sama připojí znovu. Kdyby iOS aplikaci ukončil, do 2,5 minuty přijde upozornění „Chůvička přestala hlídat“. Stačí ji znovu otevřít.",

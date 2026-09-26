@@ -43,30 +43,16 @@ struct SettingsView: View {
                     } label: {
                         Label("Citlivost", systemImage: "waveform.badge.magnifyingglass")
                     }
-                } footer: {
-                    Text("Citlivost určuje, co se počítá jako zvuk – pro upozornění i pro Přehled.")
-                }
-
-                Section {
                     Picker(selection: $settings.loudness) {
                         ForEach(Settings.Loudness.allCases) { Text($0.title).tag($0) }
                     } label: {
                         Label("Hlasitost", systemImage: "speaker.plus")
                     }
-                } footer: {
-                    Text("Zesílená se hodí do tichého pokoje. Celkovou hlasitost dál ovládáte tlačítky na boku telefonu.")
-                }
-
-                Section {
-                    Toggle(isOn: $settings.alertOnSound) {
-                        Label("Upozornit na pláč i když zvuk hraje", systemImage: "bell.badge")
-                    }
                 } header: {
-                    Text("Upozornění")
+                    Text("Zvuk")
                 } footer: {
-                    Text("Na výpadek spojení a na pláč při ztlumeném nebo tichém zvuku Chůvička upozorní vždy. Upozornění chodí nejvýš jednou za minutu.")
+                    Text("Citlivost: co se počítá jako zvuk. Zesílená hlasitost se hodí do tichého pokoje.")
                 }
-                .onChange(of: settings.alertOnSound) { _, on in if on { NurseryAlerts.requestPermission() } }
 
                 Section {
                     Button {
@@ -90,9 +76,6 @@ struct SettingsView: View {
                     NavigationLink(value: Page.help) {
                         Label("Nápověda", systemImage: "questionmark.circle")
                     }
-                }
-
-                Section {
                     DisclosureGroup(isExpanded: $advanced) {
                         advancedRows
                     } label: {
@@ -104,7 +87,7 @@ struct SettingsView: View {
                 Section {
                     row("Verze", Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String ?? "–")
                 } footer: {
-                    Text("Doma jde obraz v domácí síti, mimo domov šifrovaně přes vaši soukromou síť. Obraz ani zvuk nikdy nejdou přes cizí server.")
+                    Text("Obraz ani zvuk nikdy nejdou přes cizí server.")
                 }
             }
             .navigationTitle("Nastavení")
@@ -146,14 +129,19 @@ struct SettingsView: View {
     }
 
     /// Behind "Pro pokročilé": what a parent does not need for the first night.
+    /// No icons here, so the text column stays aligned.
     @ViewBuilder private var advancedRows: some View {
-        Toggle(isOn: $settings.keepAwake) {
-            Label("Nevypínat displej", systemImage: "sun.max")
+        Toggle(isOn: $settings.alertOnSound) {
+            VStack(alignment: .leading, spacing: 2) {
+                Text("Upozornit na pláč i když zvuk hraje")
+                Text("Na výpadek spojení a na pláč, když zvuk neslyšíte, upozorní Chůvička vždy.")
+                    .font(.caption).foregroundStyle(.secondary)
+            }
         }
-        Picker(selection: $settings.appearance) {
+        .onChange(of: settings.alertOnSound) { _, on in if on { NurseryAlerts.requestPermission() } }
+        Toggle("Nevypínat displej", isOn: $settings.keepAwake)
+        Picker("Vzhled", selection: $settings.appearance) {
             ForEach(Settings.Appearance.allCases) { Text($0.title).tag($0) }
-        } label: {
-            Label("Vzhled", systemImage: "circle.lefthalf.filled")
         }
         addressRows
         statusRows
@@ -184,13 +172,13 @@ struct SettingsView: View {
             }
         }
         NavigationLink(value: Page.remote) {
-            Label("Mimo domov", systemImage: "globe")
+            Text("Mimo domov")
         }
         if server {
             Toggle(isOn: $settings.cameraControl) {
                 VStack(alignment: .leading, spacing: 2) {
-                    Text("Natočit kameru (Home Assistant)")
-                    Text("Šipky pro natočení kamery přes Home Assistant. Jen pro server s tímto nastavením.")
+                    Text("Ovládání kamery ze serveru")
+                    Text("Šipky pro natočení kamery, když je server umí posílat.")
                         .font(.caption).foregroundStyle(.secondary)
                 }
             }

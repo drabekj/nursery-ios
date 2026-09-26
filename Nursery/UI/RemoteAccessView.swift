@@ -31,12 +31,14 @@ struct RemoteAccessView: View {
                 Section {
                     checklistRow("Tailscale v tomto telefonu", ok: hereOK,
                                  help: "Nainstalujte Tailscale, přihlaste se a zapněte ho.") {
-                        Link("Stáhnout Tailscale", destination: URL(string: "https://apps.apple.com/app/tailscale/id1470499037")!)
-                            .font(.subheadline.weight(.semibold))
+                        if !hereOK {
+                            Link("Stáhnout Tailscale", destination: URL(string: "https://apps.apple.com/app/tailscale/id1470499037")!)
+                                .font(.subheadline.weight(.semibold))
+                        }
                     }
                     other
                 } footer: {
-                    Text("Doma se Chůvička připojuje přímo. Tailscale použije sama, až budete pryč.")
+                    Text("Každý bod se zaškrtne sám, jakmile je hotový.\nDoma se Chůvička připojuje přímo. Tailscale použije sama, až budete pryč.")
                 }
             }
         }

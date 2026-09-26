@@ -37,18 +37,29 @@ private struct BabySetupView: View {
     var body: some View {
         ZStack {
             Theme.skyTop.ignoresSafeArea()
-            ScrollView {
-                VStack(spacing: 22) {
-                    header
-                    codeCard
-                    optionsCard
-                    tips
-                    if let error = unit.error {
-                        Label(error, systemImage: "exclamationmark.triangle.fill")
-                            .font(.subheadline)
-                            .foregroundStyle(Theme.alarm)
-                            .frame(maxWidth: .infinity, alignment: .leading)
+            VStack(spacing: 0) {
+                ScrollView {
+                    VStack(spacing: 22) {
+                        header
+                        codeCard
+                        optionsCard
+                        tips
+                        if let error = unit.error {
+                            Label(error, systemImage: "exclamationmark.triangle.fill")
+                                .font(.subheadline)
+                                .foregroundStyle(Theme.alarm)
+                                .frame(maxWidth: .infinity, alignment: .leading)
+                        }
                     }
+                    .padding(.horizontal, 20)
+                    .padding(.top, 12)
+                    .padding(.bottom, 24)
+                    .frame(maxWidth: 560)
+                    .frame(maxWidth: .infinity)
+                }
+
+                // Pinned under the scroll, as in the guide: the start is always in sight.
+                VStack(spacing: 10) {
                     Button {
                         starting = true
                         Haptics.firm()
@@ -66,12 +77,11 @@ private struct BabySetupView: View {
                     .disabled(starting)
                     Button("Tento telefon je rodičovský") { confirmParent = true }
                         .font(.subheadline)
-                        .padding(.bottom, 12)
+                        .frame(minHeight: 44)
                 }
                 .padding(.horizontal, 20)
-                .padding(.top, 12)
+                .padding(.bottom, 12)
                 .frame(maxWidth: 560)
-                .frame(maxWidth: .infinity)
             }
         }
         .confirmationDialog("Používat tento telefon jako rodičovský?", isPresented: $confirmParent, titleVisibility: .visible) {
@@ -98,13 +108,18 @@ private struct BabySetupView: View {
 
     private var codeCard: some View {
         VStack(spacing: 8) {
-            Text("Párovací kód").font(.subheadline.weight(.semibold)).foregroundStyle(.secondary)
+            // The QR first, as on Android: the guide on the parent's phone says to scan it.
+            Text("Naskenujte telefonem rodiče").font(.headline)
+            QRCodeView(text: pairLink(settings).url.absoluteString)
+                .frame(maxWidth: 200)
+            Text("Nebo zadejte párovací kód").font(.subheadline.weight(.semibold)).foregroundStyle(.secondary)
+                .padding(.top, 6)
             Text(spaced(settings.unitCode))
                 .font(.system(size: 44, weight: .semibold, design: .rounded))
                 .monospacedDigit()
                 .textSelection(.enabled)
                 .accessibilityLabel("Párovací kód \(settings.unitCode.map(String.init).joined(separator: " "))")
-            Text("Na telefonu rodiče: Nastavení → Kamera → Druhý telefon.")
+            Text("Na telefonu rodiče zvolte Hlídat miminko → Druhý telefon. Později: Nastavení → Kamera.")
                 .font(.caption)
                 .foregroundStyle(.secondary)
                 .multilineTextAlignment(.center)
@@ -178,6 +193,12 @@ private struct BabySetupView: View {
             Text(text).font(.subheadline).fixedSize(horizontal: false, vertical: true)
         }
     }
+}
+
+/// What the QR code carries: the name, the code and the addresses of this phone.
+@MainActor private func pairLink(_ settings: Settings) -> PairLink {
+    PairLink(name: BabyUnit.serviceName(settings.unitName), code: settings.unitCode,
+             addresses: Reach.localAddresses().map { "\($0):\(BabyService.port.rawValue)" })
 }
 
 /// "482913" as "482 913".
@@ -294,7 +315,7 @@ private struct BabySendingView: View {
                 .multilineTextAlignment(.center)
             if unit.parents == 0 {
                 // No parent yet: the QR code is the easiest way to pair.
-                QRCodeView(text: pairLink.url.absoluteString)
+                QRCodeView(text: pairLink(settings).url.absoluteString)
                     .frame(maxWidth: 220)
                 Text("Naskenujte telefonem rodiče").font(.headline).foregroundStyle(.white)
             }
@@ -317,11 +338,6 @@ private struct BabySendingView: View {
         .padding(20)
         .frame(maxWidth: .infinity, maxHeight: .infinity)
         .overlay(alignment: .bottom) { batteryLine.padding(.bottom, 20) }
-    }
-
-    private var pairLink: PairLink {
-        PairLink(name: BabyUnit.serviceName(settings.unitName), code: settings.unitCode,
-                 addresses: Reach.localAddresses().map { "\($0):\(BabyService.port.rawValue)" })
     }
 
     /// The controls show for 20 s, then the screen goes dark again. With no parent yet, they stay.

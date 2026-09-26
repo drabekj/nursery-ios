@@ -45,7 +45,7 @@ enum CameraBrand: String, CaseIterable, Identifiable {
 
     var hint: String? {
         switch self {
-        case .tapo: "Účet kamery vytvoříte v aplikaci Tapo: Kamera → Nastavení → Pokročilé nastavení → Účet kamery."
+        case .tapo: "Účet kamery vytvoříte v aplikaci Tapo: Kamera → Nastavení → Pokročilé nastavení → Účet kamery. Není to váš účet Tapo."
         case .hikvision, .dahua: "Použijte účet, kterým se přihlašujete do kamery. Zvuk nastavte v kameře na G.711."
         case .reolink: "Reolink posílá zvuk ve formátu AAC, který Chůvička neumí přehrát. Obraz funguje."
         case .other: "Adresu RTSP najdete v návodu ke kameře. Chůvička umí obraz H.264 a zvuk G.711."
