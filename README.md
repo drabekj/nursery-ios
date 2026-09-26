@@ -1,8 +1,9 @@
 # Chůvička (Nursery) — a local-only baby monitor for iOS and Android
 
 It shows the camera in the nursery and plays its sound in real time. It continues on the lock screen and in
-picture in picture. It uses no cloud service. Three sources: a camera through a go2rtc server, an IP camera
-read directly (RTSP), or an old phone at the baby (iOS or Android) that sends to the parents' phones.
+picture in picture. It uses no cloud service. Two main sources: an IP camera read directly (RTSP, no server),
+or an old phone at the baby (iOS or Android) that sends to the parents' phones. A camera through an own
+go2rtc server is an advanced option.
 The iOS app has no third-party code; the Android app uses AndroidX, CameraX and zxing (the QR code).
 
 The state of the app for other users, and the roadmap: `docs/READINESS.md`.
@@ -50,7 +51,7 @@ navigation bar. The background glows softly with the loudness of the room.
   crying and fussing, or every sound.
 - **Move** puts arrows on the picture itself, so you watch while you aim. Tap for one step, or hold to keep turning.
   The pinch zoom (1–4×, double tap) changes only your screen.
-- **Photo** takes one full frame of the main stream from go2rtc and opens the share sheet.
+- **Photo** takes one full frame of the main stream (from the camera, the phone at the baby, or go2rtc) and opens the share sheet.
 - **Night** makes the screen black at minimum brightness, with a dim clock and waveform. The waveform
   brightens while a sound lasts.
 - **Picture in picture** opens by itself when you swipe home. **Full screen** comes with a button, or when you turn the phone.
@@ -85,9 +86,18 @@ Simulator, and it uploads the screenshots as the `build-output` artifact.
 A free Apple ID works, but the app then stops after 7 days, and you must press Run again.
 A paid developer account ($99/year) gives one year, and TestFlight lets your wife install it with no cable.
 
-## What the server must give
+## The camera read directly (the main path)
 
-The app needs no change on the Pi. It uses what already runs:
+No server. The app reads the camera's RTSP streams itself (Tapo `stream1`/`stream2`, Hikvision, Dahua, Reolink,
+or a full address), with the camera account (Digest login). The guide finds the camera on the home Wi-Fi.
+A direct camera gives the photo (one frame from the stream), pan and tilt through ONVIF (Tapo port 2020), and a
+new address by itself when the router moves the camera. Away from home it needs Tailscale on the phone and a
+Tailscale subnet route at home for the camera's address (advanced); then the same address works everywhere.
+A phone that used the go2rtc server moves to the direct camera once, with the address that go2rtc reports.
+
+## What the server must give (optional, advanced)
+
+The own server is optional. When used, the app needs no change on the Pi. It uses what already runs:
 
 - go2rtc RTSP on port **8554**, with two streams of the camera: the main (high) stream and the sub (low)
   stream. Their names are in Settings (the developer's are `nursery`, 2K, and `nursery_sd`, 360p). The app
