@@ -4,7 +4,8 @@ import UIKit
 
 /// The first-run guide. The benchmark: a mother with a newborn in one arm sets it up with the other.
 /// So: one question per screen, one big button, everyday words, and a live check at each step.
-/// Technical words (RTSP, go2rtc) appear only behind "Jiná kamera" and "Mám vlastní server".
+/// The main camera path is a camera read directly ("Kamera v síti"). Technical words (RTSP, go2rtc)
+/// appear only behind "Jiná kamera" and the small advanced link to an own server.
 struct OnboardingView: View {
     @EnvironmentObject private var settings: Settings
     @EnvironmentObject private var unit: BabyUnit
@@ -376,11 +377,16 @@ private struct SourcePage: View {
     let back: () -> Void
     let choose: (SourceChoice) -> Void
     var body: some View {
-        Page(back: back, title: "Odkud bude obraz a zvuk?", secondary: "Mám vlastní server",
-             secondaryAction: { choose(.go2rtc) }) {
+        Page(back: back, title: "Odkud bude obraz a zvuk?") {
             ChoiceCard(symbol: "iphone.gen3", title: "Druhý telefon", subtitle: "Starý telefon postavíte k postýlce. Nejjednodušší.",
                        badge: "Doporučeno") { choose(.phone) }
-            ChoiceCard(symbol: "web.camera", title: "Mám IP kameru", subtitle: "Tapo, Hikvision, Dahua a další.") { choose(.camera) }
+            ChoiceCard(symbol: "web.camera", title: "Kamera v síti",
+                       subtitle: "Tapo, Hikvision, Dahua, Reolink… Chůvička ji najde sama.") { choose(.camera) }
+            // The own go2rtc server: an edge case, so a small link, not a card.
+            Button("Pro pokročilé: mám vlastní server (go2rtc)") { choose(.go2rtc) }
+                .font(.footnote.weight(.medium))
+                .tint(Theme.accent)
+                .frame(maxWidth: .infinity, minHeight: 44)
         }
     }
 }
@@ -492,6 +498,12 @@ private struct CameraDetailsPage: View {
                 next()
              }) {
             VStack(spacing: 12) {
+                if settings.rtspBrand != .other {
+                    Text("Adresu kamery Chůvička najde sama. Vy zadáte jen účet kamery.")
+                        .font(.body)
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                        .fixedSize(horizontal: false, vertical: true)
+                }
                 if settings.rtspBrand == .other {
                     field("Adresa RTSP", "192.168.0.50:554/live", text: $settings.rtspCustom, keyboard: .URL)
                 } else {
