@@ -18,6 +18,8 @@ struct OnboardingView: View {
 
     @State private var path: [Step] = []
     @State private var current: Step = .welcome
+    /// The working setup, when the guide was opened from Settings. Then "Zrušit" brings it back.
+    @State private var saved: SetupSnapshot?
 
     var body: some View {
         ZStack {
@@ -28,7 +30,26 @@ struct OnboardingView: View {
                                         removal: .move(edge: .leading).combined(with: .opacity)))
         }
         .animation(.spring(response: 0.45, dampingFraction: 0.9), value: current)
+        .overlay(alignment: .topTrailing) {
+            if saved != nil {
+                Button("Zrušit", action: cancel)
+                    .font(.body.weight(.semibold))
+                    .tint(Theme.accent)
+                    .frame(height: 44)
+                    .padding(.horizontal, 20)
+            }
+        }
         .onAppear(perform: start)
+    }
+
+    /// Back to the monitor with the setup as it was before the guide opened.
+    private func cancel() {
+        guard let saved else { return }
+        Haptics.tap()
+        saved.restore(to: settings)
+        UserDefaults.standard.removeObject(forKey: "wizardStart")
+        settings.onboarded = true
+        if saved.role == .baby { Task { await unit.start() } } else { finish() }
     }
 
     private func go(_ next: Step) {
@@ -49,6 +70,7 @@ struct OnboardingView: View {
         case .babySetup: BabySetupPage(back: back) { go(.babyReady) }
         case .babyReady: BabyReadyPage(back: back) {
             settings.role = .baby
+            UserDefaults.standard.removeObject(forKey: "wizardStart")
             settings.onboarded = true
             Task { await unit.start() }
         }
@@ -65,6 +87,7 @@ struct OnboardingView: View {
         case .go2rtc: Go2rtcPage(back: back) { go(.test) }
         case .test: TestPage(back: back) {
             settings.role = .parent
+            UserDefaults.standard.removeObject(forKey: "wizardStart")
             settings.onboarded = true
             finish()
         }
@@ -72,12 +95,19 @@ struct OnboardingView: View {
     }
 
     /// From Settings → Kamera the guide starts at the source step. Zpět still reaches the role.
+    /// Opened from Settings at all ("source" or "welcome"), it keeps the working setup for "Zrušit".
     private func start() {
-        if UserDefaults.standard.string(forKey: "wizardStart") == "source" {
+        switch UserDefaults.standard.string(forKey: "wizardStart") {
+        case "source":
             path = [.welcome, .role]
             current = .source
+            saved = SetupSnapshot(settings)
+        case "welcome":
+            saved = SetupSnapshot(settings)
+        default:
+            break
         }
-        UserDefaults.standard.removeObject(forKey: "wizardStart")
+        // The key stays until the guide ends, so "Zrušit" is there also after the app restarts.
         applyDemo()
     }
 

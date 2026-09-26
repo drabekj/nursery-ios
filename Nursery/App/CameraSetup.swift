@@ -103,3 +103,34 @@ extension Settings {
         return "\(u):\(p)@"
     }
 }
+
+/// What the guide can change. Settings → Kamera keeps a copy, so "Zrušit" in the guide
+/// brings back the working setup exactly as it was.
+struct SetupSnapshot {
+    let role: Settings.Role
+    let source: Settings.Source
+    let cameraKind: CameraKind
+    let rtspBrand: CameraBrand
+    let rtspHost, rtspUser, rtspCustom, password: String
+    let rtspPort: Int
+    let host, streamMain, streamSmall: String
+    let babyName, babyCode: String
+    let babyAddresses: [String]
+    let babyDirect: String?
+
+    init(_ s: Settings) {
+        role = s.role; source = s.source; cameraKind = s.cameraKind; rtspBrand = s.rtspBrand
+        rtspHost = s.rtspHost; rtspUser = s.rtspUser; rtspCustom = s.rtspCustom; rtspPort = s.rtspPort
+        password = CameraSecret.password
+        host = s.host; streamMain = s.streamMain; streamSmall = s.streamSmall
+        babyName = s.babyName; babyCode = s.babyCode; babyAddresses = s.babyAddresses; babyDirect = s.babyDirect
+    }
+
+    func restore(to s: Settings) {
+        s.role = role; s.source = source; s.cameraKind = cameraKind; s.rtspBrand = rtspBrand
+        s.rtspHost = rtspHost; s.rtspUser = rtspUser; s.rtspCustom = rtspCustom; s.rtspPort = rtspPort
+        if CameraSecret.password != password { CameraSecret.password = password }
+        s.host = host; s.streamMain = streamMain; s.streamSmall = streamSmall
+        s.babyName = babyName; s.babyCode = babyCode; s.babyAddresses = babyAddresses; s.babyDirect = babyDirect
+    }
+}

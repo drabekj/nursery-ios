@@ -150,7 +150,7 @@ struct SettingsView: View {
             Text("Technický záznam")
         }
         Button("Spustit průvodce znovu") {
-            UserDefaults.standard.removeObject(forKey: "wizardStart")
+            UserDefaults.standard.set("welcome", forKey: "wizardStart")
             dismiss()
             settings.onboarded = false
         }
