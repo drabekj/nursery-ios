@@ -46,6 +46,13 @@ final class MonitorEngine: ObservableObject {
     @Published private(set) var videoSize = CGSize(width: 16, height: 9)
     /// The loudness in words, with a hold time. A louder word shows after 0.4 s, a quieter one after 2.5 s.
     @Published private(set) var roomLevel: RoomLevel = .quiet
+    /// What the room does, in one word: Připojuji, Klid, Ozývá se, Pláče, Nehlídá. It is computed
+    /// at the 2 Hz tick and set only when the word changes.
+    @Published private(set) var roomState: RoomState = .connecting
+    /// When `roomState` last changed. The sublines count from it ("už 38 s", "před 2 min").
+    @Published private(set) var roomStateSince = Date()
+    /// The end of the last finished sound event, for "ticho už 42 min". Nil before the first one.
+    var lastEventEnd: Date? { activityLog.events.last?.end }
     @Published private(set) var audioOnly = false
     @Published private(set) var delayMilliseconds = 0
     @Published private(set) var failures = 0
@@ -106,6 +113,10 @@ final class MonitorEngine: ObservableObject {
     private var lastWatchdog = Date.distantPast
     private var lastAlive = Date()
     private var lastAliveCPU = MonitorEngine.processCPUSeconds()
+    /// The rules behind `roomState`. Fed at 2 Hz, and with the verdicts of the cry classifier.
+    private var roomMachine = RoomStateMachine()
+    /// The cry classifier can run. False after it failed: then the loudness rule decides.
+    private var classifierAvailable = true
 
     /// The processor time of the whole app, in seconds.
     nonisolated private static func processCPUSeconds() -> Double {
@@ -123,7 +134,10 @@ final class MonitorEngine: ObservableObject {
         self.settings = settings
         let saved = UserDefaults.standard.string(forKey: "soundMode") ?? ""
         var savedMode = SoundMode(rawValue: saved) ?? (saved == "silent" ? .off : .live)   // "silent" was the old muted mode.
-        if Self.isDemo { savedMode = UserDefaults.standard.string(forKey: "demoScreen") == "muted" ? .off : .live }
+        if Self.isDemo {
+            let screen = UserDefaults.standard.string(forKey: "demoScreen")
+            savedMode = screen == "muted" || screen == "sound-muted" ? .off : .live
+        }
         mode = savedMode
         let view = VideoLayerView()
         videoView = view
@@ -299,9 +313,27 @@ final class MonitorEngine: ObservableObject {
         if UserDefaults.standard.string(forKey: "demoScreen") == "volume" { systemVolume = 0.12 }
         audioOnly = settings.soundView
         activityLog.loadDemo()
+        if let state = Self.demoRoomState {
+            // A fixed word for the screenshot. The subline counts from a believable moment.
+            roomState = state
+            roomStateSince = Date().addingTimeInterval(state == .cry ? -38 : state == .lost ? -120 : 0)
+        }
         if let image = UIImage(named: "DemoFrame") { renderer.showStill(image) }
         shared.withLock { $0.lastVideo = .distantFuture; $0.lastAudio = .distantFuture; $0.lastPacket = .distantFuture }
     }
+
+    /// The fixed word of a demo screen (`-demoScreen klid`, `sound-cry`...). Nil: the word follows
+    /// the fake level, as the other screens did before the words existed.
+    private static let demoRoomState: RoomState? = {
+        switch UserDefaults.standard.string(forKey: "demoScreen") {
+        case "klid", "main": return .calm
+        case "sound", "sound-muted": return .sound
+        case "sound-cry", "main-cry", "night-cry": return .cry
+        case "sound-lost": return .lost
+        case "sound-connecting": return .connecting
+        default: return nil
+        }
+    }()
 
     /// A fake room for the demo: a quiet hiss, and a short cry each 12 seconds.
     private func demoLevel() -> Float {
@@ -977,6 +1009,7 @@ final class MonitorEngine: ObservableObject {
             reconnect(why: "no data for 6 s")
         }
         updateStatus(force: false, lastAudio: s.lastAudio)
+        updateRoomState(now: now)
 
         audio.heal()
         // The watchdog: while the app runs in the background, keep the "stopped" alert 150 s away.
@@ -1017,6 +1050,31 @@ final class MonitorEngine: ObservableObject {
             louderSince = nil
             quieterSince = nil
         }
+    }
+
+    /// The word of the room, from the signals the engine has. Published only when it changes.
+    private func updateRoomState(now: Date) {
+        let next: RoomState
+        if Self.isDemo {
+            guard Self.demoRoomState == nil else { return }       // Set once in startDemo().
+            next = meter > 0.35 ? .sound : .calm
+        } else {
+            let event = activityLog.current
+            let input = RoomStateMachine.Input(
+                heard: soundStatus == .listening || soundStatus == .silent,
+                everHeard: everHeard,
+                eventRunning: event != nil,
+                eventSeconds: event?.duration ?? 0,
+                eventPeak: event?.peak ?? 0,
+                level: meter,
+                loudLevel: max(activityLog.threshold + 0.15, 0.45),
+                classifierAvailable: classifierAvailable)
+            next = roomMachine.update(input, now: now)
+        }
+        guard next != roomState else { return }
+        roomState = next
+        roomStateSince = Self.isDemo ? now : roomMachine.since ?? now
+        Log.shared.add("room: \(next.title)")
     }
 
     private func updateStatus(force: Bool, lastAudio: Date? = nil) {
