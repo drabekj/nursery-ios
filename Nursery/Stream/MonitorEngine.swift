@@ -620,13 +620,12 @@ final class MonitorEngine: ObservableObject {
     /// The router gave the camera a new address: the saved one does not answer at all. Search the
     /// home network after the second failure, in the foreground or in picture in picture only
     /// (the scan wakes the Wi-Fi radio for about 3 s). Not for a full camera or a wrong password:
-    /// those answer at the saved address. Only on the home network: a new address from the home
-    /// router stays on the same /24, and away from home a search would ask a stranger's devices.
+    /// those answer at the saved address. Also on another network than the saved address: on a
+    /// trip the camera hangs on the phone's own hotspot (172.20.10.x) and gets a new address there.
     private func shouldRelocate(after error: Error?) -> Bool {
         guard settings.source == .camera, settings.cameraKind == .rtsp, settings.rtspBrand != .other,
               failures >= 2, isForeground || pip.isActive,
-              Date().timeIntervalSince(lastRelocation) > 60,
-              Self.onOwnNetwork(host: settings.rtspHost, local: Reach.localAddresses()) else { return false }
+              Date().timeIntervalSince(lastRelocation) > 60 else { return false }
         switch error as? RTSPClient.Failure {
         case .unreachable?, .timeout?: return true
         default: return false
