@@ -1184,7 +1184,7 @@ final class MonitorEngine: ObservableObject {
         }
 
         guard !Self.isDemo else { return }
-        activity.update(status: status, enabled: true)
+        activity.update(status: status, room: roomState, enabled: true, canUpdate: isForeground || pip.isActive)
     }
 }
 

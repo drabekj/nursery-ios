@@ -1,35 +1,6 @@
 import Foundation
 
-/// What the room is doing, in one word. The big word on the screen, the colour of the field,
-/// the title of a notification. It is derived twice a second from three things the engine
-/// already has: the sound status, the sound event of `SoundActivity`, and the cry classifier.
-///
-/// The words are honest: "Klid" means the room is quiet, not that the baby sleeps. "Pláče" means
-/// the classifier heard a baby cry during a loud stretch; without a classifier it means "loud for
-/// a while", and Nápověda says so.
-enum RoomState: String, Codable, Sendable {
-    /// The start: the app has not heard the room yet.
-    case connecting
-    /// Quiet, or nothing above the noise floor.
-    case calm
-    /// A sound event runs: something is louder than the room. A sigh, a dog, a door, a cry that
-    /// the classifier has not confirmed yet.
-    case sound
-    /// A baby cry, confirmed by the classifier (or by loudness and duration without one).
-    case cry
-    /// No sound for 20 s: the app does not hear the room.
-    case lost
-
-    var title: String {
-        switch self {
-        case .connecting: "Připojuji…"
-        case .calm: "Klid"
-        case .sound: "Ozývá se"
-        case .cry: "Pláče"
-        case .lost: "Nehlídá"
-        }
-    }
-}
+// `RoomState`, the word itself, is in Shared/NurseryActivity.swift: the Live Activity needs it too.
 
 /// One verdict of the cry classifier, for one window of sound (about one second).
 enum CryVerdict: Equatable, Sendable {

@@ -57,7 +57,7 @@ final class NowPlaying {
 final class LiveActivityController {
     private var activity: Activity<NurseryActivityAttributes>?
     private var current: NurseryActivityAttributes.ContentState?
-    private var pendingStatus: NurseryActivityAttributes.Status?
+    private var pending: Pending?
     private var pendingSince = Date()
     private var chain: Task<Void, Never>?
 
@@ -71,11 +71,18 @@ final class LiveActivityController {
         }
     }
 
-    /// It sends a status change only when the status holds for 2 s (a lost sound goes at once),
-    /// so a flapping status does not spend the update budget. It never sets a stale date:
-    /// in the background iOS may refuse the updates, and a stale date would then falsely say
-    /// that the app stopped.
-    func update(status: NurseryActivityAttributes.Status, enabled: Bool) {
+    private struct Pending: Equatable {
+        var status: NurseryActivityAttributes.Status
+        var room: RoomState
+    }
+
+    /// It sends a change of the status or the room word only when it holds for 2 s (a lost sound
+    /// and a cry go at once), so a flapping word does not spend the update budget. It never sets
+    /// a stale date: a stale date would falsely say that the app stopped.
+    ///
+    /// Only in the foreground (or with picture in picture): iOS refuses the updates from an app
+    /// that runs in the background only for audio, so the app does not try.
+    func update(status: NurseryActivityAttributes.Status, room: RoomState, enabled: Bool, canUpdate: Bool) {
         guard enabled, ActivityAuthorizationInfo().areActivitiesEnabled else { end(); return }
         let now = Date()
         let appActive = UIApplication.shared.applicationState == .active
@@ -90,7 +97,7 @@ final class LiveActivityController {
 
         guard let activity else {
             guard appActive else { return }            // Only the foreground can start an activity.
-            let state = NurseryActivityAttributes.ContentState(status: status, since: now)
+            let state = NurseryActivityAttributes.ContentState(status: status, since: now, state: room)
             do {
                 self.activity = try Activity<NurseryActivityAttributes>.request(
                     attributes: NurseryActivityAttributes(room: "Chůvička", started: now),
@@ -102,14 +109,16 @@ final class LiveActivityController {
             return
         }
 
-        guard status != current?.status else { pendingStatus = nil; return }
-        if pendingStatus != status {
-            pendingStatus = status
+        let next = Pending(status: status, room: room)
+        guard next != current.map({ Pending(status: $0.status, room: $0.state) }) else { pending = nil; return }
+        guard canUpdate else { return }
+        if pending != next {
+            pending = next
             pendingSince = now
         }
-        guard status == .lost || now.timeIntervalSince(pendingSince) >= 2 else { return }
-        pendingStatus = nil
-        let state = NurseryActivityAttributes.ContentState(status: status, since: now)
+        guard status == .lost || room == .cry || now.timeIntervalSince(pendingSince) >= 2 else { return }
+        pending = nil
+        let state = NurseryActivityAttributes.ContentState(status: status, since: now, state: room)
         current = state
         let content = ActivityContent(state: state, staleDate: nil)
         let previous = chain
@@ -123,7 +132,7 @@ final class LiveActivityController {
         guard let activity else { return }
         self.activity = nil
         current = nil
-        pendingStatus = nil
+        pending = nil
         Task { await activity.end(nil, dismissalPolicy: .immediate) }
     }
 }
