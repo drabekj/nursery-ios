@@ -36,8 +36,13 @@ final class VideoRenderer: @unchecked Sendable {
     }
 
     /// It drops the decoder state. The next frame that shows is a keyframe.
+    /// It also forgets the format: each connection has a new depacketizer, whose version count
+    /// starts again at 0. Without this, a switch from the phone at the baby back to the camera
+    /// kept the phone's SPS (both were version 1), and each camera frame failed: a black picture.
     func reset() {
         waitingForKeyframe = true
+        format = nil
+        formatVersion = -1
         renderer.flush()
     }
 

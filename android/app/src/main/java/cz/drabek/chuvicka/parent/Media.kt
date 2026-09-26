@@ -73,17 +73,22 @@ class AudioPlayer {
  */
 class VideoDecoder(private val surface: Surface, private val onSize: (Int, Int) -> Unit) {
     private var codec: MediaCodec? = null
-    private var version = -1
+    // The SPS and the PPS it runs with. Compare the bytes, not the depacketizer's version:
+    // each connection has a new depacketizer that counts from 0 again, so a switch between
+    // two sources kept the old format and drew nothing.
+    private var sps: ByteArray? = null
+    private var pps: ByteArray? = null
     private val info = MediaCodec.BufferInfo()
 
     @Synchronized
     fun push(unit: AccessUnit, depacketizer: H264Depacketizer) {
         val sps = depacketizer.sps ?: return
         val pps = depacketizer.pps ?: return
-        if (codec == null || version != depacketizer.parameterVersion) {
+        if (codec == null || !sps.contentEquals(this.sps) || !pps.contentEquals(this.pps)) {
             if (!unit.keyframe) return
             configure(sps, pps)
-            version = depacketizer.parameterVersion
+            this.sps = sps
+            this.pps = pps
         }
         val c = codec ?: return
         try {
