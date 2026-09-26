@@ -114,7 +114,7 @@ struct RoomOrb: View {
 
     private func color(_ v: Float) -> Color {
         switch status {
-        case .lost, .muted: Theme.alarm
+        case .lost: Theme.alarm
         case .connecting: Theme.glowNeutral
         default: Theme.level(v)
         }
@@ -126,8 +126,6 @@ struct RoomOrb: View {
             ProgressView().controlSize(.large)
         case .lost:
             Image(systemName: "wifi.exclamationmark").foregroundStyle(Theme.alarm)
-        case .muted:
-            Image(systemName: "speaker.slash.fill").foregroundStyle(Theme.alarm)
         case .listening, .silent:
             Image(systemName: soundNow ? "waveform" : (status == .silent ? "bell.fill" : "moon.zzz.fill"))
                 .foregroundStyle(soundNow ? Theme.level(value(ago: 0)) : Color.primary.opacity(0.55))
@@ -139,26 +137,33 @@ struct RoomOrb: View {
 
 // MARK: - The stage
 
-/// The orb, the words, and the last sound. The whole stage opens the Overview.
+/// The orb and the words. The card of the last hour under it opens the Overview.
 struct SoundStage: View {
     @EnvironmentObject private var engine: MonitorEngine
     @EnvironmentObject private var settings: Settings
     @ObservedObject var activity: SoundActivity
-    let openActivity: () -> Void
+
+    private var offline: Bool {
+        if case .offline = engine.overall { return true }
+        return false
+    }
 
     var body: some View {
+        let sub = engine.mode == .off ? "Ztlumeno · při pláči přijde upozornění\nKlepnutím na kruh zvuk zapnete"
+                                      : RoomWords.subline(engine, settings)
         VStack(spacing: 14) {
             Button {
-                // The orb looks like a button, so it is one: a tap turns the sound on.
-                guard engine.mode == .off else { return }
+                // The orb looks like a button, so it is one: a tap mutes the sound or turns it on,
+                // the same as the Zvuk button.
                 Haptics.firm()
-                engine.soundOn()
+                if engine.mode == .off { engine.soundOn() } else { engine.mode = .off }
             } label: {
                 LiveOrb(levels: engine.levels, status: engine.soundStatus, soundNow: activity.current != nil)
             }
             .buttonStyle(PressScale())
-            .disabled(engine.mode != .off)
-            .accessibilityLabel(engine.mode == .off ? "Zapnout zvuk" : RoomWords.headline(engine))
+            .accessibilityLabel("Zvuk")
+            .accessibilityValue("\(engine.mode.title). \(RoomWords.headline(engine))")
+            .accessibilityHint("Dvojitým klepnutím zvuk zapnete nebo ztlumíte.")
             .frame(maxWidth: 280, maxHeight: 280)
                 .frame(maxHeight: .infinity)
                 .layoutPriority(-1)          // The orb gives way on a small screen. The words do not.
@@ -168,16 +173,19 @@ struct SoundStage: View {
                     .foregroundStyle(RoomWords.color(engine))
                     .contentTransition(.opacity)
                     .animation(.easeInOut(duration: 0.35), value: RoomWords.headline(engine))
-                Text(engine.mode == .off ? "Ztlumeno · při pláči přijde upozornění\nZvuk zapnete klepnutím na kruh" : RoomWords.subline(engine, settings))
-                    .font(.subheadline)
-                    .foregroundStyle(.secondary)
+                if !sub.isEmpty {
+                    Text(sub)
+                        .font(.subheadline)
+                        .foregroundStyle(.secondary)
+                }
             }
             .multilineTextAlignment(.center)
             .accessibilityElement(children: .combine)
-            Button(action: openActivity) {
-                LastSoundLabel(activity: activity, alignment: .center)
+            if offline {
+                Button("Zkusit znovu") { engine.reconnect(why: "user asked") }
+                    .buttonStyle(.bordered)
+                    .controlSize(.small)
             }
-            .buttonStyle(.plain)
         }
     }
 }
@@ -185,10 +193,9 @@ struct SoundStage: View {
 // MARK: - The peek
 
 /// One photo of the cot, on request. The parent sees the baby without the live picture:
-/// no stream, no battery cost. A tap takes a new photo. The button on the right opens the live picture.
+/// no stream, no battery cost. A tap takes a new photo. The switch above opens the live picture.
 struct PeekCard: View {
     @EnvironmentObject private var camera: CameraControl
-    let openPicture: () -> Void
     @State private var image: UIImage?
     @State private var taken: Date?
     @State private var loading = false
@@ -201,7 +208,7 @@ struct PeekCard: View {
                 HStack(spacing: 14) {
                     thumbnail
                     VStack(alignment: .leading, spacing: 3) {
-                        Text(image == nil ? "Nahlédnout do postýlky" : "Fotka z kamery")
+                        Text("Fotka z postýlky")
                             .font(.subheadline.weight(.semibold))
                         subtitle
                             .font(.caption)
@@ -214,8 +221,6 @@ struct PeekCard: View {
             .buttonStyle(.plain)
             .disabled(loading)
             .accessibilityHint("Pořídí novou fotku z kamery")
-
-            GlassCircleButton(symbol: "video.fill", size: 44, label: "Živý obraz", action: openPicture)
         }
         .padding(12)
         .glass(in: RoundedRectangle(cornerRadius: 24, style: .continuous))

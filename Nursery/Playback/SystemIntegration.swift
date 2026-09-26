@@ -44,7 +44,7 @@ final class NowPlaying {
             MPMediaItemPropertyArtist: status.title,
             MPNowPlayingInfoPropertyIsLiveStream: true,
             MPNowPlayingInfoPropertyMediaType: MPNowPlayingInfoMediaType.audio.rawValue,
-            MPNowPlayingInfoPropertyPlaybackRate: status == .muted ? 0.0 : 1.0,
+            MPNowPlayingInfoPropertyPlaybackRate: 1.0,
         ]
         if let artwork { info[MPMediaItemPropertyArtwork] = artwork }
         MPNowPlayingInfoCenter.default().nowPlayingInfo = info

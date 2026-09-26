@@ -25,6 +25,8 @@ struct MonitorView: View {
 
     private var soundView: Bool { settings.soundView }
     private var wide: Bool { hSize == .regular || vSize == .compact }
+    /// A plain RTSP camera gives no photo, so the photo card has nothing to show.
+    private var canPeek: Bool { MonitorEngine.isDemo || settings.source != .camera || settings.cameraKind != .rtsp }
 
     var body: some View {
         ZStack {
@@ -44,7 +46,12 @@ struct MonitorView: View {
                 Color.white.ignoresSafeArea().transition(.opacity).allowsHitTesting(false).zIndex(4)
             }
             if night {
-                NightView(activity: engine.activityLog) { withAnimation(.easeInOut(duration: 0.5)) { night = false } }
+                NightView(activity: engine.activityLog,
+                          onClose: { withAnimation(.easeInOut(duration: 0.5)) { night = false } },
+                          onStop: {
+                              night = false
+                              withAnimation(.easeInOut(duration: 0.4)) { engine.pause(why: "night mode") }
+                          })
                     .transition(.opacity)
                     .zIndex(5)
             }
@@ -114,13 +121,15 @@ struct MonitorView: View {
     private var phoneContent: some View {
         VStack(spacing: 0) {
             if soundView {
-                SoundStage(activity: engine.activityLog) { sheet = .activity }
+                SoundStage(activity: engine.activityLog)
                     .padding(.horizontal, 20)
                     .transition(stageTransition)
-                PeekCard { setSoundView(false) }
-                    .padding(.horizontal, 16)
-                    .padding(.top, 22)
-                    .transition(.opacity)
+                if canPeek {
+                    PeekCard()
+                        .padding(.horizontal, 16)
+                        .padding(.top, 22)
+                        .transition(.opacity)
+                }
             } else {
                 VideoHero(zoom: zoom, pip: engine.pip, aiming: $aiming, onMove: move, fullScreen: {
                     Orientation.request(.landscapeRight)
@@ -128,7 +137,7 @@ struct MonitorView: View {
                 .padding(.horizontal, 8)
                 .transition(stageTransition)
 
-                RoomPanel(activity: engine.activityLog) { sheet = .activity }
+                RoomPanel()
                     .padding(.horizontal, 20)
                     .padding(.top, 22)
                     .transition(.opacity)
@@ -148,7 +157,7 @@ struct MonitorView: View {
                     .padding(.bottom, 12)
                     .transition(.move(edge: .bottom).combined(with: .opacity))
             } else if askAlerts {
-                AlertOffer(allow: allowAlerts, dismiss: { withAnimation { askAlerts = false } })
+                AlertOffer(allow: allowAlerts, dismiss: { withAnimation { dismissAlerts() } })
                     .padding(.horizontal, 16)
                     .padding(.bottom, 12)
                     .transition(.move(edge: .bottom).combined(with: .opacity))
@@ -165,7 +174,7 @@ struct MonitorView: View {
     private var wideContent: some View {
         HStack(alignment: .top, spacing: 24) {
             if soundView {
-                SoundStage(activity: engine.activityLog) { sheet = .activity }
+                SoundStage(activity: engine.activityLog)
                     .frame(maxWidth: .infinity, maxHeight: .infinity)
                     .transition(stageTransition)
             } else {
@@ -174,9 +183,9 @@ struct MonitorView: View {
             }
             VStack(spacing: 20) {
                 if soundView {
-                    PeekCard { setSoundView(false) }
+                    if canPeek { PeekCard() }
                 } else {
-                    RoomPanel(activity: engine.activityLog) { sheet = .activity }
+                    RoomPanel()
                 }
                 if vSize != .compact {
                     HourStrip(activity: engine.activityLog) { sheet = .activity }
@@ -185,7 +194,7 @@ struct MonitorView: View {
                 if engine.volumeLow {
                     VolumeWarning(volume: engine.systemVolume)
                 } else if askAlerts {
-                    AlertOffer(allow: allowAlerts, dismiss: { askAlerts = false })
+                    AlertOffer(allow: allowAlerts, dismiss: dismissAlerts)
                 }
                 ControlBar(aiming: $aiming, actions: actions, pictureTools: !soundView)
             }
@@ -203,10 +212,9 @@ struct MonitorView: View {
         ToolbarItem(placement: .topBarTrailing) {
             Menu {
                 Button { sheet = .activity } label: { Label("Přehled", systemImage: "chart.bar.xaxis") }
-                Button { sheet = .help } label: { Label("Jak Chůvička funguje", systemImage: "questionmark.circle") }
                 Button { sheet = .settings } label: { Label("Nastavení", systemImage: "gearshape") }
+                Button { sheet = .help } label: { Label("Nápověda", systemImage: "questionmark.circle") }
                 Divider()
-                Button { engine.reconnect(why: "menu") } label: { Label("Znovu připojit", systemImage: "arrow.clockwise") }
                 Button(role: .destructive) {
                     night = false
                     withAnimation(.easeInOut(duration: 0.4)) { engine.pause(why: "menu") }
@@ -284,15 +292,22 @@ struct MonitorView: View {
         withAnimation { askAlerts = false }
     }
 
-    /// `-demoScreen aim|night|activity|settings` opens a screen at launch, for the screenshots.
+    /// "Později" is also an answer: the offer does not come back at the next launch.
+    private func dismissAlerts() {
+        UserDefaults.standard.set(true, forKey: "alertOfferShown")
+        askAlerts = false
+    }
+
+    /// `-demoScreen aim|night|night-controls|activity|settings|remote|help|alerts|paused` opens a screen
+    /// at launch, for the screenshots. NightView and SettingsView read the value too.
     private func applyDemoScreen() {
         guard MonitorEngine.isDemo else { return }
         Log.shared.add("demo screen \(UserDefaults.standard.string(forKey: "demoScreen") ?? "none")")
         switch UserDefaults.standard.string(forKey: "demoScreen") {
         case "aim": aiming = true
-        case "night": night = true
+        case "night", "night-controls": night = true
         case "activity": sheet = .activity
-        case "settings": sheet = .settings
+        case "settings", "remote", "settings-advanced": sheet = .settings
         case "help": sheet = .help
         case "alerts": askAlerts = true
         case "paused": engine.pause(why: "demo")
@@ -333,7 +348,7 @@ struct AmbientBackground: View {
     private var glow: Color {
         switch status {
         case .lost: Theme.alarm
-        case .muted, .connecting: Theme.glowNeutral
+        case .connecting: Theme.glowNeutral
         default: Theme.level(level)
         }
     }
@@ -366,7 +381,8 @@ struct StatusBadge: View {
 
     private var color: Color {
         switch overall {
-        case .live, .soundOnly: pictureLive || overall == .soundOnly ? Theme.alarm : Theme.warn   // Red dot: live, as in the Camera app.
+        // Green: all is well. Red means a fault in this app, so the live dot is not red.
+        case .live, .soundOnly: pictureLive || overall == .soundOnly ? Theme.calm : Theme.warn
         case .connecting, .reconnecting: Theme.warn
         case .offline: Color.gray
         }

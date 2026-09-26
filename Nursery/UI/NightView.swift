@@ -1,6 +1,9 @@
 import SwiftUI
 import UIKit
 
+/// `-demoScreen night-controls`: the row of controls shows at once and stays, for the screenshot.
+private let demoControls = MonitorEngine.isDemo && UserDefaults.standard.string(forKey: "demoScreen") == "night-controls"
+
 /// Night mode: a phone on the night table that gives no light, but answers two questions at a glance:
 /// what time is it, and is the baby making a sound.
 ///
@@ -8,15 +11,21 @@ import UIKit
 /// - The screen stays on at the minimum brightness, almost black. The phone does not lock by itself.
 /// - The picture stops (sound only), which saves the battery. The sound and the alerts continue.
 /// - A sound makes the waveform brighter for its length.
-/// - A tap wakes the screen. Locking the phone is still fine: the sound continues.
+/// - A tap shows Zvuk and Ukončit hlídání for 5 s. A second tap leaves Night mode.
+///   Locking the phone is still fine: the sound continues.
 struct NightView: View {
     @EnvironmentObject private var engine: MonitorEngine
     @EnvironmentObject private var battery: BatteryMonitor
     @EnvironmentObject private var settings: Settings
     @ObservedObject var activity: SoundActivity
     let onClose: () -> Void
+    /// "Ukončit hlídání" in the row of controls.
+    let onStop: () -> Void
     @State private var savedBrightness: CGFloat?
-    @State private var explain = !UserDefaults.standard.bool(forKey: "nightExplained")
+    @State private var explain = !UserDefaults.standard.bool(forKey: "nightExplained") && !demoControls
+    /// The row with Zvuk and Ukončit hlídání. A tap shows it for 5 s.
+    @State private var controls = demoControls
+    @State private var hideTask: Task<Void, Never>?
 
     var body: some View {
         let sound = activity.current != nil
@@ -43,10 +52,16 @@ struct NightView: View {
                                      : Color.white.opacity(sound ? 0.6 : 0.28))
                 Spacer()
                 batteryLine
-                Text("Klepnutím probudíte displej")
-                    .font(.caption)
-                    .foregroundStyle(.white.opacity(0.16))
-                    .padding(.bottom, 20)
+                if controls {
+                    controlRow
+                        .padding(.bottom, 20)
+                        .transition(.opacity)
+                } else {
+                    Text("Klepnutím zobrazíte ovládání")
+                        .font(.caption)
+                        .foregroundStyle(.white.opacity(0.16))
+                        .padding(.bottom, 20)
+                }
             }
             .opacity(explain ? 0 : 1)        // The explainer reads alone, with nothing behind it.
             if explain {
@@ -73,16 +88,19 @@ struct NightView: View {
         .onTapGesture {
             guard !explain else { return }
             Haptics.tap()
-            onClose()
+            // The first tap shows the controls. A tap while they show leaves Night mode.
+            if controls { onClose() } else { showControls() }
         }
         .accessibilityAddTraits(.isButton)
-        .accessibilityLabel("Noční režim. \(statusText). Dvojitým klepnutím probudíte displej.")
+        .accessibilityLabel(controls ? "Noční režim. \(statusText). Dvojitým klepnutím noční režim ukončíte."
+                                     : "Noční režim. \(statusText). Dvojitým klepnutím zobrazíte ovládání.")
         .onAppear {
             engine.setNightMode(true)
             UIApplication.shared.isIdleTimerDisabled = true      // The phone does not lock by itself.
             dim()
         }
         .onDisappear {
+            hideTask?.cancel()
             engine.setNightMode(false)
             UIApplication.shared.isIdleTimerDisabled = settings.keepAwake
             restore()
@@ -92,8 +110,56 @@ struct NightView: View {
     }
 
     private var statusText: String {
-        if engine.volumeLow { return "Hlasitost iPhonu je nízká" }
+        if engine.volumeLow { return "Hlasitost telefonu je nízká" }
         return activity.current != nil ? "Ozývá se" : engine.soundStatus.title
+    }
+
+    /// Zvuk and Ukončit hlídání. Dim too: the room is dark, and the parent needs them only for a moment.
+    private var controlRow: some View {
+        let muted = engine.mode == .off
+        return HStack(spacing: 12) {
+            Button {
+                Haptics.firm()
+                if muted { engine.soundOn() } else { engine.mode = .off }
+                showControls()          // The 5 s start again.
+            } label: {
+                nightLabel(muted ? "Ztlumeno" : "Zvuk", engine.mode.symbol,
+                           color: muted ? .white : Color.white.opacity(0.85), tint: muted ? Theme.alarm : nil)
+            }
+            .accessibilityLabel("Zvuk")
+            .accessibilityValue(engine.mode.title)
+            Button {
+                Haptics.firm()
+                onStop()
+            } label: {
+                nightLabel("Ukončit hlídání", "stop.circle", color: Theme.alarm, tint: nil)
+            }
+        }
+        .buttonStyle(PressScale())
+        .opacity(0.8)
+        .padding(.horizontal, 24)
+    }
+
+    private func nightLabel(_ title: String, _ symbol: String, color: Color, tint: Color?) -> some View {
+        Label(title, systemImage: symbol)
+            .font(.subheadline.weight(.semibold))
+            .lineLimit(1)
+            .minimumScaleFactor(0.8)
+            .foregroundStyle(color)
+            .frame(maxWidth: .infinity, minHeight: 50)
+            .glass(in: Capsule(), interactive: true, tint: tint)
+            .contentShape(Capsule())
+    }
+
+    /// It shows the row, and hides it again after 5 s. The demo screenshot keeps it.
+    private func showControls() {
+        withAnimation(.easeInOut(duration: 0.25)) { controls = true }
+        hideTask?.cancel()
+        guard !demoControls else { return }
+        hideTask = Task {
+            try? await Task.sleep(for: .seconds(5))
+            if !Task.isCancelled { withAnimation(.easeInOut(duration: 0.4)) { controls = false } }
+        }
     }
 
     /// The battery, dim. It turns red and asks for a charger when the battery is low.
@@ -129,6 +195,7 @@ private struct NightExplainer: View {
                 .foregroundStyle(Theme.moon)
             point("sun.min", "Displej zůstane zapnutý, ale téměř černý a na nejnižším jasu. Telefon se sám nezamkne.")
             point("waveform", "Zvuk i upozornění běží dál. Obraz se zastaví, aby šetřil baterii.")
+            point("hand.tap", "Klepnutím zobrazíte zvuk a ukončení hlídání. Dalším klepnutím noční režim ukončíte.")
             point("battery.100.bolt", "Na celou noc připojte nabíječku. Spotřebu Chůvička měří a ukazuje dole.")
             point("lock.fill", "Chcete šetřit ještě víc? Telefon klidně zamkněte. Zvuk poběží dál i se zamčenou obrazovkou.")
             Button(action: done) {

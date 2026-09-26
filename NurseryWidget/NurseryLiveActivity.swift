@@ -22,7 +22,6 @@ private extension NurseryActivityAttributes.Status {
         case .silent: moon
         case .connecting: warn
         case .lost: alarm
-        case .muted: .gray
         }
     }
     var hearsRoom: Bool { self == .listening || self == .silent }
@@ -32,7 +31,6 @@ private extension NurseryActivityAttributes.Status {
         case .silent: "bell.badge.fill"
         case .connecting: "antenna.radiowaves.left.and.right"
         case .lost: "exclamationmark.triangle.fill"
-        case .muted: "speaker.slash.fill"
         }
     }
 }
@@ -66,7 +64,7 @@ struct NurseryLiveActivity: Widget {
                             .font(.system(.subheadline, design: .rounded))
                         Spacer()
                         Button(intent: StopMonitoringIntent()) {
-                            Label("Ukončit", systemImage: "stop.fill").font(.system(.caption, design: .rounded).weight(.semibold))
+                            Label("Ukončit hlídání", systemImage: "stop.fill").font(.system(.caption, design: .rounded).weight(.semibold))
                         }
                         .buttonStyle(.bordered)
                         .tint(moon)
@@ -115,8 +113,9 @@ private struct LockScreenView: View {
                     .foregroundStyle(.white.opacity(0.85))
                 // The clear way to stop, right where the parent sees that it runs.
                 Button(intent: StopMonitoringIntent()) {
-                    Label("Ukončit", systemImage: "stop.fill")
+                    Label("Ukončit hlídání", systemImage: "stop.fill")
                         .font(.system(.caption, design: .rounded).weight(.semibold))
+                        .lineLimit(1)
                 }
                 .buttonStyle(.bordered)
                 .tint(moon)

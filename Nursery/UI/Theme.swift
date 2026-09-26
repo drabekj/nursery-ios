@@ -54,7 +54,6 @@ enum Theme {
         case .silent: accent
         case .connecting: warn
         case .lost: alarm
-        case .muted: secondaryText
         }
     }
 
@@ -64,7 +63,6 @@ enum Theme {
         case .silent: "bell.badge.fill"
         case .connecting: "antenna.radiowaves.left.and.right"
         case .lost: "exclamationmark.triangle.fill"
-        case .muted: "speaker.slash.fill"
         }
     }
 }

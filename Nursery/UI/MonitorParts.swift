@@ -76,7 +76,7 @@ struct VideoPlaceholder: View {
             if inPictureInPicture {
                 Image(systemName: "pip.fill").font(.largeTitle).foregroundStyle(.secondary)
                 Text("Přehrává se v obrazu v obraze").font(.subheadline).foregroundStyle(.secondary)
-            } else if case .offline(let why) = engine.overall {
+            } else if case .offline = engine.overall {
                 Image(systemName: "wifi.exclamationmark").font(.system(size: 30)).foregroundStyle(Theme.alarm)
                     .symbolEffect(.pulse)
                 Text(settings.source == .phone ? "Telefon u miminka je nedostupný" : "Kamera je nedostupná").font(.headline)
@@ -90,14 +90,15 @@ struct VideoPlaceholder: View {
                         Text("Zkusit znovu").foregroundStyle(.black)
                     }
                     .buttonStyle(.borderedProminent)
-                    Button("Nastavení") {
+                    // iOS Settings, where the access to the local network is. Not the app's settings.
+                    Button("Nastavení telefonu") {
                         if let url = URL(string: UIApplication.openSettingsURLString) { UIApplication.shared.open(url) }
                     }
                     .buttonStyle(.bordered)
                 }
                 .controlSize(.small)
                 .padding(.top, 2)
-                Text(why).font(.caption2).foregroundStyle(.tertiary).lineLimit(1)
+                // The raw reason is only in the technical log: a system error string says nothing to a parent.
             } else {
                 ProgressView().controlSize(.large).tint(.white)
                 Text(waitingText).font(.subheadline).foregroundStyle(.secondary)
@@ -131,7 +132,7 @@ struct AimOverlay: View {
             VStack { arrow(.up); Spacer(); arrow(.down) }.padding(10)
             HStack { arrow(.left); Spacer(); arrow(.right) }.padding(10)
             if hint {
-                Text("Klepnutím nebo podržením šipky otočíte kameru")
+                Text("Klepnutím nebo podržením šipky natočíte kameru")
                     .font(.footnote.weight(.medium))
                     .padding(.horizontal, 14).padding(.vertical, 8)
                     .glass(in: Capsule())
@@ -171,7 +172,7 @@ struct AimOverlay: View {
                 .scaleEffect(pressed ? 0.9 : 1)
                 .animation(.spring(response: 0.2, dampingFraction: 0.7), value: pressed)
         }
-        .accessibilityLabel("Otočit kameru \(d.czech)")
+        .accessibilityLabel("Natočit kameru \(d.czech)")
     }
 }
 
@@ -200,26 +201,24 @@ enum RoomWords {
         case .listening, .silent: e.roomLevel.title
         case .connecting: "Připojování"
         case .lost: "Zvuk vypadl"
-        case .muted: "Zvuk vypnut"
         }
     }
 
     static func color(_ e: MonitorEngine) -> Color {
         switch e.soundStatus {
         case .lost: Theme.alarm
-        case .muted, .connecting: .secondary
+        case .connecting: .secondary
         default: .primary
         }
     }
 
+    /// Only a state that is not the usual one gets a line. Live sound says nothing: the button already does.
     static func subline(_ e: MonitorEngine, _ settings: Settings) -> String {
         switch e.soundStatus {
-        case .listening:
-            settings.loudness == .normal ? "Živý zvuk" : "Živý zvuk · \(settings.loudness.title) +\(Int(settings.loudness.decibels)) dB"
+        case .listening: settings.loudness == .normal ? "" : "Zesílený zvuk"
         case .silent: "Ztlumeno · při pláči přijde upozornění"
         case .connecting: "Spouštění živého zvuku…"
-        case .lost: "Obnovování spojení s kamerou…"
-        case .muted: "Zapnete ho tlačítkem Zvuk"
+        case .lost: "Obnovování spojení…"
         }
     }
 }
@@ -228,27 +227,23 @@ enum RoomWords {
 struct RoomPanel: View {
     @EnvironmentObject private var engine: MonitorEngine
     @EnvironmentObject private var settings: Settings
-    @ObservedObject var activity: SoundActivity
-    let openActivity: () -> Void
 
     var body: some View {
+        let sub = RoomWords.subline(engine, settings)
         VStack(alignment: .leading, spacing: 16) {
-            HStack(alignment: .top) {
-                VStack(alignment: .leading, spacing: 4) {
-                    Text(RoomWords.headline(engine))
-                        .font(.system(size: 34, weight: .semibold, design: .rounded))
-                        .foregroundStyle(RoomWords.color(engine))
-                        .contentTransition(.opacity)
-                        .animation(.easeInOut(duration: 0.35), value: RoomWords.headline(engine))
-                    Text(RoomWords.subline(engine, settings))
+            VStack(alignment: .leading, spacing: 4) {
+                Text(RoomWords.headline(engine))
+                    .font(.system(size: 34, weight: .semibold, design: .rounded))
+                    .foregroundStyle(RoomWords.color(engine))
+                    .contentTransition(.opacity)
+                    .animation(.easeInOut(duration: 0.35), value: RoomWords.headline(engine))
+                if !sub.isEmpty {
+                    Text(sub)
                         .font(.subheadline)
                         .foregroundStyle(.secondary)
                 }
-                Spacer(minLength: 8)
-                Button(action: openActivity) { LastSoundLabel(activity: activity, alignment: .trailing) }
-                    .buttonStyle(.plain)
-                    .padding(.top, 6)
             }
+            .frame(maxWidth: .infinity, alignment: .leading)
             .accessibilityElement(children: .combine)
 
             LiveWaveform(levels: engine.levels, dim: !RoomWords.hearsRoom(engine))
@@ -257,41 +252,10 @@ struct RoomPanel: View {
     }
 }
 
-/// "Poslední zvuk před 3 min", or "Ozývá se" while a sound goes on.
-struct LastSoundLabel: View {
-    @ObservedObject var activity: SoundActivity
-    var alignment: HorizontalAlignment = .trailing
-
-    var body: some View {
-        VStack(alignment: alignment, spacing: 3) {
-            if activity.current != nil {
-                HStack(spacing: 7) {
-                    PulseDot(color: Theme.warn)
-                    Text("Ozývá se")
-                }
-                .font(.footnote.weight(.semibold))
-                .foregroundStyle(Theme.warn)
-            } else if let last = activity.lastSound {
-                Text("Poslední zvuk").font(.caption).foregroundStyle(.secondary)
-                // "před 7 s", "před 3 min": the Czech relative form, updated each second.
-                TimelineView(.periodic(from: .now, by: 1)) { context in
-                    Text(last.formatted(.relative(presentation: .numeric, unitsStyle: .abbreviated)
-                        .locale(Locale(identifier: "cs_CZ"))))
-                        .font(.footnote.weight(.semibold)).monospacedDigit()
-                }
-            } else {
-                Text("Zatím žádný zvuk").font(.footnote).foregroundStyle(.secondary)
-            }
-        }
-        .contentShape(Rectangle())
-        .accessibilityHint("Otevře přehled")
-    }
-}
-
 // MARK: - The control bar
 
-/// The four actions, where the thumb is. Sound is the primary one.
-/// A long press on Sound opens the sound mode and the loudness.
+/// The actions, where the thumb is. Sound is the primary one: a tap mutes it or turns it on.
+/// The loudness is in the settings.
 struct ControlBar: View {
     @EnvironmentObject private var engine: MonitorEngine
     @EnvironmentObject private var camera: CameraControl
@@ -310,13 +274,13 @@ struct ControlBar: View {
                         Haptics.tap()
                         withAnimation(.spring(response: 0.35)) { aiming.toggle() }
                     } label: {
-                        BarLabel(title: "Otočit", symbol: "arrow.up.and.down.and.arrow.left.and.right", isOn: aiming, tint: Theme.moon)
+                        BarLabel(title: "Natočit", symbol: "arrow.up.and.down.and.arrow.left.and.right", isOn: aiming, tint: Theme.moon)
                     }
                     .buttonStyle(PressScale())
                     .disabled(engine.connection != .live)
                     .transition(.scale(scale: 0.8).combined(with: .opacity))
                 }
-                if pictureTools {
+                if pictureTools, canSnapshot {
                     Button(action: actions.snapshot) {
                         BarLabel(title: "Fotka", symbol: "camera.fill", isOn: false, tint: Theme.moon)
                     }
@@ -331,29 +295,25 @@ struct ControlBar: View {
         }
     }
 
+    /// A plain RTSP camera has no photo. The demo shows the button.
+    private var canSnapshot: Bool {
+        MonitorEngine.isDemo || settings.source != .camera || settings.cameraKind != .rtsp
+    }
+
     private var soundButton: some View {
-        Menu {
-            Picker("Režim zvuku", selection: $engine.mode) {
-                ForEach(MonitorEngine.SoundMode.allCases) { Label($0.title, systemImage: $0.symbol).tag($0) }
-            }
-            Picker("Hlasitost", selection: $settings.loudness) {
-                ForEach(Settings.Loudness.allCases) { Text($0.title).tag($0) }
-            }
-            .pickerStyle(.menu)
+        Button {
+            Haptics.firm()
+            if engine.mode == .off { engine.soundOn() } else { engine.mode = .off }
         } label: {
             // Off is red: a parent must see at a glance that nothing plays.
             BarLabel(title: soundTitle, symbol: engine.mode.symbol, isOn: true,
                      tint: engine.mode == .off ? Theme.alarm : Theme.moon,
                      onForeground: engine.mode == .off ? .white : .black)
-        } primaryAction: {
-            Haptics.firm()
-            if engine.mode == .off { engine.soundOn() } else { engine.mode = .off }
         }
-        .menuStyle(.button)
         .buttonStyle(PressScale())
         .accessibilityLabel("Zvuk")
         .accessibilityValue(engine.mode.title)
-        .accessibilityHint("Dvojitým klepnutím zvuk zapnete nebo ztlumíte. Ztlumená Chůvička dál poslouchá a na pláč upozorní. Podržením zobrazíte další volby.")
+        .accessibilityHint("Dvojitým klepnutím zvuk zapnete nebo ztlumíte. Ztlumená Chůvička dál poslouchá a na pláč upozorní.")
     }
 
     private var soundTitle: String {
@@ -396,6 +356,7 @@ struct BarLabel: View {
 struct FullScreenMonitor: View {
     @EnvironmentObject private var engine: MonitorEngine
     @EnvironmentObject private var camera: CameraControl
+    @EnvironmentObject private var settings: Settings
     @ObservedObject var zoom: ZoomState
     @ObservedObject var pip: PictureInPicture
     @Binding var aiming: Bool
@@ -445,11 +406,14 @@ struct FullScreenMonitor: View {
                                     scheduleHide()
                                 }
                                 if camera.canAim || MonitorEngine.isDemo {
-                                    GlassCircleButton(symbol: "arrow.up.and.down.and.arrow.left.and.right", size: 50, label: "Otočit kameru") {
+                                    GlassCircleButton(symbol: "arrow.up.and.down.and.arrow.left.and.right", size: 50, label: "Natočit kameru") {
                                         aiming = true
                                     }
                                 }
-                                GlassCircleButton(symbol: "camera.fill", size: 50, label: "Fotka") { actions.snapshot() }
+                                // A plain RTSP camera has no photo.
+                                if MonitorEngine.isDemo || settings.source != .camera || settings.cameraKind != .rtsp {
+                                    GlassCircleButton(symbol: "camera.fill", size: 50, label: "Fotka") { actions.snapshot() }
+                                }
                             }
                         }
                     }

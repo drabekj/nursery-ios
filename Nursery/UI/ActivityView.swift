@@ -53,9 +53,7 @@ private struct Summary {
 
 struct ActivityView: View {
     @ObservedObject var activity: SoundActivity
-    @EnvironmentObject private var settings: Settings
     @Environment(\.dismiss) private var dismiss
-    @State private var confirmClear = false
     @State private var photo: PhotoItem?
 
     private var since: Date { Date().addingTimeInterval(-12 * 3600) }
@@ -95,24 +93,11 @@ struct ActivityView: View {
                 } header: {
                     Text("Události")
                 }
-
-                Section {
-                    Picker("Citlivost", selection: $settings.sensitivity) {
-                        ForEach(Settings.Sensitivity.allCases) { Text($0.title).tag($0) }
-                    }
-                    Button("Smazat historii", role: .destructive) { confirmClear = true }
-                        .disabled(activity.events.isEmpty && activity.coverage.isEmpty)
-                } footer: {
-                    Text("Chůvička se sama přizpůsobí šumu v pokoji, třeba ventilátoru nebo šumu kamery. Citlivost určuje, jak výrazný zvuk se zaznamená. Zvuky blíž než 90 sekund od sebe tvoří jednu událost.")
-                }
             }
             .navigationTitle("Přehled")
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
                 ToolbarItem(placement: .confirmationAction) { Button("Hotovo") { dismiss() } }
-            }
-            .confirmationDialog("Smazat historii a fotky?", isPresented: $confirmClear, titleVisibility: .visible) {
-                Button("Smazat historii", role: .destructive) { activity.clear() }
             }
             .sheet(item: $photo) { PhotoView(item: $0) }
         }
@@ -258,6 +243,7 @@ private struct PhotoView: View {
 }
 
 /// The last hour at a glance, on the main screen. A tap opens the Overview.
+/// Its title line is the one place on the main screen that says when the last sound was.
 struct HourStrip: View {
     @ObservedObject var activity: SoundActivity
     let open: () -> Void
@@ -269,7 +255,16 @@ struct HourStrip: View {
                 HStack(alignment: .firstTextBaseline) {
                     Text("Poslední hodina").font(.subheadline.weight(.semibold))
                     Spacer()
-                    Text(summary(since: since)).font(.footnote).foregroundStyle(.secondary)
+                    if activity.current != nil {
+                        HStack(spacing: 7) {
+                            PulseDot(color: Theme.warn)
+                            Text("Právě se ozývá")
+                        }
+                        .font(.footnote.weight(.semibold))
+                        .foregroundStyle(Theme.warn)
+                    } else {
+                        Text(summary(since: since)).font(.footnote).foregroundStyle(.secondary)
+                    }
                     Image(systemName: "chevron.right").font(.caption.weight(.semibold)).foregroundStyle(.tertiary)
                 }
                 Timeline(activity: activity, since: since, height: 28)
@@ -293,8 +288,20 @@ struct HourStrip: View {
         if activity.current != nil { return "Právě se ozývá" }
         let episodes = activity.episodes(since: since)
         if activity.listened(since: since) < 60 { return "Zatím bez záznamu" }
-        guard let last = episodes.first else { return "Klid" }
+        guard let last = episodes.first else {
+            // Nothing in this hour. An older sound still says how long the quiet lasts.
+            guard let lastSound = activity.lastSound, let ago = agoText(lastSound) else { return "Klid" }
+            return "Klid · poslední zvuk před \(ago)"
+        }
         let minutes = Int(Date().timeIntervalSince(last.end) / 60)
         return "\(eventsText(episodes.count)) · naposledy před \(max(minutes, 1)) min"
+    }
+
+    /// "12 min", "3 h". Nil after a day: so old a sound says nothing about tonight.
+    private func agoText(_ d: Date) -> String? {
+        let minutes = Int(Date().timeIntervalSince(d) / 60)
+        if minutes < 60 { return "\(max(minutes, 1)) min" }
+        if minutes < 24 * 60 { return "\(minutes / 60) h" }
+        return nil
     }
 }
